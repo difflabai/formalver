@@ -1,0 +1,10 @@
+[package]
+name = "ironclaw-verify"
+version = "0.1.0"
+edition = "2021"
+description = "Verus formal verification models for ironclaw safety module"
+
+[features]
+# Enable when compiling with the Verus toolchain.
+# Under standard cargo, the crate compiles as plain Rust types (no proofs).
+verus = []

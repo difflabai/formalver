@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "projects/ironclaw/verus",
+]
+resolver = "2"
