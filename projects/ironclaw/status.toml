@@ -1,0 +1,49 @@
+[project]
+name = "ironclaw"
+upstream = "https://github.com/nearai/ironclaw"
+pinned_commit = "34550add3ee85bab6fe1c670dff46871d1a41e04"
+last_reviewed = "2026-03-11"
+
+# Status values: unverified | in-progress | verified | verified-with-assumptions | stale
+
+[modules.safety_sanitizer]
+source = "src/safety/sanitizer.rs"
+verus_model = "verus/src/safety/sanitizer.rs"
+prolog_requirements = "prolog/requirements/sanitizer_req.pl"
+
+  [modules.safety_sanitizer.properties]
+  detection_completeness = { status = "in-progress", layer = "verus", description = "All defined patterns are detected by the sanitizer" }
+  escape_correctness = { status = "in-progress", layer = "verus", description = "Critical patterns are escaped in output" }
+  case_insensitivity = { status = "in-progress", layer = "verus", description = "Pattern detection is case-insensitive" }
+  severity_ordering = { status = "in-progress", layer = "verus", description = "Warnings sorted by severity, critical first" }
+  content_preservation = { status = "in-progress", layer = "verus", description = "Non-matching content is not modified" }
+  requirement_consistency = { status = "in-progress", layer = "prolog", description = "No contradictory requirement rules" }
+  requirement_completeness = { status = "in-progress", layer = "prolog", description = "All known attack vectors have detection patterns" }
+
+[modules.safety_leak_detector]
+source = "src/safety/leak_detector.rs"
+verus_model = ""
+prolog_requirements = ""
+
+  [modules.safety_leak_detector.properties]
+
+[modules.safety_policy]
+source = "src/safety/policy.rs"
+verus_model = ""
+prolog_requirements = ""
+
+  [modules.safety_policy.properties]
+
+[modules.safety_validator]
+source = "src/safety/validator.rs"
+verus_model = ""
+prolog_requirements = ""
+
+  [modules.safety_validator.properties]
+
+[modules.safety_credential_detect]
+source = "src/safety/credential_detect.rs"
+verus_model = ""
+prolog_requirements = ""
+
+  [modules.safety_credential_detect.properties]
