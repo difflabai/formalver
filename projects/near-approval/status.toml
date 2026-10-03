@@ -9,10 +9,12 @@ mc1_state_floor = 0         # recorded at M4 sign-off; MC-1 fails below it
 
 # Status values: unverified | in-progress | verified | verified-with-assumptions | stale
 # Optional property keys (backward-compatible with the ironclaw format), see strategy.md section 12:
-#   id, evidence (proof | model-proof | bounded-proof | test | review | check), layer, cross,
+#   id, evidence (proof | model-proof | bounded-proof | model-check | test | review | check), layer, cross,
 #   harness, depends_on (relative to upstream_path), assumptions, blocked_by
 # A Kani result is at most verified-with-assumptions / bounded-proof.
-# Only Verus on the real core (M5 path A) yields verified / proof.
+# Only Verus on the real core (M5 path A) yields evidence = proof; status stays
+# verified-with-assumptions while TRUSTED.toml or the property's assumptions are non-empty.
+# Allowed evidence per layer: strategy.md section 12.
 # The `evidence` value on each property is the TARGET evidence for that property.
 
 [review]
@@ -34,6 +36,7 @@ borsh = "1.8.1"             # from source-mirror Cargo.lock
 "README.md" = "82223133c71e91acc1d688515474906ddeff58d991bfd4f2b24dd52b31340004"
 "core/Cargo.toml" = "0a872e27977c514a3e35cba2afd0c4b9945f4eb6fbbfe60dd731d04937d4484a"
 "core/src/lib.rs" = "6b3f53d525bf1e2c9b7328f6558adae44f31770efc6a65add23dc9c2d6946c24"
+"core/src/tests.rs" = "63a27915cf881f718ab292f2b56513291ceabbd16d6907024f51269f767b52d0"
 "contract/Cargo.toml" = "7bb93aee10a87567448a53f81018fd180bb957553d3a2f884e41e7774dc41eda"
 "contract/src/lib.rs" = "8774a82c7b148c327ebb922b9f33a8ab5b438cd26034af5c978c3c8946a3979f"
 
@@ -72,7 +75,7 @@ status = "unverified"
 
 [assumptions.ASM-TIME]
 statement = "block_height and block_timestamp never decrease across receipts on one account"
-level = "high"
+level = "med"
 checked_by = []
 status = "unverified"
 
@@ -83,9 +86,9 @@ checked_by = []
 status = "unverified"
 
 [assumptions.ASM-CODE]
-statement = "Code changes only via DeployContract (needs a full-access key on C); DeleteAccount erases state and a recreated account starts empty"
-level = "high"
-checked_by = ["RT-RESET"]
+statement = "Code changes only via DeployContract or UseGlobalContract on C (both need a full-access key on C), or via DeployGlobalContract by the owner of a NEP-591 global contract C references by account id; DeleteAccount erases state and a recreated account starts empty"
+level = "med"
+checked_by = ["RT-RESET", "DEP-1"]
 status = "unverified"
 
 [assumptions.ASM-SDK]
@@ -101,14 +104,14 @@ checked_by = ["ST-4", "ST-5", "ST-6"]
 status = "unverified"
 
 [assumptions.ASM-IDENT]
-statement = "PartialEq on AccountId/PublicKey is an equivalence matching Borsh-byte equality; the core uses A/K only via Clone and PartialEq (parametricity justifies u8 identities)"
+statement = "PartialEq on AccountId/PublicKey is an equivalence matching Borsh-byte equality; the core uses A/K only via Clone and PartialEq (parametricity justifies small identities); harnesses use opaque newtypes so a new trait bound breaks the build"
 level = "high"
 checked_by = []
 status = "unverified"
 
 [assumptions.ASM-STAKE]
 statement = "Account must hold storage_usage * 1e19 yocto; ~40 B overhead per record"
-level = "high"
+level = "med"
 checked_by = ["RES-1"]
 status = "unverified"
 
@@ -131,7 +134,7 @@ checked_by = ["RT-FCKEY"]
 status = "unverified"
 
 [assumptions.ASM-COMPILE]
-statement = "rustc/LLVM/wasm-opt preserve core semantics host -> wasm32; overflow-checks on in release; cfg(feature=\"borsh\") gates only use/derive"
+statement = "rustc/LLVM/wasm-opt preserve core semantics host -> wasm32; overflow-checks on in release; the only on-chain usize use is action.len() > MAX_ACTION_LEN; cfg(feature=\"borsh\") gates only use/derive"
 level = "n/a"
 checked_by = ["RT-CODEHASH", "RT-TRACE"]
 status = "unverified"
@@ -157,7 +160,7 @@ status = "unverified"
 [assumptions.ASM-OWNER]
 statement = "The owner registers keys honestly (it could otherwise register two accounts it controls)"
 level = "policy"
-checked_by = ["DEP-1"]
+checked_by = ["DEP-1", "VER-4"]
 status = "unverified"
 
 [assumptions.ASM-DEPLOY]
@@ -195,7 +198,7 @@ prolog_requirements = "prolog/requirements/approval_req.pl"
   C-8 = { status = "unverified", layer = "prolog", evidence = "check", description = "Every threat has mitigated_by or accepted_risk" }
   C-9 = { status = "unverified", layer = "prolog", evidence = "check", description = "Property and assumption IDs in status.toml equal those in traceability.pl" }
   C-10 = { status = "unverified", layer = "prolog", evidence = "check", description = "Warn when a verified* property depends on an assumption with level below high whose check has not passed" }
-  MC-1 = { status = "unverified", layer = "prolog", evidence = "bounded-proof", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-SPEC"], description = "Bounded model check of reference step/4 at depth 6: no INV, separation-of-duties, double-approval, pending-count or revival violation; reaches every error except approve LogFull, an approved and a void state; state count >= mc1_state_floor" }
+  MC-1 = { status = "unverified", layer = "prolog", evidence = "model-check", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-SPEC"], description = "Bounded model check of reference step/4 at depth 6 with real constants: no INV, separation-of-duties, double-approval, pending-count or revival violation; reaches approved and void states and every error except both LogFull and TooManyPending; MC-1s (max_pending=2, max_u=2) also reaches TooManyPending and request LogFull; state counts >= mc1_state_floor" }
   MC-2 = { status = "unverified", layer = "prolog", evidence = "test", cross = ["plain", "sandbox"], depends_on = ["core/src/lib.rs"], assumptions = ["ASM-SPEC"], description = "Generated traces replayed on the real core, on spec.rs and (RT-TRACE) on the wasm; all agree" }
 
 # ---------------------------------------------------------------------------
@@ -209,7 +212,7 @@ prolog_requirements = "prolog/model/approval_machine.pl"
   TX-1 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus", "prolog"], harness = "h_step_add", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "add_principal: Ok <=> caller = owner and key unregistered; errors NotOwner, KeyAlreadyRegistered; P' = P[k -> (acct, role, #R, 0)]" }
   TX-2 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus", "prolog"], harness = "h_step_revoke", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "revoke_key: Ok(P(k)) <=> caller = owner and key registered; errors NotOwner, KeyNotRegistered; P' = P minus k" }
   TX-3 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus"], harness = "h_step_request, h_step_approve", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "authenticate: Ok <=> predecessor = signer and key registered to signer with role; errors IndirectCall, UnknownKey, WrongRole, KeyAccountMismatch; read-only" }
-  TX-4 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus", "prolog"], harness = "h_step_request", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "request_action: exact result, error order (auth, EmptyAction, ActionTooLong, TooManyPending, LogFull), appended request, caller key pend+1" }
+  TX-4 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus", "prolog"], harness = "h_step_request, h_raw_request", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "request_action: exact result, error order (auth, EmptyAction, ActionTooLong, TooManyPending, LogFull), appended request, caller key pend+1" }
   TX-5 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus", "prolog"], harness = "h_step_approve", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "approve: exact result, error order (auth, RequestNotFound, AlreadyApproved, AgentRevoked, ActionMismatch, SelfApproval, LogFull), approval recorded, log appended, agent key pend-1, proof = approval(s', i)" }
   TX-6 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["review"], harness = "h_step_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Owner never changes; owner checks compare the caller account passed by the shell (predecessor: SH-1)" }
   INV-0 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus"], harness = "h_store_laws_mem, h_step_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Registry is a function: one registration and role per key (MemStore has no duplicate keys)" }
@@ -217,12 +220,12 @@ prolog_requirements = "prolog/model/approval_machine.pl"
   INV-2 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus", "prolog"], harness = "h_step_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Stored actions are 1..=2048 bytes" }
   INV-3 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus", "prolog"], harness = "h_step_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Log -> request: L[j] < #R and R[L[j]] approved with index j" }
   INV-4 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus", "prolog"], harness = "h_step_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Request -> log: approved R[i] has index < #L and L[index] = i" }
-  INV-5 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus", "prolog"], harness = "h_step_approve", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Separation of duties: approver account != agent account" }
-  INV-6 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus"], harness = "h_step_approve", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Approver key != agent key on every approval" }
+  INV-5 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus", "prolog"], harness = "h_init, h_step_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Separation of duties: approver account != agent account" }
+  INV-6 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus"], harness = "h_init, h_step_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Approver key != agent key on every approval" }
   INV-7 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus"], harness = "h_step_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Registration bound: P(k).active_from <= #R" }
   INV-8 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus", "prolog"], harness = "h_step_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Registration provenance: R[i].ak = k and i >= P(k).active_from => R[i].aa = P(k).account and role Agent" }
-  INV-9 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus", "prolog"], harness = "h_step_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Pending count: P(k).pending equals live pending requests of k under its registration, <= 16 (0 for approvers)" }
-  INV-10 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus"], harness = "h_step_approve", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC", "ASM-TIME"], description = "Time order (non-decreasing time inputs): approved_at >= requested_at component-wise" }
+  INV-9 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus", "prolog"], harness = "h_step_*, h_raw_request", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Pending count: P(k).pending equals live pending requests of k under its registration, <= 16 (0 for approvers); the cap bound is stepped in h_raw_request" }
+  INV-10 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus"], harness = "h_init, h_step_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC", "ASM-TIME"], description = "Time order (non-decreasing time inputs): approved_at >= requested_at component-wise" }
   LEM-1 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus"], harness = "h_step_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Approval log has no duplicates" }
   LEM-2 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus"], harness = "h_step_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "#L = number of approved requests <= #R" }
   LEM-3 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus"], harness = "h_step_approve", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "A pending request exists => #L < #R <= MAXU, so approve's LogFull is unreachable (F-7)" }
@@ -235,26 +238,26 @@ prolog_requirements = "prolog/model/approval_machine.pl"
   HIST-6 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus"], harness = "h_step_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Registry discipline: owner fixed; P changes only by owner Add/Revoke or the pending field on request/approve" }
   HIST-7 = { status = "unverified", layer = "kani", evidence = "bounded-proof", harness = "h_raw_add, h_raw_revoke", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Owner operations never change requests or the log, from any state" }
   HIST-8 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus", "prolog"], harness = "h_step_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Void is terminal" }
-  TR-1 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus", "prolog"], harness = "h_bmc_from_init (+ corollary of TX/HIST/INV-8)", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC", "ASM-SIGNER", "ASM-PRED"], description = "Provenance: every proof has a prior successful request by a registered agent key and a successful approval restating the action by a registered approver key of a different account, with the agent registration continuous in between" }
-  TR-2 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus", "prolog"], harness = "h_bmc_from_init", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Each request approved at most once in any trace" }
-  TR-3 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus", "prolog"], harness = "h_bmc_from_init", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Durable revocation: a request whose agent registration is revoked while pending is never approved, even after re-registration" }
+  TR-1 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus", "prolog"], harness = "h_init, h_step_*, h_bmc_from_init", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC", "ASM-SIGNER", "ASM-PRED"], description = "Provenance: every proof has a prior successful request by a registered agent key and a successful approval restating the action by a registered approver key of a different account, with the agent registration continuous in between" }
+  TR-2 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus", "prolog"], harness = "h_step_approve, h_bmc_from_init", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Each request approved at most once in any trace" }
+  TR-3 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus", "prolog"], harness = "h_step_*, h_bmc_from_init", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Durable revocation: a request whose agent registration is revoked while pending is never approved, even after re-registration" }
   TR-4 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus"], harness = "h_step_approve", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC", "ASM-TIME"], description = "Approval times non-decreasing along the log" }
-  TR-5 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus", "prolog"], harness = "covers", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Non-vacuity: approved and void states reachable; every error reachable except approve LogFull; request LogFull only at #R = MAXU" }
-  TR-6 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus"], harness = "h_bmc_from_init", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Agent storage bound: without approvals or Add, successful requests <= sum over agent keys of (16 - pending)" }
+  TR-5 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus", "prolog"], harness = "h_step_*, h_raw_request, h_action_len, h_proto_request, h_bmc_from_init", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Non-vacuity: approved and void states reachable; every error reachable except approve LogFull; request LogFull only at #R = MAXU" }
+  TR-6 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus"], harness = "h_step_*, h_raw_request", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Agent storage bound as a potential: Phi = sum over agent keys of (16 - pending) >= 0 drops by 1 per successful request and rises only on a successful approval or agent Add" }
   RD-1 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus"], harness = "h_read", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "approval(s,i) = Some(proof(R[i])) iff approved; None for pending, void or unknown" }
-  RD-2 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus"], harness = "h_read", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Exact page: approvals(f,l) = proofs of L[f..min(f+min(l,100), #L)], no drops" }
-  RD-3 = { status = "unverified", layer = "kani", evidence = "bounded-proof", harness = "h_page_arith", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-TOOLS"], description = "Page arithmetic over any u64 (from, limit, count): no overflow, reads only the page, no writes" }
+  RD-2 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus"], harness = "h_read", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Exact page: approvals(f,l) = proofs of L[f..min(f saturating_add min(l,100), #L)], no drops" }
+  RD-3 = { status = "unverified", layer = "kani", evidence = "bounded-proof", harness = "h_page_arith", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-TOOLS", "ASM-IDENT"], description = "Page arithmetic over any u64 (from, limit, count): no overflow; reads only approval_count, approved_request_id(j) in the page and request(id) for returned ids; no writes" }
   RD-4 = { status = "unverified", layer = "plain", evidence = "test", cross = ["verus", "prolog"], harness = "plain::client_enum", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-SPEC"], description = "Client loop (stop on empty page or from >= count) enumerates the log exactly once, in order" }
   RD-5 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus"], harness = "h_read", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Per-request and paged views agree; proof findable by request_id or approval_index" }
-  RD-6 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["review"], harness = "h_page_arith", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-TOOLS"], description = "Core reads are pure (Window store panics on writes)" }
+  RD-6 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["review"], harness = "h_page_arith", depends_on = ["core/src/lib.rs", "contract/src/lib.rs"], assumptions = ["ASM-TOOLS", "ASM-IDENT"], description = "Core reads are pure (Window store panics on writes); every get_* takes &self" }
   RD-7 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["verus"], harness = "h_read", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "request_status = Approved / Pending (live) / Void; None for unknown ids" }
-  ROB-1 = { status = "unverified", layer = "kani", evidence = "bounded-proof", harness = "h_raw_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-TOOLS", "ASM-IDENT"], description = "No panics, overflows or OOB indexing for any arguments and any MemStore, including non-Inv states" }
-  ROB-2 = { status = "unverified", layer = "kani", evidence = "bounded-proof", harness = "h_proto_request, h_proto_approve", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-TOOLS"], description = "LogFull guards: count = MAXU => Err(LogFull), no writes (protects the shell's += 1)" }
-  ROB-3 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["plain"], harness = "h_action_len", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-TOOLS"], description = "Action length boundaries in bytes: 0, 1, 2048, 2049 and a multi-byte 2050" }
-  ROB-4 = { status = "unverified", layer = "kani", evidence = "bounded-proof", harness = "h_count_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-TOOLS"], description = "Bounded work: <= 4 Store reads and <= 3 writes per mutator; approvals <= 2*min(l,100)+1 reads" }
-  ST-1 = { status = "unverified", layer = "kani", evidence = "bounded-proof", harness = "h_store_laws_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-TOOLS"], description = "Store laws for MemStore and Sparse (map/sequence semantics; removing an absent key is a no-op)" }
-  ST-2 = { status = "unverified", layer = "kani", evidence = "bounded-proof", harness = "h_proto_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-TOOLS"], description = "Store protocol: exact mutator call sequence per op; makes contract-store differences from MemStore unreachable" }
-  ST-3 = { status = "unverified", layer = "kani", evidence = "bounded-proof", harness = "h_refine_*", depends_on = ["core/src/lib.rs", "contract/src/lib.rs"], assumptions = ["ASM-TOOLS"], description = "Sparse (transliteration of the contract Store impl) refines MemStore" }
+  ROB-1 = { status = "unverified", layer = "kani", evidence = "bounded-proof", harness = "h_raw_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS"], description = "No panics, overflows or OOB indexing for any arguments and any MemStore within the bounds (beyond: ASM-MODEL), including non-Inv states" }
+  ROB-2 = { status = "unverified", layer = "kani", evidence = "bounded-proof", harness = "h_proto_request, h_proto_approve", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS"], description = "LogFull guards: count = MAXU with all earlier guards passing => Err(LogFull), no writes, before the shell's += 1 (which would panic under overflow-checks); approve's case needs a non-Inv state" }
+  ROB-3 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["plain"], harness = "h_action_len", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-TOOLS", "ASM-IDENT"], description = "Action length boundaries in bytes: 0, 1 (a space), 2048, 2049 and a multi-byte 2050" }
+  ROB-4 = { status = "unverified", layer = "kani", evidence = "bounded-proof", harness = "h_count_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS"], description = "Bounded work: <= 4 Store reads and <= 3 writes per mutator; approvals <= 2*min(l,100)+1 reads" }
+  ST-1 = { status = "unverified", layer = "kani", evidence = "bounded-proof", harness = "h_store_laws_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS"], description = "Store laws for MemStore and Sparse (map/sequence semantics; removing an absent key is a no-op)" }
+  ST-2 = { status = "unverified", layer = "kani", evidence = "bounded-proof", harness = "h_proto_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Store protocol: exact mutator call sequence per op; makes contract-store differences from MemStore unreachable" }
+  ST-3 = { status = "unverified", layer = "kani", evidence = "bounded-proof", harness = "h_refine_*", depends_on = ["core/src/lib.rs", "contract/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS"], description = "Sparse (transliteration of the contract Store impl) refines MemStore" }
 
 # ---------------------------------------------------------------------------
 [modules.contract_store]
@@ -265,7 +268,7 @@ prolog_requirements = ""
   [modules.contract_store.properties]
   ST-4 = { status = "unverified", layer = "difftest", evidence = "test", depends_on = ["core/src/lib.rs", "contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-STORE", "ASM-SDK"], description = "Real ApprovalContract store refines MemStore over 10k x 50 random ops, persisted and reloaded every step" }
   ST-5 = { status = "unverified", layer = "unit", evidence = "test", cross = ["review"], depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-STORE"], description = "Storage prefixes p/r/a distinct from each other and STATE; all keys well-formed after random runs" }
-  ST-6 = { status = "unverified", layer = "unit", evidence = "test", depends_on = ["core/src/lib.rs", "contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-STORE"], description = "Golden Borsh bytes for STATE and each map value; layout changes flagged storage-breaking" }
+  ST-6 = { status = "unverified", layer = "unit", evidence = "test", depends_on = ["core/src/lib.rs", "core/Cargo.toml", "contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-STORE"], description = "Golden Borsh bytes for STATE and each map value; layout changes flagged storage-breaking" }
 
 # ---------------------------------------------------------------------------
 [modules.contract_shell]
@@ -274,17 +277,17 @@ verus_model = ""
 prolog_requirements = "prolog/requirements/approval_req.pl"
 
   [modules.contract_shell.properties]
-  SH-1 = { status = "unverified", layer = "unit", evidence = "test", cross = ["review"], depends_on = ["contract/src/lib.rs"], description = "Env mapping (caller, now); add_agent/add_approver pass the right role; owner methods pass the predecessor" }
-  SH-2 = { status = "unverified", layer = "difftest", evidence = "test", depends_on = ["contract/src/lib.rs"], description = "Exactly one core transition per change call and no other writes" }
-  SH-3 = { status = "unverified", layer = "unit", evidence = "test", cross = ["sandbox"], depends_on = ["core/src/lib.rs", "contract/src/lib.rs"], description = "Core Err(e) panics with exactly e.as_str() (catch_unwind) and logs nothing" }
-  SH-4 = { status = "unverified", layer = "unit", evidence = "test", cross = ["review"], depends_on = ["contract/src/lib.rs"], assumptions = ["ASM-ATOMIC"], description = "approval_requested: exactly one NEP-297 line with RequestView(r), status pending; emitted only after Ok" }
-  SH-5 = { status = "unverified", layer = "unit", evidence = "test", depends_on = ["contract/src/lib.rs"], description = "action_approved: exactly one line; data = return value = get_approval(i)" }
-  SH-6 = { status = "unverified", layer = "unit", evidence = "test", depends_on = ["contract/src/lib.rs"], description = "No other method logs" }
-  SH-7 = { status = "unverified", layer = "unit", evidence = "test", depends_on = ["contract/src/lib.rs"], description = "View mapping: get_approval(s), get_approvals defaults (0, 50), status, principal role and pending, get_owner, counts" }
-  SH-8 = { status = "unverified", layer = "unit", evidence = "test", cross = ["sandbox"], depends_on = ["contract/src/lib.rs", "Cargo.lock"], description = "JSON shape: README field names, U64 strings for *_ns, numbers for ids, {}/null defaults, lossless conversions" }
+  SH-1 = { status = "unverified", layer = "unit", evidence = "test", cross = ["review"], depends_on = ["contract/src/lib.rs", "Cargo.lock"], description = "Env mapping (caller, now); add_agent/add_approver pass the right role; owner methods pass the predecessor" }
+  SH-2 = { status = "unverified", layer = "difftest", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], description = "Exactly one core transition per change call and no other writes" }
+  SH-3 = { status = "unverified", layer = "unit", evidence = "test", cross = ["sandbox"], depends_on = ["core/src/lib.rs", "contract/src/lib.rs", "Cargo.lock"], description = "Core Err(e) panics with exactly e.as_str() (catch_unwind) and logs nothing" }
+  SH-4 = { status = "unverified", layer = "unit", evidence = "test", cross = ["review"], depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-ATOMIC"], description = "approval_requested: exactly one NEP-297 line with RequestView(r), status pending; emitted only after Ok" }
+  SH-5 = { status = "unverified", layer = "unit", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], description = "action_approved: exactly one line; data = return value = get_approval(i)" }
+  SH-6 = { status = "unverified", layer = "unit", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], description = "No other method logs" }
+  SH-7 = { status = "unverified", layer = "unit", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], description = "View mapping: get_approval(s), get_approvals defaults (0, 50); get_request None past #R else every field of R[i] plus request_status; get_principal None if unregistered else account, role, pending; get_owner; counts" }
+  SH-8 = { status = "unverified", layer = "unit", evidence = "test", cross = ["sandbox"], depends_on = ["contract/src/lib.rs", "Cargo.lock"], description = "JSON shape: README field names, U64 strings for *_ns, numbers for ids, {} or null fields give defaults, whole-args null fails, lossless conversions" }
   SH-9 = { status = "unverified", layer = "sandbox", evidence = "test", cross = ["review"], depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-SDK"], blocked_by = "OQ-2", description = "Init once, only from C; methods fail before init; post-init state is Init(owner)" }
-  SH-10 = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-SDK"], blocked_by = "OQ-2", description = "All 13 exports called with 1 yocto: change methods and new reject; view outcomes recorded" }
-  SH-11 = { status = "unverified", layer = "wasm-check", evidence = "check", cross = ["sandbox"], depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-SDK"], description = "Exactly the 13 methods exported (+ SDK metadata); no Store, upgrade or owner-transfer export" }
+  SH-10 = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-SDK"], blocked_by = "OQ-2", description = "All 13 exports called with 1 yocto via full-access keys (new on a fresh deployment): change methods and new fail with the non-payable panic; view outcomes recorded" }
+  SH-11 = { status = "unverified", layer = "wasm-check", evidence = "check", cross = ["sandbox"], depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-SDK"], description = "Function exports exactly the 13 methods + contract_source_metadata (+ __contract_abi if embedded); non-function exports memory (+ __data_end/__heap_base); no Store, upgrade or owner-transfer export" }
   SH-12 = { status = "unverified", layer = "wasm-check", evidence = "check", cross = ["review"], depends_on = ["contract/src/lib.rs", "Cargo.lock"], description = "No promise_*, deploy, delete or transfer imports; only ST-5 storage keys written" }
   RES-1 = { status = "unverified", layer = "unit", evidence = "test", cross = ["sandbox"], depends_on = ["core/src/lib.rs", "contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-STAKE"], description = "Storage growth per op bounded from the Borsh layout; measured on-chain; <= 16 x B_req lockable per agent key without an approver" }
   RES-2 = { status = "unverified", layer = "unit", evidence = "test", cross = ["sandbox"], depends_on = ["core/src/lib.rs", "contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-LIMITS"], description = "Worst-case event lines (2048 escaped control bytes, 64-char accounts, secp256k1 keys) fit 16384 B (F-4)" }
@@ -301,12 +304,12 @@ prolog_requirements = "prolog/requirements/threat_model.pl"
   RT-RELAY = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-PRED"], blocked_by = "OQ-2", description = "Calls through a third-party relay contract fail IndirectCall" }
   RT-SELFACCT = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-PRED"], blocked_by = "OQ-2", description = "A contract on the signer's own account calling C succeeds (documents F-9)" }
   RT-METATX = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-META"], blocked_by = "OQ-2", description = "NEP-366 delegate action outcome recorded (expected IndirectCall)" }
-  RT-FCKEY = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-FCKEY"], blocked_by = "OQ-2", description = "Agent FC key scoped to request_action cannot call approve or add_agent" }
+  RT-FCKEY = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-FCKEY"], blocked_by = "OQ-2", description = "Agent FC key scoped to request_action cannot call approve or add_agent: InvalidAccessKeyError(MethodNameMismatch), not a contract panic" }
   RT-REVERT = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-ATOMIC"], blocked_by = "OQ-2", description = "Forced failures (LackBalanceForState, gas-starved after emit) leave state and views unchanged; record whether logs survive" }
-  RT-BATCH = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-ATOMIC"], blocked_by = "OQ-2", description = "Batched [request_action(a), request_action('')] leaves counters unchanged; record whether the first event appears" }
-  RT-RESET = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-CODE"], blocked_by = "OQ-2", description = "Delete + recreate C resets counters; VER-6 detects it" }
-  RT-SPOOF = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs"], blocked_by = "OQ-2", description = "Forged EVENT_JSON from a spoofer contract rejected by the VER-1 executor_id rule" }
-  RT-CODEHASH = { status = "unverified", layer = "sandbox", evidence = "check", depends_on = ["Cargo.toml", "Cargo.lock", "contract/Cargo.toml", "core/src/lib.rs", "contract/src/lib.rs"], assumptions = ["ASM-DEPLOY", "ASM-COMPILE"], blocked_by = "OQ-2", description = "Wasm under test is the reproducible build; record sha256 (hex) and NEAR code_hash (base58)" }
+  RT-BATCH = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-ATOMIC"], blocked_by = "OQ-2", description = "Batched [request_action(a), request_action('')] signed by a full-access registered agent key fails at action 1 and leaves counters unchanged; record whether the first event appears" }
+  RT-RESET = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-CODE"], blocked_by = "OQ-2", description = "Delete + recreate C resets counters; VER-3 detects it (VER-6 only heuristically)" }
+  RT-SPOOF = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], blocked_by = "OQ-2", description = "Forged EVENT_JSON from a spoofer contract rejected by the VER-1 executor_id rule" }
+  RT-CODEHASH = { status = "unverified", layer = "sandbox", evidence = "check", depends_on = ["Cargo.toml", "Cargo.lock", "contract/Cargo.toml", "core/Cargo.toml", "core/src/lib.rs", "contract/src/lib.rs"], assumptions = ["ASM-DEPLOY", "ASM-COMPILE"], blocked_by = "OQ-2", description = "Wasm under test is the reproducible build; record sha256 (hex) and NEAR code_hash (base58)" }
   RT-TRACE = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["core/src/lib.rs", "contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-COMPILE", "ASM-SDK"], blocked_by = "OQ-2", description = "Prolog traces + 200 random sequences replayed on the reproducible wasm equal spec.rs: results, exact messages, logs, views" }
 
 # ---------------------------------------------------------------------------
@@ -316,11 +319,12 @@ verus_model = ""
 prolog_requirements = "prolog/verification/verifier_rules.pl"
 
   [modules.deployment.properties]
-  DEP-1 = { status = "unverified", layer = "deploy-check", evidence = "check", depends_on = ["README.md", "contract/src/lib.rs"], assumptions = ["ASM-DEPLOY", "ASM-OWNER"], blocked_by = "OQ-2", description = "Code hash = reproducible build; locked at deploy (deploy + new + full-access key deletion in one tx); owner is multisig/DAO; registered keys are FC keys scoped to C; balance buffer" }
+  DEP-1 = { status = "unverified", layer = "deploy-check", evidence = "check", depends_on = ["README.md", "contract/src/lib.rs"], assumptions = ["ASM-DEPLOY", "ASM-OWNER"], blocked_by = "OQ-2", description = "Code hash = reproducible build, not a global contract referenced by account id; locked at deploy (deploy + new + full-access key deletion in one tx); owner is multisig/DAO; registered keys (rebuilt from an indexer) are FC keys scoped to C; balance buffer" }
   VER-1 = { status = "unverified", layer = "prolog", evidence = "check", cross = ["sandbox"], depends_on = ["README.md"], assumptions = ["ASM-FINAL", "ASM-ATOMIC"], description = "Accept proofs only from get_approval at final, or action_approved logs of successful receipts with executor_id = C in final blocks" }
   VER-2 = { status = "unverified", layer = "deploy-check", evidence = "check", depends_on = ["README.md"], assumptions = ["ASM-CODE"], blocked_by = "OQ-2", description = "code_hash(C) = expected at the proof's block (archival) and now" }
-  VER-3 = { status = "unverified", layer = "deploy-check", evidence = "check", depends_on = ["README.md"], assumptions = ["ASM-CODE"], description = "No full-access key on C since b0, or an indexer scan finds no DeployContract/AddKey/DeleteAccount" }
+  VER-3 = { status = "unverified", layer = "deploy-check", evidence = "check", depends_on = ["README.md"], assumptions = ["ASM-CODE"], blocked_by = "OQ-2", description = "No full-access key on C since b0, or an indexer scan finds no DeployContract/UseGlobalContract/AddKey/DeleteAccount" }
   VER-4 = { status = "unverified", layer = "prolog", evidence = "check", depends_on = ["README.md"], assumptions = ["ASM-OWNER"], description = "Check action and both accounts against expectations; approver against the verifier's own allowlist" }
   VER-5 = { status = "unverified", layer = "prolog", evidence = "check", depends_on = ["README.md"], description = "Enumerate with the RD-4 loop at one block_id" }
   VER-6 = { status = "unverified", layer = "prolog", evidence = "check", depends_on = ["README.md"], description = "Counter decrease or code-hash change invalidates cached proofs" }
   VER-7 = { status = "unverified", layer = "prolog", evidence = "check", depends_on = ["README.md"], description = "Executors deduplicate on (C, request_id) and enforce a maximum approval age" }
+  VER-8 = { status = "unverified", layer = "deploy-check", evidence = "check", cross = ["prolog"], depends_on = ["README.md"], assumptions = ["ASM-FCKEY", "ASM-PRED"], description = "Per proof: archival view_access_key for the agent key at the request block and the approver key at the approval block both show a function-call permission with receiver C and the DEP-1 method names (closes F-9)" }

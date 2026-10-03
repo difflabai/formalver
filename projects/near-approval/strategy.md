@@ -12,7 +12,7 @@ readable per request or as a paged log.
 |---|---|
 | Pinned commit | `5736251d65c6bc11c20e5f27ddc869db27bd7299`. This pin is **provisional**: it is on branch `claude/near-approval-contract-qin858`. Re-pin when the branch merges (OQ-1). |
 | Crates | `approval-core` (`core/src/lib.rs`, 584 lines incl. docs). A dependency-free state machine, generic over account `A` and key `K`, holding *all* authorization and transition logic. `approval-contract` (`contract/src/lib.rs`, 660 lines incl. tests). A near-sdk 5.29 shell: env → `Caller`, `Store` over `LookupMap`, NEP-297 events, JSON views. |
-| In the TCB via `Cargo.lock` | near-sdk 5.29.1, borsh 1.8.1 |
+| In the TCB via `Cargo.lock` | near-sdk 5.29.1, near-sdk-macros 5.29.1, near-sdk-core 4.2.3, near-sdk-env 0.1.6, near-account-id 2.6.0, near-sys 0.2.14, borsh 1.8.1, serde_json 1.0.151 |
 | Mirror | git submodule `projects/near-approval/source-mirror` (same pattern as ironclaw) |
 
 The split is deliberate. Every decision is in `approval-core`, which has no
@@ -28,8 +28,8 @@ against the pinned core:
 - its 21 tests, including a randomized state-machine spec with an exact-error
   oracle, frame conditions and a ghost-state model of revocation;
 - 29 hand-seeded mutants: 27 killed, 2 equivalent (F-14);
-- a plain-mode prototype of the Kani harness crate, against the previous core
-  API. M1 ports its design (§6).
+- a plain-mode prototype of the Kani harness design, against the previous
+  core API (not committed; §6.1).
 
 ---
 
@@ -47,7 +47,8 @@ reproducible build of the pin and the assumptions in §3 hold:
   The approval call carried exactly `π.action`. The agent key's registration
   under which the request was made was **continuously** in force from request
   to approval. Each call came from the signing account itself: directly, or
-  via code deployed on that account. DEP-1 rules the second case out.
+  via code deployed on that account. VER-8 rules the second case out for each
+  proof.
 - **(b) Permanence.**
   - Requests and proofs are never changed or removed.
   - A request is approved at most once.
@@ -70,7 +71,7 @@ reproducible build of the pin and the assumptions in §3 hold:
 
 | Tier | Milestones | Effort | Result |
 |---|---|---|---|
-| **1. Code-level core** | M0–M3 | 8–13 days | Bounded proofs (Kani) of every transition contract, invariant step, history and read property **on the real `approval-core`**, with counters and paging over all `u64`. Plus a differential store test and exact shell tests. Covers about 80% of the risk. |
+| **1. Code-level core** | M0–M3 | 8–13 days | Bounded proofs (Kani) of every transition contract, invariant step, history and read property **on the real `approval-core`**, with counters and paging over all `u64`. Plus a differential store test and exact shell tests. The most assurance per day: it checks the logic that is actually deployed. |
 | **2. Operational** | M4, M6, M7 | 8–11 days | Requirement consistency and an independent reference semantics (Prolog). Runtime assumptions tested on the reproducible wasm (sandbox). Deployment lock and verifier rules. |
 | **3. Unbounded** | M5 | 9–15 days | Verus on the real core, removing the small-scope step. If the spike fails, Verus on a spec machine instead, which yields model-proofs only. |
 
@@ -139,17 +140,17 @@ only if "formally verified" will be claimed externally.
 
 | T | Threat | Mitigated by | Residual |
 |---|---|---|---|
-| T1 | Approval with no genuine approver, or self-approval | TX-5, INV-5, INV-6, TR-1 | Sybil accounts registered by the owner (ASM-OWNER) |
+| T1 | Approval with no genuine approver, or self-approval | TX-5, INV-5, INV-6, TR-1, VER-4 | Sybil accounts registered by the owner (ASM-OWNER) |
 | T2 | Request attributed to another agent | TX-3, TX-4, TR-1, SH-1; ASM-SIGNER, ASM-PRED | none |
 | T3 | Action changed after request or approval | HIST-1, HIST-2, SH-12 | Redeploy (T11) |
 | T4 | Unregistered, wrong-role or revoked key acts | TX-3, TR-3, HIST-8 | none |
 | T5 | Approver approves content it didn't review | TX-5 (`ActionMismatch`), TR-1 | UI rendering (ASM-DISPLAY) |
 | T6 | Double approval, or log inflation | TX-5, INV-3, INV-4, TR-2 | none |
 | T7 | A rogue approver approves anything | By design. TR-1 gives accountability; TR-3 stops it after revocation. | yes |
-| T8 | Relayed signature (phishing contract) | TX-3 (`IndirectCall`), RT-RELAY, DEP-1 | Code on the signer's own account (F-9) |
-| T9 | Owner compromise | HIST-6, HIST-7: can't rewrite history. DEP-1: owner is a multisig. | New approvals; DoS via revocation |
-| T10 | Revoked agent's queued requests get approved after re-registration | TR-3, HIST-8, INV-8 | none (was F-1, fixed) |
-| T11 | Contract redeployed, deleted or recreated | SH-12, DEP-1 (lock at deploy), VER-2, VER-3, VER-6 | Governance keys, if allowed |
+| T8 | Relayed signature (phishing contract) | TX-3 (`IndirectCall`), RT-RELAY, RT-FCKEY, DEP-1, VER-8 | none if VER-8 is applied; otherwise code on the signer's own account (F-9) |
+| T9 | Owner compromise | HIST-6, HIST-7: can't rewrite history. DEP-1: owner is a multisig. VER-4: verifier allowlist. | New approvals; DoS via revocation |
+| T10 | Revoked agent's queued requests get approved after re-registration | TR-3, HIST-8, INV-8 | none (was R-1, fixed) |
+| T11 | Contract redeployed, deleted or recreated | SH-12, DEP-1 (lock at deploy), VER-2, VER-3, VER-6, RT-CODEHASH, RT-RESET | Governance keys, if allowed |
 | T12 | Storage exhaustion by an agent | INV-9 (≤16 pending per key), TR-6, RES-1 | Approved and void requests accumulate |
 | T13 | Unregistered callers grief the contract | TX-0: nothing is written, and the caller pays gas | none |
 | T14 | Accepted request can never be approved (log limit) | RES-2 (F-4) | none |
@@ -166,7 +167,8 @@ only if "formally verified" will be claimed externally.
 ### 3.3 Trust assumptions (TCB)
 
 Each row is an `[assumptions.<ID>]` entry in `status.toml`, with a `level`
-field (`high | med | low | policy | n/a`) for C-10. Any Verus `external_body`
+field (`high | med | low | policy | n/a`) for C-10. A mixed level is recorded
+as its lowest component. Any Verus `external_body`
 or `assume_specification` must cite one of these IDs.
 
 | ID | Assumption | Level | Checked by |
@@ -175,17 +177,17 @@ or `assume_specification` must cite one of these IDs.
 | ASM-PRED | `predecessor_account_id()` can't be forged. It equals the signer for the tx's first receipt, **and** when code deployed on the signer's own account makes the call (F-9). | high | RT-RELAY, RT-SELFACCT |
 | ASM-ATOMIC | Atomicity is per receipt. A panic, out-of-gas or `LackBalanceForState` reverts every write of that receipt. Several FunctionCall actions in one tx share one receipt, so a later failing action reverts the earlier ones. Logs of a failed receipt may remain visible. | high (revert); med (logs) | RT-REVERT, RT-BATCH |
 | ASM-SEQ | Receipts on one account execute one at a time. The contract creates no promises, so there is no reentrancy. Each successful action is one atomic model step. | high | SH-12, review |
-| ASM-TIME | `block_height` and `block_timestamp` never decrease across receipts on one account. | high / med-high | Used only by INV-10, TR-4 |
+| ASM-TIME | `block_height` and `block_timestamp` never decrease across receipts on one account. | med (height high, timestamp med-high) | Used only by INV-10, TR-4 |
 | ASM-FINAL | State at finality `final` is never reverted. | high | none |
-| ASM-CODE | Code changes only through `DeployContract`, which needs a full-access key on `C`. `DeleteAccount` erases state, and a recreated account starts empty. | high | RT-RESET |
+| ASM-CODE | Code changes only through `DeployContract` or `UseGlobalContract` on `C` (both need a full-access key on `C`). If `C` uses a NEP-591 global contract referenced by account id, it also changes through `DeployGlobalContract` by that account. `DeleteAccount` erases state, and a recreated account starts empty. | med | RT-RESET, DEP-1 |
 | ASM-SDK | `#[init]` panics if state exists. `#[private]` requires predecessor = current account. Non-payable change methods reject deposits. `&self` methods never write. Only `#[near]` impl methods are exported. `PanicOnDefault` blocks default init. | high | SH-9, SH-10, SH-11, `cargo expand` review |
 | ASM-STORE | `store::LookupMap` is a map keyed by `prefix ‖ borsh(key)`. Its writes are flushed when the contract struct drops after `state_write`. | high (semantics); med (flush) | ST-4, ST-5, ST-6 |
-| ASM-IDENT | `PartialEq` on `AccountId` and `PublicKey` is an equivalence matching equality of their Borsh bytes, and `clone` preserves it. The core uses `A`/`K` only via `Clone` and `PartialEq` (`#![forbid(unsafe_code)]`, no `Ord`/`Hash`). This **parametricity** justifies `u8` identities in harnesses. | high | Inspection on every pin bump: a bound change breaks the harness build |
-| ASM-STAKE | The account must hold `storage_usage × 10^19` yocto, with about 40 bytes of overhead per record. | high / med-high | RES-1 |
+| ASM-IDENT | `PartialEq` on `AccountId` and `PublicKey` is an equivalence matching equality of their Borsh bytes, and `clone` preserves it. The core uses `A`/`K` only via `Clone` and `PartialEq` (`#![forbid(unsafe_code)]`, no `Ord`/`Hash`). This **parametricity** justifies small identities in harnesses. | high | Harnesses instantiate `A`/`K` with opaque newtypes (`Acct(u8)`, `Key(u8)`) implementing only `Clone`, `PartialEq`, `Debug` and a hand-written `kani::Arbitrary`, so any new trait bound upstream breaks the harness build |
+| ASM-STAKE | The account must hold `storage_usage × 10^19` yocto, with about 40 bytes of overhead per record. | med (rule high, constants med-high) | RES-1 |
 | ASM-LIMITS | `max_total_log_length` 16384 B. 100 logs. 4 MiB return data. 300 TGas per call. The view gas cap is set per node. | med | RES-2, RES-3 |
 | ASM-META | NEP-366: the inner receipt has signer = relayer, so relayed calls fail `IndirectCall`. The same holds for NEP-518 eth-implicit accounts. | med | RT-METATX |
 | ASM-FCKEY | Function-call keys restrict receiver and methods, can't attach a deposit, and have an allowance. Function-call keys can't add keys. | high | RT-FCKEY |
-| ASM-COMPILE | rustc/LLVM/wasm-opt preserve core semantics from host to wasm32. The release profile keeps `overflow-checks = true`. No on-chain `usize` dependence (`MemStore` is off-chain). `cfg(feature = "borsh")` gates only `use` and `derive` items, so Kani (borsh off) and the wasm (borsh on) compile the same logic. | n/a | RT-CODEHASH, RT-TRACE, `check-pin.sh` grep |
+| ASM-COMPILE | rustc/LLVM/wasm-opt preserve core semantics from host to wasm32. The release profile keeps `overflow-checks = true`. The only on-chain `usize` use is `action.len() > MAX_ACTION_LEN`; every value is far below 2³², so host and wasm32 agree (`MemStore` is off-chain). `cfg(feature = "borsh")` gates only `use` and `derive` items, so Kani (borsh off) and the wasm (borsh on) compile the same logic. | n/a | RT-CODEHASH, RT-TRACE, `check-pin.sh` grep |
 | ASM-MODEL | *Until M5 (code-level Verus):* a core step on a state larger than the Kani bound behaves like one within it (the §6.3 small-scope argument). | med | Plain-mode random traces of ≤200 steps, MC-2. Removed by M5 path A. |
 | ASM-SPEC | The specs (`spec.rs`, Verus, Prolog) state the intended behaviour. | n/a | Independent authorship, signed off by a **named human who did not write `approval-core`** (`[review] spec_reviewer`), required before any K/V property is `verified*`. Also traceability (C-7), mutants and three-way trace replay. |
 | ASM-TOOLS | Kani (CBMC, unwinding assertions on), Verus with Z3, and scryer-prolog are sound at the pinned versions. | n/a | `tools/versions.env`, the canary lemma must fail, mutants must be caught |
@@ -221,8 +223,8 @@ These were found by review and planning on the first draft, and fixed in
 | F-7 | `approve`'s `LogFull` branch is unreachable under `Inv`: a pending request implies `#L < #R ≤ MAXU`. | Kept as defence in depth. LEM-3. |
 | F-8 | Key registry changes emit no events. | Accepted risk (upstream README). C-4 records it. |
 | F-9 | `predecessor == signer` also admits code deployed on the signer's own account. | DEP-1 requires registered keys to be function-call keys with receiver `C`. RT-SELFACCT. |
-| F-10 | **formalver tooling defects:** <br>(a) `run-prolog.sh` ends with `\|\| true`, so failures never fail the script. <br>(b) `run-verus.sh` omits `--cfg 'feature="verus"'`, so ironclaw's `cfg(feature="verus")` spec and proof modules are never compiled [conf: high]. <br>(c) ironclaw proofs take their conclusion as a `requires`. <br>(d) ironclaw's gitlink `d313f44` ≠ recorded pin `34550ad`. <br>(e) No CI. | M0 fixes (a), (b) and (e), and decides (d) (OQ-6). Rule for this project: no proof assumes its conclusion. |
-| F-12 | `contract/Cargo.toml` has no `[package.metadata.near.reproducible_build]` (image, digest, command) and no `repository`. `cargo near build reproducible-wasm` needs both [conf: med-high]. Everything code-hash related depends on this. | OQ-2. Until then RT-CODEHASH, RT-TRACE, DEP-1, VER-2 have `blocked_by = "OQ-2"`. |
+| F-10 | **formalver tooling defects:** <br>(a) `run-prolog.sh` ends with `\|\| true` and runs `-g "run_tests, halt."`; a failing `run_tests` falls through to the toplevel, which exits 0 at EOF. Failures never fail the script. <br>(b) `run-verus.sh` and the README's direct `verus` command omit `--cfg 'feature="verus"'`, so ironclaw's `cfg(feature="verus")` spec and proof modules are never compiled [conf: high]. The README's `./tools/get-z3.sh` lives under `source/` in the Verus repo. <br>(c) ironclaw proofs take their conclusion as a `requires`. <br>(d) ironclaw's gitlink `d313f44` ≠ recorded pin `34550ad`. <br>(e) No CI. | M0 fixes (a), (b) and (e), and decides (d) (OQ-6). Rule for this project: no proof assumes its conclusion. |
+| F-12 | `contract/Cargo.toml` has no `[package.metadata.near.reproducible_build]` (image, digest, command) and no `repository`. `cargo near build reproducible-wasm` needs both [conf: med-high]. Everything code-hash related depends on this. | OQ-2. Until then every sandbox (S) property (SH-9, SH-10, RES-3, RT-*), DEP-1, VER-2 and VER-3 have `blocked_by = "OQ-2"`. |
 | F-13 | `approval-contract` has **never been compiled against real near-sdk**: crate downloads were blocked when it was written. It type-checks against a hand-written near-sdk shim, but the real macros, ABI generation and wasm build are unverified. | M0 gate: `cargo test -p approval-contract` and `cargo near build` succeed in CI (OQ-3) |
 | F-14 | Two equivalent mutants. In `live_agent_registration`, dropping the role check or the account check survives all tests: under INV-8 both are implied by `active_from ≤ id`. They are kept as defence in depth. | LEM-4 proves the redundancy, so the equivalence is established and not merely assumed. |
 
@@ -241,7 +243,8 @@ These were found by review and planning on the first draft, and fixed in
   - `L : Seq<u64>` is the approval log.
 - **Constants:** `#R`, `#L` are the store counters. `MAXU = 2⁶⁴−1`,
   `N = 2048`, `MAXP = 16`, `PG = 100`, `DPG = 50`. `len` is the UTF-8 byte
-  length.
+  length. `⊕` is saturating `u64` addition (`saturating_add`), and `∸` is
+  truncated subtraction.
 - **Caller** `c = ⟨pred, sig, key⟩`.
 - **Predicates:**
   - `Holds(s,c,ρ) ≜ c.pred = c.sig ∧ P(c.key).acct = c.sig ∧ P(c.key).role = ρ`
@@ -262,7 +265,7 @@ These were found by review and planning on the first draft, and fixed in
 | **Kp** | Same harness bodies as random tests (plain `cargo test`) | `test` |
 | **VC** | Verus on the real core (M5 path A) | `proof` |
 | **VM** | Verus spec machine (M5 path B) | `model-proof` (+ ASM-MODEL) |
-| **P / PM** | Prolog consistency check / bounded model check or trace replay | `check` / `bounded-proof (model)` |
+| **P / PM** | Prolog consistency check / bounded model check or trace replay | `check` / `model-check` or `test` |
 | **D** | near-sdk unit or differential test (`near-tests/`) | `test` |
 | **S** | near-workspaces sandbox on the reproducible wasm | `test` |
 | **W** | CI static check of the wasm | `check` |
@@ -324,12 +327,12 @@ within bounds), VC/VM (unbounded), PM and Kp.
 
 | ID | Statement | Check |
 |---|---|---|
-| **TR-1** | **Provenance (headline).** If `approval(s,i) = Some(π)` for `s ∈ Reach`, there are steps `k₁ < k₂` where: <br>(a) `ops[k₁]` is a successful `Req(c₁, π.action, π.requested_at)` creating `i`, with `c₁.pred = c₁.sig = π.agent_account_id`, `c₁.key = π.agent_key`, and `P_{k₁}(π.agent_key)` an Agent registration of that account; <br>(b) `ops[k₂]` is a successful `Appr(c₂, i, π.action, π.approved_at)` with `c₂.pred = c₂.sig = π.approver_account_id ≠ π.agent_account_id`, `P_{k₂}(π.approver_key)` an Approver registration of that account, and `π.approval_index = #L_{k₂}`; <br>(c) `π.agent_key` was registered **continuously** (same registration) over `[k₁, k₂]`. <br>With ASM-SIGNER and ASM-PRED: each key holder signed a tx from its own account that reached `C` directly, or through code on that account (F-9; excluded under DEP-1). | K (corollary of TX-4, TX-5, HIST, INV-8; plus `h_bmc_from_init` depth ≤ 6) / VC, PM |
-| TR-2 | At most once: each `i` has at most one successful `Appr` in any trace. | K / VC, PM |
-| TR-3 | **Durable revocation:** if the registration of `R[i].ak` under which `i` was made is removed while `R[i]` is pending, then `R[i]` is never approved in any extension. This holds even if the key is re-registered to the same account and role. | K (BMC depth 6: revoke, re-add, approve fails) / VC, PM (MC-1 must find **no** revival) |
+| **TR-1** | **Provenance (headline).** If `approval(s,i) = Some(π)` for `s ∈ Reach`, there are steps `k₁ < k₂` where: <br>(a) `ops[k₁]` is a successful `Req(c₁, π.action, π.requested_at)` creating `i`, with `c₁.pred = c₁.sig = π.agent_account_id`, `c₁.key = π.agent_key`, and `P_{k₁}(π.agent_key)` an Agent registration of that account; <br>(b) `ops[k₂]` is a successful `Appr(c₂, i, π.action, π.approved_at)` with `c₂.pred = c₂.sig = π.approver_account_id ≠ π.agent_account_id`, `P_{k₂}(π.approver_key)` an Approver registration of that account, and `π.approval_index = #L_{k₂}`; <br>(c) `π.agent_key` was registered **continuously** (same registration) over `[k₁, k₂]`. <br>With ASM-SIGNER and ASM-PRED: each key holder signed a tx from its own account that reached `C` directly, or through code on that account (F-9; excluded by VER-8). | K: ghost-history invariant `GH` (§6.1) checked in `h_init` and every `h_step_*` inductive step, plus `h_bmc_from_init` witnesses / VC, PM |
+| TR-2 | At most once: each `i` has at most one successful `Appr` in any trace. | K (HIST-2 + `AlreadyApproved` in `h_step_approve`; `h_bmc_from_init`) / VC, PM |
+| TR-3 | **Durable revocation:** if the registration of `R[i].ak` under which `i` was made is removed while `R[i]` is pending, then `R[i]` is never approved in any extension. This holds even if the key is re-registered to the same account and role. | K (HIST-8 + `AgentRevoked` in `h_step_*`; `h_bmc_from_init` witness: revoke, re-add, approve fails) / VC, PM (MC-1 must find **no** revival) |
 | TR-4 | Time order along the log (ASM-TIME): `j₁ < j₂ ⇒ approved_at(L[j₁]) ≤ approved_at(L[j₂])` | K / VC |
 | TR-5 | **Non-vacuity:** <br>• a witness reaches an approved state and a void state; <br>• every `ApprovalError` is produced by some reachable step, except `approve`'s `LogFull` (LEM-3); <br>• `request_action`'s `LogFull` only at `#R = MAXU` (ghost store). | K covers / VC, PM |
-| TR-6 | **Agent storage bound:** a trace segment with no successful `Appr` and no `Add` has at most `Σ_{k agent} (MAXP − pend_k)` successful `Req`. Storage growth without approver or owner action is bounded. | K / VC |
+| TR-6 | **Agent storage bound,** as a one-step potential: `Φ(s) = Σ_{k agent} (MAXP − pend_k) ≥ 0` (INV-9). A successful `Req` decreases `Φ` by exactly 1. `Φ` increases only on a successful `Appr` (by 1) or `Add` of an agent key (by `MAXP`). So a trace segment without approvals or `Add` makes at most `Φ` successful requests: storage growth without approver or owner action is bounded. | K (`h_step_*` for the `Φ` step; `h_raw_request` for the cap boundary) / VC |
 
 ### 5.5 Reads (RD)
 
@@ -337,7 +340,7 @@ within bounds), VC/VM (unbounded), PM and Kp.
 |---|---|---|
 | RD-1 | `approval(s,i) = Some(π) ⇔ i < #R ∧ R[i].ap ≠ None`, with `π = proof(R[i])` field by field and `L[π.approval_index] = i`. | K / VC |
 | RD-2 | **Exact page (under Inv):** for all `f, l ∈ u64`, `approvals(s,f,l) = [proof(R[L[j]]) | j ∈ f..e]` where `e = min(f ⊕ min(l,PG), #L)`. Its length is exactly `e ∸ f`: neither `filter_map` drops anything. | K / VC |
-| RD-3 | **Page arithmetic, any store:** for all `f, l, count ∈ u64`, including `MAXU`: no panic or overflow; reads only `approved_request_id(j)` for `j ∈ [f,e)` plus `request(id)` for returned ids; no writes. | K (`Window` store) |
+| RD-3 | **Page arithmetic, any store:** for all `f, l, count ∈ u64`, including `MAXU`: no panic or overflow; reads only `approval_count()` once, `approved_request_id(j)` for `j ∈ [f,e)`, and `request(id)` for each id those calls return; no writes. | K (`Window` store) |
 | RD-4 | **Client enumeration:** with `l ≥ 1` and `from_{k+1} = from_k + len_k`, stopping at the first empty page (the documented rule), or at `from ≥ get_approval_count()`, yields `L` exactly once and in order. This holds at one `block_id`, or across states (HIST-3, HIST-5). | VC/VM / Kp, PM |
 | RD-5 | View consistency: `p ∈ approvals(s,f,l) ⇒ approval(s, p.request_id) = Some(p)`, and `approval(s,i) = Some(π) ⇒ approvals(s, π.approval_index, 1) = [π]`. So a proof is findable by `request_id` (from `approval_requested`) or by `approval_index` (from `action_approved`). | K / VC |
 | RD-6 | Views are pure: the core reads take `&S`, and every `get_*` takes `&self`. | K / R |
@@ -347,12 +350,12 @@ within bounds), VC/VM (unbounded), PM and Kp.
 
 | ID | Statement | Check |
 |---|---|---|
-| ROB-1 | **No panics:** no core function panics, overflows or indexes out of bounds, for any arguments and any `MemStore` contents, **including non-`Inv` states**. | K (`h_raw_*`, no `assume(inv)`) |
-| ROB-2 | `LogFull` guards are the only protection for the shell's `+= 1` counters. `request_count = MAXU ⇒ Err(LogFull)`, no writes. `approval_count = MAXU` with all other guards passing ⇒ `Err(LogFull)`, no writes. | K (`Sparse`, symbolic counters) |
+| ROB-1 | **No panics:** no core function panics, overflows or indexes out of bounds, for any arguments and any `MemStore` within the §6.3 bounds (beyond them, ASM-MODEL), **including non-`Inv` states**. | K (`h_raw_*`, no `assume(inv)`) |
+| ROB-2 | `LogFull` guards turn counter exhaustion into a clean `Err` before the shell's `+= 1`, which would otherwise panic (overflow-checks). `request_count = MAXU` with all earlier guards passing ⇒ `Err(LogFull)`, no writes. `approval_count = MAXU` with all earlier guards passing ⇒ `Err(LogFull)`, no writes. Approve's case needs a non-`Inv` state (LEM-3). | K (raw `Sparse`, symbolic counters) |
 | ROB-3 | Length boundaries in **bytes**: 0 → `EmptyAction`; 1 → ok; N → ok; N+1 → `ActionTooLong`; 1025 two-byte characters (2050 bytes) → `ActionTooLong`. | K (`h_action_len`) / Kp |
 | ROB-4 | Bounded work: each mutator makes ≤ 4 `Store` reads (approve: caller principal, request, agent principal, approval count) and ≤ 3 writes. `approvals` makes ≤ `2·min(l,PG)+1` reads. No unbounded loops in mutators. | K (`Counting` store) |
 | ST-1 | **Store laws** that every `Store` must satisfy: map semantics for principals (with L-REMOVE-ABSENT); `push_request` appends at `request_count()`; `replace_request` overwrites at `r.id`; the log is a sequence; reads are pure. | K (`MemStore`, `Sparse`) |
-| ST-2 | **Store protocol (the correspondence hinge).** The core's mutating `Store` calls are exactly: <br>• add → `[insert_principal(k)]`, with `k ∉ dom P`; <br>• revoke → `[remove_principal(k)]`, also on failure with `k ∉ dom P` (F-6); <br>• request → `[insert_principal(c.key, pend+1), push_request(r)]`, with `r.id = #R < MAXU`; <br>• approve → `[insert_principal(R[i].ak, pend−1), replace_request(r), push_approval(i)]`, with `r.id = i < #R`, `r` equal to `R[i]` except `ap` going from `None` to `Some`, and `#L < MAXU`; <br>• any other failure → no calls. <br>This makes the on-chain impl's differences from `MemStore` unreachable: `push_request` ignores `r.id`, `replace_request` inserts unconditionally, and `+= 1` has no overflow guard. | K (recording `Sparse`) |
+| ST-2 | **Store protocol (the correspondence hinge).** The core's mutating `Store` calls are exactly: <br>• add → `[insert_principal(k)]`, with `k ∉ dom P`; <br>• revoke → `[remove_principal(k)]`, also on failure with `k ∉ dom P` (F-6); <br>• request → `[insert_principal(c.key, pend+1), push_request(r)]`, with `r.id = #R < MAXU`; <br>• approve → `[insert_principal(R[i].ak, pend−1), replace_request(r), push_approval(i)]`, with `r.id = i < #R`, `r` equal to `R[i]` except `ap` going from `None` to `Some`, and `#L < MAXU`; <br>• any other failure → no calls. <br>This makes the on-chain impl's differences from `MemStore` unreachable: `replace_request` inserts unconditionally (`MemStore` drops an out-of-range write), and `+= 1` at `u64::MAX` panics under overflow-checks instead of returning `LogFull`. | K (recording `Sparse`) |
 | ST-3 | `Sparse`, a line-by-line transliteration of `impl Store for ApprovalContract` with each `LookupMap` replaced by an association list, refines `MemStore`: same results, same abstraction `α`. | K (`h_refine_*`) |
 | ST-4 | **The real store refines `MemStore`:** `ApprovalContract` and `MemStore<AccountId,PublicKey>` run random op sequences (10k × 50) through the core and through the public methods. **Before each step the contract is persisted and reloaded** (`state_write`, drop, `state_read`), so every step reads Borsh from cold storage. After every step, results and `α` are equal. | D (`store_diff.rs`) |
 | ST-5 | Storage layout: prefixes `p`, `r`, `a` are pairwise distinct and distinct from `STATE`. After random runs, every key is `STATE` or `p|r|a ‖ borsh(key)`. | D / R |
@@ -372,15 +375,15 @@ within bounds), VC/VM (unbounded), PM and Kp.
 |---|---|---|
 | SH-1 | **Env mapping:** `caller() = ⟨predecessor, signer, signer_pk⟩` and `now() = ⟨block_height, block_timestamp⟩`, probed with pairwise-distinct context values. `add_agent` passes `Agent`, `add_approver` passes `Approver`. All three owner methods pass the **predecessor**: a DAO owner works, and an owner's signature relayed by another contract fails. | D (upstream tests cover part) / R |
 | SH-2 | One core transition per change call, with no other writes (`α` compared around each public call). | D |
-| SH-3 | **Exact errors:** a core `Err(e)` panics with exactly `e.as_str()`, compared exactly via `catch_unwind`, and nothing is logged. On-chain the failure message is `"Smart contract panicked: " ‖ as_str` [conf: high on the prefix]. | D, S |
+| SH-3 | **Exact errors:** a core `Err(e)` panics with exactly `e.as_str()`, compared exactly via `catch_unwind` after extracting `panic_msg` from the mocked runtime's payload (payload format recorded at M3), and nothing is logged. On-chain the failure message is `"Smart contract panicked: " ‖ as_str` [conf: high on the prefix]. | D, S |
 | SH-4 | `approval_requested` is exactly one log line, `EVENT_JSON:{"standard":"trust_approval","version":"1.0.0","event":"approval_requested","data":RequestView(r)}`, with `status: "pending"`. The method returns `r.id`. The emit happens only after the core returned `Ok`. The only failures after it are gas exhaustion and `LackBalanceForState` (ASM-ATOMIC, VER-1). | D / R |
 | SH-5 | `action_approved` is exactly one line. Its `data` = the return value = `get_approval(i)` now and later (HIST-5). | D |
 | SH-6 | No other method logs. | D |
-| SH-7 | **View mapping:** <br>• `get_approval` is `approval`, and `get_approvals(f?,l?)` is `approvals(f.unwrap_or(0), l.unwrap_or(50))`; <br>• `get_request.status` is `request_status`; <br>• `get_principal` maps role and `pending`; <br>• `get_owner` is `o`; <br>• the counts are the store counters. | D |
-| SH-8 | **JSON shape:** <br>• field names as in the README; <br>• `*_ns` are strings (`U64`); ids, indices and heights are numbers; <br>• arguments `{}` or `null` give the defaults; <br>• `From` conversions preserve every field. | D, S |
+| SH-7 | **View mapping:** <br>• `get_approval` is `approval`, and `get_approvals(f?,l?)` is `approvals(f.unwrap_or(0), l.unwrap_or(50))`; <br>• `get_request(i)` is `None` for `i ≥ #R`, otherwise a `RequestView` with every field equal to `R[i]` and `status = request_status`; <br>• `get_principal(k)` is `None` for `k ∉ dom P`, otherwise `account_id`, `role` and `pending` equal `P(k)`; <br>• `get_owner` is `o`; <br>• the counts are the store counters. | D |
+| SH-8 | **JSON shape:** <br>• field names as in the README; <br>• `*_ns` are strings (`U64`); ids, indices and heights are numbers; <br>• arguments `{}`, or `from_index`/`limit` set to `null`, give the defaults; whole-args `null` and empty input fail with near-sdk's deserialization panic (message recorded); <br>• `From` conversions and `request_view` preserve every field. | D, S |
 | SH-9 | **Init:** `new` succeeds once (`#[init]`) and only from `C` (`#[private]`). Every method fails before init (`PanicOnDefault`). Post-init state is `Init(owner_id)`. Wrapper-only, so unit tests can't see it [conf: high]. | S / R |
-| SH-10 | **Deposits:** call all 13 exports as transactions with 1 yocto attached. Change methods and `new` must reject it; record the outcome for each `get_*` [conf: med that the wrapper checks `&self` methods]. | S |
-| SH-11 | **Export surface:** exactly the 13 methods (plus any SDK metadata export, e.g. `contract_source_metadata` [conf: med]). No `Store` method, upgrade or owner transfer is exported. | W / S |
+| SH-10 | **Deposits:** call all 13 exports with 1 yocto attached, using **full-access** keys (function-call keys can't attach deposits), calling `new` on a fresh, uninitialized deployment. Every change method and `new` must fail with near-sdk's non-payable panic; record the outcome for each `get_*` [conf: med that the wrapper checks `&self` methods]. | S |
+| SH-11 | **Export surface:** function exports are exactly the 13 methods plus `contract_source_metadata` and, if the build embeds the ABI, `__contract_abi` [conf: med]. Non-function exports are exactly `memory` (plus `__data_end`/`__heap_base` if present). `wasm-surface.expected` lists both sets. No `Store` method, upgrade or owner transfer is exported. | W / S |
 | SH-12 | **No escape hatches:** wasm imports include no `promise_*` (which covers create, then, batch, yield, and, return), no deploy, no delete, and no transfer. The only storage keys written are those of ST-5. | W / R |
 
 ### 5.9 Runtime assumption tests (RT): sandbox, reproducible wasm
@@ -391,10 +394,10 @@ within bounds), VC/VM (unbounded), PM and Kp.
 | RT-RELAY | `request_action`/`approve` through a third-party relay contract fails with `IndirectCall`. | ASM-PRED |
 | RT-SELFACCT | A contract on the signer's own account calling `C` **succeeds** (documents F-9). | ASM-PRED |
 | RT-METATX | NEP-366 delegate action: record the outcome (expected `IndirectCall`). | ASM-META |
-| RT-FCKEY | An agent function-call key scoped to `request_action` can't call `approve` or `add_agent`. | ASM-FCKEY |
+| RT-FCKEY | An agent function-call key scoped to `request_action` can't call `approve` or `add_agent`. Assert `InvalidTxError::InvalidAccessKeyError(MethodNameMismatch)`, not a contract panic: the contract would also reject both calls, so only the error kind shows the runtime enforced the scope. | ASM-FCKEY |
 | RT-REVERT | Force failures, including `LackBalanceForState` after draining `C`'s balance, and a call with just enough gas for the core step. State and views must be unchanged. Record whether the event survives in the failed outcome. | ASM-ATOMIC |
-| RT-BATCH | One tx `[request_action("a"), request_action("")]`: counters unchanged. Record whether the first event appears. | ASM-ATOMIC |
-| RT-RESET | Delete and recreate `C`: counters reset, and VER-6 detects it. | ASM-CODE |
+| RT-BATCH | One tx `[request_action("a"), request_action("")]`, signed by a **full-access** key of the agent account that is also its registered agent key (a function-call key can sign only single-action txs). The outcome fails at action index 1 with "action is empty", and the counters are unchanged. Record whether the first event appears. | ASM-ATOMIC |
+| RT-RESET | Delete and recreate `C`: counters reset. VER-3 (a full-access key or a `DeleteAccount` since `b₀`) detects it. VER-6 is only a heuristic that catches it while counters are below cached values. | ASM-CODE |
 | RT-SPOOF | A spoofer contract logs a forged `EVENT_JSON`. The VER-1 `executor_id` rule rejects it. | VER-1 |
 | RT-CODEHASH | The wasm under test is the `cargo near build reproducible-wasm` output. Record its sha256 (hex) **and** the NEAR `code_hash` (base58 of sha256). *Blocked by F-12.* | ASM-DEPLOY, ASM-COMPILE |
 | RT-TRACE | **Main flows on the deployed artifact.** Replay every `conformance/traces/*.txt`, plus 200 random sequences of ≤30 ops, on the reproducible wasm. For each step, these must equal `spec.rs`: the result or return value, the exact failure message, the receipt logs, and the `get_*` views (including `{}` args, nulls, `limit = 0`, and values > 2⁵³). *Blocked by F-12.* | ASM-COMPILE, ASM-SDK |
@@ -407,11 +410,18 @@ within bounds), VC/VM (unbounded), PM and Kp.
    key on `C` happen in one transaction at block `b₀`. Function-call keys
    can't add keys, and the code has no deploy, add-key or delete path (SH-12).
    So an empty full-access key list at `b₀+1` rules out any later redeploy
-   [conf: high].
+   [conf: high]. `C`'s code must come from a local `DeployContract` (or a
+   NEP-591 global contract referenced by code hash). `check_deployment.sh`
+   fails if `view_account` reports a global contract referenced by account id,
+   whose owner could replace the code.
 3. The owner is a multisig or DAO.
 4. Every registered key exists on its bound account as a **function-call
    key**: receiver `C`, `method_names = [request_action]` for agents or
-   `[approve]` for approvers, finite allowance.
+   `[approve]` for approvers, finite allowance. The contract can't list its
+   keys, so the registered-key set is rebuilt by replaying every successful
+   `add_agent`/`add_approver`/`revoke_key` receipt to `C` since `b₀` from an
+   indexer (or NEAR Lake). This is a point-in-time check. VER-8 is the
+   per-proof version.
 5. `C`'s free balance ≥ current storage plus a configured buffer.
 
 **Verifier rules.** Specified in P (`verifier_rules.pl`) and demonstrated in S.
@@ -420,11 +430,12 @@ within bounds), VC/VM (unbounded), PM and Kp.
 |---|---|
 | VER-1 | Accept proof `π` for `(C,i)` only from `get_approval(i)` at finality `final`, or from an `action_approved` log in a **successful** receipt with `executor_id = C` in a final block. Events are hints. |
 | VER-2 | `code_hash(C)` = expected, at the proof's block (archival) and now. |
-| VER-3 | No full-access key on `C` since `b₀` (archival query plus SH-12). If governance keys are allowed: an indexer scan of every receipt to `C` since `b₀` finds no `DeployContract`, `AddKey` or `DeleteAccount`. |
+| VER-3 | No full-access key on `C` since `b₀` (archival query plus SH-12). If governance keys are allowed: an indexer scan of every receipt to `C` since `b₀` finds no `DeployContract`, `UseGlobalContract`, `AddKey` or `DeleteAccount`. |
 | VER-4 | Check `π.action` and both accounts against what is expected. Check `approver_*` against the verifier's own allowlist if the owner isn't fully trusted. |
 | VER-5 | Enumerate with the RD-4 loop, reading every page at one `block_id`. |
 | VER-6 | A counter decrease or a code-hash change invalidates every cached `(C,i)`. |
 | VER-7 | Executors deduplicate on `(C, request_id)` and enforce their own maximum age on `approved_at_ns`. Approvals never expire or get consumed on-chain. |
+| VER-8 | For each accepted `π`, archival `view_access_key(π.agent_account_id, π.agent_key)` at the block that included the request tx, and `view_access_key(π.approver_account_id, π.approver_key)` at the block that included the approval tx, both return a function-call permission with `receiver_id = C` and the DEP-1.4 method names. This closes F-9 per proof. |
 
 ### 5.11 Requirement checks (C) and Prolog model checks (MC)
 
@@ -440,7 +451,7 @@ within bounds), VC/VM (unbounded), PM and Kp.
 | C-8 | Every threat has `mitigated_by` or `accepted_risk`. | P |
 | C-9 | Property and assumption IDs in `status.toml` = IDs in `traceability.pl`. | P |
 | C-10 | Warn when a `verified*` property depends on an assumption with `level` below `high` whose check hasn't passed. | P |
-| MC-1 | Bounded model check of the reference `step/4`: owner `o`, accounts `{a,b}`, keys `{k1,k2,k3}`, depth **6**, with state deduplication. It must find no INV, separation-of-duties, double-approval, pending-count or revival violation; it must reach every error except `approve`'s `LogFull`, an approved state and a void state. It prints the state count, and CI enforces `mc1_state_floor` (recorded at M4 sign-off). | PM |
+| MC-1 | Bounded model check of the reference `step/4`: owner `o`, accounts `{a,b}`, keys `{k1,k2,k3}`, depth **6**, with state deduplication. With the real constants it must find no INV, separation-of-duties, double-approval, pending-count or revival violation, and must reach an approved state, a void state and every error except `approve`'s `LogFull`, `request_action`'s `LogFull` and `TooManyPending`. **MC-1s** reruns with scaled constants `max_pending = 2`, `max_u = 2` (C-5 checks the real ones) and must also reach `TooManyPending` and `request_action`'s `LogFull`. `approve`'s `LogFull` stays unreachable (LEM-3). Each run prints its state count, and CI enforces `mc1_state_floor` (recorded at M4 sign-off). | PM |
 | MC-2 | **Trace replay:** `gen_traces.pl` writes every trace to depth *d*, with per-step results and the final views. These are replayed on the real core, on `spec.rs` (Kp), and on the wasm (RT-TRACE). | PM / Kp / S |
 
 ### 5.12 Traceability
@@ -448,22 +459,26 @@ within bounds), VC/VM (unbounded), PM and Kp.
 | Requirement | Properties |
 |---|---|
 | R1: agent requests with its key | TX-3, TX-4, TR-1, SH-1, RT-KEY |
-| R2: emits `approval_requested` | SH-4, C-4, RT-TRACE |
+| R2: emits `approval_requested` | SH-4, SH-6, C-4, RT-TRACE |
 | R3: approver approves with its key | TX-3, TX-5, INV-5, INV-6, TR-1, RT-KEY, RT-RELAY |
-| R4: emits `action_approved` | SH-5, C-4, RT-TRACE |
+| R4: emits `action_approved` | SH-5, SH-6, C-4, RT-TRACE |
 | R5: proof for a specific event is public | RD-1, RD-5, HIST-5, SH-7, SH-8, VER-1 |
 | R6: all approvals public, paged | RD-2, RD-3, RD-4, RD-5, SH-7, RES-3, VER-5 |
-| D1 key+account identity, D2 caller = signer | TX-3, INV-8, RT-KEY, RT-RELAY, RT-SELFACCT, RT-METATX, DEP-1 |
+| D1 key+account identity, D2 caller = signer | TX-3, INV-8, RT-KEY, RT-RELAY, RT-SELFACCT, RT-METATX, RT-FCKEY, DEP-1, VER-8 |
 | D3 owner manages keys | TX-1, TX-2, TX-6, HIST-6, HIST-7, SH-1 |
 | D4 one role per key | INV-0, INV-6, C-1 |
 | D5 approver ≠ agent account | INV-5 |
 | D6 approved at most once | TX-5, HIST-2, TR-2 |
-| D7 durable revocation | TR-3, HIST-8, INV-8, RD-7 |
-| D8 append-only paged log | INV-1, INV-3, INV-4, HIST-3, RD-2, RD-4 |
+| D7 durable revocation | TR-3, HIST-8, INV-8, LEM-4, RD-7 |
+| D8 append-only paged log | INV-1, INV-3, INV-4, INV-7, LEM-1, LEM-2, HIST-3, HIST-4, RD-2, RD-4 |
 | D9 bounded storage (action ≤ 2048 B, ≤ 16 pending/key) | INV-2, INV-9, ROB-3, TR-6, RES-1, RES-2 |
 | D10 approval commits to content | TX-5, TR-1 |
 | D11 no upgrade, rejection, expiry or threshold | SH-11, SH-12, C-1 |
-| Atomic, bounded execution | TX-0, ROB-1, ROB-2, ROB-4, ST-2, SH-3 |
+| D12 atomic, bounded execution | TX-0, ROB-1, ROB-2, ROB-4, ST-1, ST-2, ST-3, ST-4, ST-5, ST-6, SH-2, SH-3, RD-6, LEM-3 |
+| D13 timestamps recorded and ordered | INV-10, TR-4 |
+| D14 deployed artifact = verified source | RT-CODEHASH, RT-RESET, RT-TRACE, DEP-1, VER-2, VER-3, VER-6 |
+| D15 verification hygiene (ASM-SPEC, ASM-TOOLS) | TR-5, MC-1, MC-2, C-2, C-3, C-5, C-6, C-7, C-8, C-9, C-10 |
+| D16 verifier and executor discipline | VER-1, VER-4, VER-5, VER-7, VER-8 |
 
 ---
 
@@ -473,94 +488,104 @@ within bounds), VC/VM (unbounded), PM and Kp.
 
 `projects/near-approval/kani/` is a standalone `[workspace]`. Its only
 dependency is `approval-core` from the mirror (path,
-`default-features = false`, so no borsh). Modules:
+`default-features = false`, so no borsh). `A`/`K` are instantiated with
+opaque newtypes `Acct(u8)` and `Key(u8)` that implement only `Clone`,
+`PartialEq`, `Debug` and a hand-written `kani::Arbitrary` (ASM-IDENT).
 
 | Module | Contents |
 |---|---|
-| `spec.rs` | `inv`; `expected(s, op)`, the exact `Result` in guard order; `check_step` (result, atomicity, history, post-state, frame); `check_read`; `check_page`; `abs` (`α`); the precedence table. Every function is tagged `// PROP: <ID>`. |
-| `gen.rs` | Bounded arbitrary-state builders: `Inv`-satisfying and raw. |
-| `ghost.rs` | Stores: `Sparse` (contract-shaped, recording), `Window` (paging over any `u64`), `Counting`. |
+| `spec.rs` | `inv`; `expected(s, op)`, the exact `Result` in guard order (needs no `Inv`); `check_step` (result, atomicity, history, post-state, frame); `check_read`; `check_page`; `abs` (`α`); the precedence table. **Ghost history** `H`: per request, the `Req` caller and the agent registration in force; per approval, the `Appr` caller. **Invariant** `GH(s,H)`: every approved `i` has `H` records satisfying TR-1 (a)–(c). Every function is tagged `// PROP: <ID>`. |
+| `gen.rs` | Bounded arbitrary-state builders: `Inv`-satisfying (with a consistent `H`) and raw. |
+| `ghost.rs` | Stores: `Sparse` (contract-shaped, recording, sha256 of `contract/src/lib.rs` in its header), `Window` (paging over any `u64`), `Counting`. |
 | `checks.rs` / `proofs.rs` / `plain.rs` | Harness bodies; `#[kani::proof]` wrappers; random-mode tests. |
 | `src.rs` | **Dual mode.** Harness bodies are written against a `Src` trait. `Sym` uses `kani::any`/`assume`: **the proof**. `Rng` uses xorshift with hints toward `Inv` states: **not a proof**. Plain mode debugs specs in seconds and gates CI without Kani. `kani/kani-stub/` lets `RUSTFLAGS="--cfg kani --cfg kani_stub" cargo check` type-check `proofs.rs`. |
 
-A plain-mode prototype of this design, about 1,150 lines, ran against the
-pre-`5736251` API: 11/11 tests passed and it killed 12/12 seeded mutants. M1
-ports it. Known gaps:
-- the new `Principal` fields, errors and `approve(…, action)`;
-- `// PROP:` tags;
-- INV renumbering, plus INV-6..9;
-- `h_raw_*`, `h_count_*`, `h_store_laws_*`;
-- the multi-byte ROB-3 case.
+During planning, a plain-mode prototype of this design (about 1,150 lines) was
+validated against the pre-`5736251` core API: 11/11 tests passed and it killed
+12/12 seeded mutants. It is **not committed**. M1 implements the design
+against the pinned API.
 
 ### 6.2 Harnesses and covers
 
+`run-kani.sh` fails the run on any `UNSATISFIABLE`/`UNREACHABLE` cover. Use
+`--fail-uncoverable` if the pinned Kani has it [conf: low-med].
+
 | Harness | Pre-state | Properties | Covers (must be SATISFIED) |
 |---|---|---|---|
-| `h_init` | `MemStore::new(OWNER)` | INV at init | none |
-| `h_step_add` | arbitrary `Inv` state, `#P,#R,#L ≤ 3` | TX-0, TX-1, HIST-*, INV step | Ok, NotOwner, KeyAlreadyRegistered |
-| `h_step_revoke` | same | TX-0, TX-2, HIST-*, HIST-8, INV step | Ok, NotOwner, KeyNotRegistered, a pending request becomes void |
-| `h_step_request` | same; actions of ≤ 2 bytes | TX-0, TX-3, TX-4, HIST-*, INV step | Ok, the 4 TX-3 errors, EmptyAction, TooManyPending |
-| `h_step_approve` | same; time monotone | TX-0, TX-3, TX-5, HIST-*, INV step, INV-10 | Ok, the 4 TX-3 errors, RequestNotFound, AlreadyApproved, AgentRevoked, ActionMismatch, SelfApproval |
-| `h_raw_{op}` | arbitrary `MemStore`, **no** `assume(inv)` | ROB-1, TX-0 | Ok per op |
-| `h_bmc_from_init` | `Init` + ≤ 6 ops, ghost history | TR-1, TR-2, TR-3, TR-6 (bounded) | approved; revoke → re-add → approve old id fails |
-| `h_read` | like `h_step`; `id`, `from`, `limit` any `u64` | RD-1, RD-2, RD-5, RD-7 | non-empty page; void status |
-| `h_page_arith` | `Window`: `from`, `limit`, `count`, `offset` any `u64`; out-of-page reads and any write panic | RD-3, RD-6 | non-empty page at `count = MAXU` |
-| `h_proto_{request,approve}` | `Sparse` from an `Inv` state, counters any `u64` ≥ size | ST-2, ROB-2 | LogFull |
+| `h_init` | `MemStore::new(OWNER)`, empty `H` | INV and GH at init | none |
+| `h_step_add` | arbitrary `Inv ∧ GH` state, `#P,#R,#L ≤ 3` | TX-0, TX-1, TX-6, HIST-*, INV, GH and LEM-1..2 step, TR-6 `Φ` step | Ok, NotOwner, KeyAlreadyRegistered |
+| `h_step_revoke` | same | TX-0, TX-2, TX-6, HIST-*, HIST-8, INV, GH and LEM-1..2 step, TR-3 step, TR-6 `Φ` step | Ok, NotOwner, KeyNotRegistered, a pending request becomes void |
+| `h_step_request` | same; actions from the §6.3 alphabet | TX-0, TX-3, TX-4 (except the cap boundary), TX-6, HIST-*, INV, GH and LEM-1..2 step, TR-6 `Φ` step | Ok, the 4 TX-3 errors, EmptyAction |
+| `h_step_approve` | same; time monotone | TX-0, TX-3, TX-5, TX-6, HIST-*, INV, GH and LEM-1..3 step, INV-10, TR-2, TR-3, TR-4 steps, TR-6 `Φ` step | Ok, the 4 TX-3 errors, RequestNotFound, AlreadyApproved, AgentRevoked, ActionMismatch, SelfApproval |
+| `h_raw_{op}` | arbitrary `MemStore`, **no** `assume(inv)`; `pend` any `u32`, `from` any `u64` | ROB-1, TX-0, TX-1..5 exact result via `expected`, HIST-7 (add, revoke); for request: the INV-9 bound step (`Ok ⇒ pend < MAXP ∧ pend' = pend + 1`) and the TX-4 cap boundary | Ok per op; request: Ok at `pend = MAXP − 1` and TooManyPending at `pend = MAXP` |
+| `h_bmc_from_init` | `Init` + ≤ 6 ops, ghost history | TR-1, TR-2, TR-3 witnesses (bounded) | approved; revoke → re-add → approve old id fails with AgentRevoked |
+| `h_read` | like `h_step`; `id`, `from`, `limit` any `u64` | RD-1, RD-2, RD-5, RD-7, LEM-4 | non-empty page; void status |
+| `h_page_arith` | `Window`: `from`, `limit`, `count`, `offset` any `u64`; out-of-page reads and any write panic; `#[kani::unwind(102)]` | RD-3, RD-6, and the page clamp | non-empty page at `count = MAXU` |
+| `h_proto_{request,approve}` | `Sparse` **raw** state (no `assume(inv)`), counters any `u64` ≥ stored size. ST-2 is also checked from `Inv` states with counters equal to size. | ST-2, ROB-2 | Ok; LogFull (approve's only from non-`Inv` states, per LEM-3) |
 | `h_proto_{add,revoke}` | same | ST-2 | Ok, each error |
 | `h_count_{op}` | `Counting` over `MemStore` | ROB-4 | none |
 | `h_refine_{op}` | the same `Inv` state in `MemStore` and `Sparse` | ST-3 | none |
 | `h_store_laws_{mem,sparse}` | small arbitrary stores | ST-1, INV-0 (`MemStore`) | none |
-| `h_action_len` | agent registered; `len ∈ {0,1,2048,2049}` plus the 2050-byte multi-byte case | ROB-3 | Ok, EmptyAction, ActionTooLong |
-
-`run-kani.sh` fails the run on any `UNSATISFIABLE`/`UNREACHABLE` cover. Use
-`--fail-uncoverable` if the pinned Kani has it [conf: low-med].
+| `h_action_len` | agent registered; `len ∈ {0, 1, 2048, 2049}` with the 1-byte case `" "`, plus the 2050-byte multi-byte case | ROB-3 | Ok, EmptyAction, ActionTooLong |
+| `h_canary` | any | asserts a false property; must report FAILED | none |
 
 ### 6.3 Bounds and the small-scope argument
 
 | Dimension | Bound | Justification |
 |---|---|---|
-| Accounts | 4 (owner = 0) | ASM-IDENT parametricity. One step compares at most 4 account terms: owner, predecessor/signer, `R[i].aa`, and a looked-up principal's account. 4 values realize every equality pattern among them. |
+| Accounts | 4 (owner = 0) | ASM-IDENT parametricity. `approve` reads 5 account terms: predecessor, signer, `P(c.key).acct`, `R[i].aa`, `P(R[i].ak).acct`. The guard order forces predecessor = signer = `P(c.key).acct` before the last two comparisons, so at most 3 values plus the owner are ever distinguished, and 4 values realize every reachable pattern. |
 | Keys | 4 | ≤ 3 stored keys plus one "absent" value. |
 | Principals / requests / log | ≤ 3 each | A step touches ≤ 2 principals (caller, agent), ≤ 1 request, ≤ 1 log slot. Any one-step violation of an INV involves the touched elements plus ≤ 1 witness. |
-| `from`, `pend` | `from ≤ #R` and `pend ≤ MAXP` in `Inv` states; any `u32`/`u64` in raw states | INV-7 and INV-9 tie them to the bounded collections. |
+| `from`, `pend` | In `Inv` states, `from ≤ #R` and INV-9 forces `pend = Pend(s,k) ≤ #R ≤ 3`. The cap boundary (`pend` near `MAXP`) is reachable only in `h_raw_request`, where `pend` is any `u32`. | INV-7, INV-9 |
 | Ids, counters, `from_index`, `limit` | **any `u64`** | `Sparse`/`Window` stores. These are the only arithmetic-dependent paths. |
-| Action | content from `{"a","b","é"}`, length ≤ 2 in step harnesses | The core uses only `is_empty`, `len`, `==` and `clone`; one equality between two terms needs 2 values. |
+| Action | content from `{"a", " ", "é"}` in step harnesses (whitespace kills the `trim`-empty mutant; two one-byte values for equality; one multi-byte value) | The core uses only `is_empty`, `len`, `==` and `clone`. |
 | Time | any `u64` | Only copied, and compared in INV-10. |
-| History | inductive step (one op from an arbitrary `Inv` state); BMC from `Init` only for covers and TR-1/TR-3 witnesses at depth 6 | This covers histories whose states stay within bounds. Beyond them it rests on ASM-MODEL until M5 path A. |
+| History | inductive step (one op from an arbitrary `Inv ∧ GH` state); BMC from `Init` only for TR witnesses at depth 6 | This covers histories whose states stay within bounds. Beyond them it rests on ASM-MODEL until M5 path A. |
 
 **Cost fallback** if a harness exceeds 20 min on a GitHub runner, applied in
 order, with the bounds used recorded in `status.toml`:
 1. Split further.
-2. `#[kani::solver(cadical)]` [conf: med].
+2. `#[kani::solver(kissat)]` (needs `kissat` on PATH) or `minisat`, whichever
+   is faster. CaDiCaL is already the default [conf: med].
 3. Bound requests and log at 2.
-4. Use a single action `"a"` in the step harnesses.
+4. Use the two actions `""` and `" "` in the step harnesses: the minimum that
+   keeps EmptyAction, ActionMismatch and the `trim`-empty kill.
 5. In `h_action_len`, assert only the error kind.
+6. In `h_page_arith`, have `Window::request` return `None` or a request whose
+   `action` is `String::new()`. Content equality (RD-2) stays in `h_read`.
 
 Counterexamples are replayed with `--concrete-playback=print` [conf: med].
 
 ### 6.4 Mutants
 
 `kani/mutants/*.patch` are applied to a temporary copy of the core. Each must
-be killed by Kani and by plain mode.
+be killed by its listed harness under Kani and by plain mode. 27 of these were
+seeded against the upstream suite during planning (27/27 killed).
 
-| Group | Mutants |
+| Killed by (milestone) | Mutants |
 |---|---|
-| Already validated upstream (kill rate 27/27) | self-approval check, relay check, key-account binding, double log push, length off-by-one, chars-vs-bytes, `trim`-empty, drop-empty, `active_from` dropped / strict / +1 / 0, cap off-by-one, no increment, no decrement, no principal write-back, action-mismatch dropped, `LogFull` request/approve, already-approved dropped, three guard swaps, void reported as pending, page clamp removed, revoke not owner-only, `MemStore` insert pushes duplicates |
-| Plan additions | page addition wraps; `approval_index` from request count; proof copies agent as approver; `push_approval` before the checks |
-| Must **survive** (equivalent, F-14) | role check dropped / account check dropped in `live_agent_registration`. If either is killed, INV-8 or LEM-4 is wrong. |
+| `h_step_*` (M1) | self-approval check; relay check; key-account binding; double log push; drop-empty; `trim`-empty; `active_from` dropped / strict / +1 / 0; no increment; no decrement; no principal write-back; action-mismatch dropped; already-approved dropped; three guard swaps; void reported as pending (`h_read`); revoke not owner-only; `approval_index` from request count; proof copies agent as approver; `push_approval` before the checks |
+| `h_raw_request` (M1) | cap off-by-one (`>=` changed to `>`) |
+| `h_action_len` (M2) | length off-by-one; chars-vs-bytes |
+| `h_page_arith` (M2) | page clamp removed; page addition wraps |
+| `h_proto_*` (M2) | `LogFull` request dropped; `LogFull` approve dropped |
+| `h_store_laws_mem` (M2) | `MemStore` insert pushes duplicates |
+| **Must survive** (equivalent, F-14) | role check dropped / account check dropped in `live_agent_registration`. If either is killed, INV-8 or LEM-4 is wrong. |
 
 ---
 
 ## 7. Verus (M5): real code first, model as fallback
 
 **Spike (2 days).** Wrap a copy of `approval-core` in `verus!` (a "verified
-twin"). Try to verify `request_action` and `approve` against
+twin"). Try to verify `request_action`, `approve`, `approvals`,
+`live_agent_registration` and `MemStore::{principal, insert_principal,
+remove_principal}` **without changing executable code**, against
 `ensures`-refinement specs over an abstract `view()` of `Store`. The known
 friction is:
 - generic `==`/`clone` on `A`/`K`;
-- `String::len` (ASM-STRLEN as `assume_specification`);
-- `ok_or()?`, `Option::filter` and iterator chains in `approvals`, which may
-  need loop rewrites [conf: low-med].
+- `String::len` and `String != &str` (ASM-STRLEN as `assume_specification`);
+- `ok_or()?`, `Option::filter` with closures, `iter().find`/`position`, and the
+  `filter_map` chains in `approvals` [conf: low-med that vstd covers them].
 
 **Path A (preferred; 8–13 days).** If the spike succeeds:
 - `Store` gains `spec fn view(&self) -> AbsState` and `spec fn wf(&self)`.
@@ -570,10 +595,15 @@ friction is:
 - `MemStore` is verified against the trait spec. This is the satisfiability
   witness that shows the trait's `ensures` aren't contradictory.
 - INV, HIST, TR and RD are proved over `view()`, unbounded, as
-  `evidence = proof`. ASM-MODEL is retired.
+  `evidence = proof`. ASM-MODEL is retired for them.
 - `tools/erasure-check` strips the ghost code, runs `rustfmt`, and requires
-  token equality with the upstream file. The only allowlisted difference is
-  `mod tests;`.
+  token equality with the upstream file. The allowlisted differences are:
+  - `mod tests;`
+  - the functions listed in `verus/REWRITES.toml`, each with a Kani
+    equivalence harness (`twin::f == upstream::f` within the §6.3 bounds) and
+    reported with ASM-MODEL.
+- `TRUSTED.toml` may hold ASM-IDENT, ASM-STRLEN, and std-library
+  specifications missing from vstd (each tagged ASM-TOOLS).
 - **Upstream adoption** (optional; replaces twin and erasure check) needs all
   of:
   - Verus crates resolve from crates.io;
@@ -609,22 +639,27 @@ formalver three-file pattern:
 
 | File | Contents |
 |---|---|
-| `requirements/approval_req.pl` | `requirement/2` (R1–R6, D1–D11), `method/3` (name, kind, authority), `emits/2`, `guard/4` (op, order, error, condition), `error_message/2`, `constant/2` |
+| `requirements/approval_req.pl` | `requirement/2` (R1–R6, D1–D16), `method/3` (name, kind, authority), `emits/2`, `guard/4` (op, order, error, condition), `error_message/2`, `constant/2` |
 | `requirements/threat_model.pl` | `adversary/2`, `threat/3`, `assumption/3` (with level), `mitigated_by/2`, `accepted_risk/2` |
 | `requirements/traceability.pl` | `verified_by/2`, `property/3` |
-| `model/approval_machine.pl` | `step(S0, Op, Result, S1)`: reference semantics written **from the requirements**, not transcribed from Rust. Actions are abstracted to `empty`, `ok(Tag)`, `too_long`. |
-| `verification/{consistency,model_check,gen_traces,verifier_rules}.pl` | C-1..10, MC-1, MC-2, VER-1..7 |
-| `extracted/{code_facts,api_facts}.pl` | **Generated:** `code_facts` by a plain-mode test in `kani/` (exhaustive `match` over `ApprovalError`, constants, the `spec.rs` precedence table); `api_facts` by the near-tests job (wasm exports and ABI). CI fails on regeneration diff. |
-| `tests/test_approval.pl` | `run_tests`, halting non-zero on failure |
+| `model/approval_machine.pl` | `step(S0, Op, Result, S1)`: reference semantics written **from the requirements**, not transcribed from Rust. Actions are abstracted to `empty`, `ok(Tag)`, `too_long`. Constants are parameters, so MC-1s can scale them. |
+| `verification/{consistency,model_check,gen_traces,verifier_rules}.pl` | C-1..10, MC-1/MC-1s, MC-2, VER-1..8 |
+| `extracted/{code_facts,api_facts}.pl` | **Generated:** `code_facts` by a plain-mode test in `kani/` (exhaustive `match` over `ApprovalError`, constants, the `spec.rs` precedence table); `api_facts` by the near-unit job (wasm exports and ABI). CI fails on regeneration diff. |
+| `tests/test_approval.pl` | `run_tests`, run under `run-prolog.sh`, which must halt non-zero on failure or exception |
 
 ---
 
 ## 9. Shell, runtime and deployment (M3, M6, M7)
 
+- **Toolchain.** `tools/versions.env` pins `RUST_TOOLCHAIN` for near-tests,
+  the M0 build and the sandbox helper contracts. rustc ≥ 1.82 enables wasm
+  features (reference-types, multivalue) that nearcore has rejected [conf:
+  med], so deployability is smoke-tested in M0, not first discovered in M6.
+- **Lockfile** (near-tests and sandbox). Seed each crate's lockfile with the
+  mirror's `Cargo.lock`, let Cargo add the missing entries once, commit the
+  result, and build with `--locked`. CI fails if any package present in both
+  lockfiles differs in version or checksum.
 - **`near-tests/`** (standalone `[workspace]`; CI only, needs crates.io):
-  - **Lockfile:** copy the mirror's `Cargo.lock` and build with `--locked`. CI
-    fails if `cargo tree -i` versions of near-sdk, near-sdk-macros, borsh or
-    serde_json differ from the mirror's.
   - **Universe:** 4 accounts and 4 real ed25519/secp256k1 keys.
   - **`tests/store_diff.rs`:** ST-4, SH-2, with persist and reload every step.
   - **`tests/shell.rs`:** SH-1, SH-3..8, ST-5, ST-6, RES-1 (computed),
@@ -638,15 +673,18 @@ formalver three-file pattern:
     - default `limit` set to 100;
     - `revoke_key` passes the signer;
     - `push_request` keyed by `count+1`;
-    - two maps sharing a prefix.
+    - two maps sharing a prefix;
+    - `request_view` sets `requested_at_block` from `timestamp_ns`.
 - **`tools/scripts/wasm-surface.sh`:** the exports (SH-11) and imports (SH-12)
-  of the reproducible wasm, diffed against `wasm-surface.expected`.
+  of the `cargo near build non-reproducible-wasm` output, in the near-unit job
+  (M3). It is repeated on the reproducible wasm in the sandbox job once OQ-2
+  lands (M6).
 - **`sandbox/`** (standalone, near-workspaces, same lockfile rule):
   - **Tests:** RT-*, SH-9, SH-10, RES-1..3.
   - **Contracts in `res/`:** `relay/`, `selfacct/` and `spoofer/`, about 30
     lines each.
 - **`deploy-checks/check_deployment.sh <net>`:** DEP-1, VER-2, VER-3. These
-  need an archival RPC.
+  need an archival RPC and an indexer (DEP-1.4, VER-3).
 
 ---
 
@@ -662,22 +700,27 @@ formalver three-file pattern:
 | *Verus model ↔ `spec.rs` (path B only)* | shared IDs plus paired review (not mechanical) |
 | real core ↔ shell | ST-2..4, SH-* (host); RT-TRACE (wasm) |
 | shell ↔ on-chain code | RT-CODEHASH, DEP-1, VER-2, VER-3 |
+| proof ↔ signing keys | VER-8 |
 
 **Vacuity guards:** TR-5, covers, both mutant suites (including the
-must-survive pair), the canary, and the `MemStore` satisfiability witness
-(path A).
+must-survive pair), the Kani and Verus canaries, and the `MemStore`
+satisfiability witness (path A).
 
 **Staleness:**
 - **Every PR:** `check-pin.sh near-approval` checks gitlink = `pinned_commit`
   and recomputes `[source_hashes]`. Every model, spec and harness file header
   carries the upstream path, pin, sha256 of the mirrored file, the items it
   covers, its simplifications and its trusted items, following
-  `sanitizer.rs`.
+  `sanitizer.rs`. `check-pin.sh` also greps that `cfg(feature = "borsh")` in
+  the core gates only `use` and `derive` items (ASM-COMPILE).
 - **Pin bump:** a changed file flips every property whose `depends_on` lists
-  it to `stale`:
-  - `core/src/lib.rs` → TX, INV, LEM, HIST, TR, RD, ROB, ST-1..3;
-  - `contract/src/lib.rs` → ST-4..6, SH, RES;
-  - `Cargo.lock` → RT, SH-9..11, ASM-SDK/STORE/LIMITS checks.
+  it to `stale`. The `depends_on` lists in `status.toml` are authoritative. In
+  outline:
+  - `core/src/lib.rs` → TX, INV, LEM, HIST, TR, RD, ROB, ST;
+  - `core/src/tests.rs` → the planning claims about upstream tests and mutants
+    (F-14);
+  - `contract/src/lib.rs` → ST-3..6, SH, RES, RT;
+  - `Cargo.lock` → ST-4..6, SH, RES, RT, and the ASM-SDK/STORE/LIMITS checks.
 
   The bump PR re-runs everything. Path B statuses return only after re-review
   against the diff.
@@ -698,7 +741,7 @@ formalver/
 ├── .gitmodules         # + projects/near-approval/source-mirror (shallow)
 ├── .github/workflows/near-approval.yml
 ├── tools/
-│   ├── versions.env    # KANI, VERUS, SCRYER, CARGO_NEAR, NEAR_SANDBOX
+│   ├── versions.env    # KANI, VERUS, SCRYER, CARGO_NEAR, NEAR_SANDBOX, RUST_TOOLCHAIN
 │   └── scripts/        # run-prolog.sh (fixed), run-verus.sh (fixed), run-kani.sh,
 │                       # check-pin.sh, check-status.sh, check-hygiene.sh, wasm-surface.sh
 └── projects/near-approval/
@@ -707,7 +750,8 @@ formalver/
     ├── prolog/{requirements,model,verification,extracted,tests}/
     ├── conformance/traces/            # generated, checked in
     ├── kani/{src,tests,mutants,kani-stub}/
-    ├── verus/                         # M5: twin + erasure check (A) or machine (B); TRUSTED.toml; canary/
+    ├── verus/                         # M5: twin + erasure check + REWRITES.toml (A) or machine (B);
+    │                                  # TRUSTED.toml; canary/
     ├── near-tests/{src,tests,mutants}/
     ├── sandbox/{res,tests}/
     └── deploy-checks/check_deployment.sh
@@ -723,17 +767,31 @@ The ironclaw format is kept. **Status values** are unchanged:
 | Key | Meaning |
 |---|---|
 | `id` | catalogue ID |
-| `evidence` | `proof | model-proof | bounded-proof | test | review | check` |
+| `evidence` | the target evidence: `proof | model-proof | bounded-proof | model-check | test | review | check` |
 | `layer` | primary technique: `kani | plain | verus | prolog | unit | difftest | sandbox | wasm-check | review | deploy-check` |
 | `cross` | cross-check techniques |
-| `harness` | the `// PROP:` tag must appear in it before the property is `verified*` |
+| `harness` | the `// PROP:` tag must appear in it before the property leaves `unverified` |
 | `depends_on` | paths relative to `upstream_path` |
 | `assumptions` | ASM IDs |
 | `blocked_by` | OQ ID |
 
-A Kani result is at most `verified-with-assumptions` with
-`evidence = "bounded-proof"`. Only path-A Verus yields
-`verified` / `evidence = "proof"`.
+**Allowed evidence per layer:**
+- `kani` → `bounded-proof`
+- `plain` → `test`
+- `verus` → `proof` or `model-proof`
+- `prolog` → `check`, `model-check` or `test`
+- `unit`, `difftest` → `test`
+- `sandbox` → `test` or `check`
+- `wasm-check`, `deploy-check` → `check`
+- `review` → `review`
+
+**Status ceilings:**
+- A Kani result is at most `verified-with-assumptions` with
+  `evidence = "bounded-proof"`.
+- Only path-A Verus yields `evidence = "proof"`. Its status stays
+  `verified-with-assumptions` while `TRUSTED.toml` or the property's
+  `assumptions` are non-empty, per `docs/architecture.md`.
+- No K or V property leaves `unverified` without `[review] spec_reviewer`.
 
 **Tables:**
 - `[tools]`
@@ -748,18 +806,18 @@ A Kani result is at most `verified-with-assumptions` with
 ## 13. Milestones
 
 Effort is in engineer-days, for someone with Kani and Verus experience. M1 and
-M3 run in parallel.
+M3 run in parallel. Each milestone ends by updating the statuses it lists.
 
 | # | Deliverable | Acceptance | Effort |
 |---|---|---|---|
-| **M0** | Bootstrap and gates | • Submodule at the provisional pin, `[source_hashes]` filled. <br>• Root `exclude` added; a clone without submodules still builds ironclaw. <br>• F-10 fixes: `run-prolog.sh` exits non-zero on failure; `run-verus.sh` passes `--cfg 'feature="verus"'` and enforces the floor; `check-pin.sh` works and reports the ironclaw drift (OQ-6 decided). <br>• CI skeleton green; canary fails as expected. <br>• **F-13 gate:** `cargo test -p approval-contract` and `cargo near build non-reproducible-wasm` pass in CI. <br>• OQ-1..5 raised upstream. | 1–2 |
-| **M1** | Kani step, raw, read and BMC harnesses on the real core | • Plain mode passes in CI. <br>• Under Kani (unwinding assertions on), `h_init`, `h_step_*`, `h_raw_*`, `h_read` and `h_bmc_from_init` pass, and every cover in §6.2 is satisfied. <br>• Each harness takes < 20 min, or the §6.3 ladder is applied and recorded. <br>• All non-ghost mutants are killed and the 2 equivalent ones survive. <br>• `inv` is numbered per the catalogue and every K property has a PROP tag. <br>• TX, INV, LEM, HIST, TR-1..3/6 and RD-1/2/5/7 become `verified-with-assumptions` (`bounded-proof`). <br>• Spec reviewer sign-off recorded. | 4–6 |
-| **M2** | Ghost-store harnesses | • `h_page_arith`, `h_proto_*`, `h_count_*`, `h_refine_*`, `h_store_laws_*` and `h_action_len` pass. <br>• LogFull covers satisfied; all mutants killed. <br>• RD-4 plain check passes (log ≤ 250; `l ∈ {1, 2, 99, 100, 101, 200}`). | 1–2 |
-| **M3** | near-sdk shell and store | • `store_diff.rs` (10k × 50, with reload) passes. <br>• `shell.rs` passes. <br>• All shell mutants are killed. <br>• Golden Borsh bytes are committed. <br>• `wasm-surface.sh` diff is clean. <br>• `api_facts.pl` generated. | 2–3 |
-| **M4** | Prolog | • `run-prolog.sh near-approval` exits 0 (strict). <br>• C-1..10 pass, or each failure has a recorded decision (C-4/F-8). <br>• MC-1 at depth 6 meets the §5.11 criteria in < 5 min, and `mc1_state_floor` is recorded. <br>• Traces checked in; MC-2 replay passes on the core and `spec.rs`. <br>• `code_facts.pl` regeneration shows no diff. | 3–4 |
-| **M5** | Verus (2-day spike, then path A or B) | • Spike decision recorded. <br>• Path A: twin verifies with refinement `ensures` for every public core fn and `MemStore`; erasure check passes; `TRUSTED.toml` holds only ASM-IDENT and ASM-STRLEN; core properties become `verified` / `proof`. <br>• Path B: all lemmas in §7 are proved under the hygiene gate; spec mutants each break a lemma; status becomes `verified-with-assumptions` / `model-proof` + ASM-MODEL. | 9–15 |
-| **M6** | Sandbox | **Requires F-12.** <br>• RT-* (including RT-TRACE and RT-BATCH), SH-9 and SH-10 pass on a pinned neard with the reproducible wasm. <br>• RES measured, with thresholds and both hashes recorded. <br>• RT-METATX outcome documented. <br>• `[assumptions]` statuses filled from observations. <br>• `cargo expand` review of SH-9/RD-6 signed off. | 3–5 |
-| **M7** | Deployment and automation | • A testnet deployment with the DEP-1 lock batch; `check_deployment.sh` passes; `[deployment.testnet]` filled. <br>• `verifier_rules.pl` encodes VER-1..7, and RT-SPOOF demonstrates them. <br>• Every CI job live; pin-bump procedure documented; `docs/architecture.md` gains the Kani, shell and deployment layers. | 2 |
+| **M0** | Bootstrap and gates | • **OQ-7 resolved:** a deploy key or token lets the `pin` job check out the private submodule. <br>• Submodule at the provisional pin, `[source_hashes]` filled. <br>• Root `exclude` added; a clone without submodules still builds ironclaw. <br>• F-10 fixes: `run-prolog.sh` runs `-g "(catch(run_tests,E,(write(E),nl,halt(2))) -> halt(0) ; halt(1))" </dev/null` without `\|\| true` and exits non-zero if any file fails; `run-verus.sh` passes `--cfg 'feature="verus"'` and enforces the floor; `check-pin.sh` works and reports the ironclaw drift (OQ-6 decided). <br>• `tools/versions.env` pins every tool and `RUST_TOOLCHAIN`. CI skeleton green. <br>• **F-13 gate:** `cargo test -p approval-contract` passes, and `cargo near build non-reproducible-wasm` with `RUST_TOOLCHAIN` produces a wasm that deploys to the pinned near-sandbox and answers `get_owner` after `new`. <br>• OQ-1..5 raised upstream; OQ-3 answered. | 1–2 |
+| **M1** | Kani step, raw, read and BMC harnesses on the real core | • Plain mode passes in CI. <br>• Under Kani (unwinding assertions on), `h_init`, `h_step_*`, `h_raw_*`, `h_read`, `h_bmc_from_init` pass and `h_canary` fails, with every cover in §6.2 satisfied. <br>• Each harness takes < 20 min, or the §6.3 ladder is applied and recorded. <br>• Every §6.4 mutant assigned to an M1 harness is killed, and the 2 equivalent ones survive. <br>• Every K property has a PROP tag. <br>• Spec reviewer sign-off recorded. <br>• **Statuses:** TX, INV-1..10, LEM, HIST, TR-1..4, TR-6, RD-1/2/5/7 and ROB-1 become `verified-with-assumptions` (`bounded-proof`). | 4–6 |
+| **M2** | Ghost-store harnesses | • `h_page_arith`, `h_proto_*`, `h_count_*`, `h_refine_*`, `h_store_laws_*` and `h_action_len` pass, with their covers satisfied. <br>• Every §6.4 mutant except the must-survive pair is killed by Kani and by plain mode. <br>• RD-4 plain check passes (log ≤ 250; `l ∈ {1, 2, 99, 100, 101, 200}`). <br>• **Statuses:** INV-0, TR-5, RD-3, RD-4, RD-6, ROB-2..4 and ST-1..3 updated. | 1–2 |
+| **M3** | near-sdk shell and store | • `store_diff.rs` (10k × 50, with reload) passes. <br>• `shell.rs` passes. <br>• All shell mutants are killed. <br>• Golden Borsh bytes are committed. <br>• `wasm-surface.sh` diff on the non-reproducible build is clean. <br>• `api_facts.pl` generated. <br>• **Statuses:** ST-4..6, SH-1..8, SH-11, SH-12, RES-1 and RES-2 updated. | 2–3 |
+| **M4** | Prolog | • `run-prolog.sh near-approval` exits 0 (strict). <br>• C-1..10 pass, or each failure has a recorded decision (C-4/F-8). <br>• MC-1 and MC-1s meet the §5.11 criteria, each in < 5 min, and `mc1_state_floor` is recorded. <br>• Traces checked in; MC-2 replay passes on the core and `spec.rs`. <br>• `code_facts.pl` regeneration shows no diff. <br>• **Statuses:** C-1..10, MC-1 and MC-2 updated. | 3–4 |
+| **M5** | Verus (2-day spike, then path A or B) | • Spike decision recorded. <br>• `verus/canary/false_lemma.rs` fails. <br>• **Path A:** the twin verifies with refinement `ensures` for every public core fn and `MemStore`; the erasure check passes; every `REWRITES.toml` entry has a passing Kani equivalence harness. Core properties become `verified-with-assumptions` / `proof`, with trusted ASM-IDENT, ASM-STRLEN and listed std specs. <br>• **Path B:** all lemmas in §7 are proved under the hygiene gate; spec mutants each break a lemma. Status becomes `verified-with-assumptions` / `model-proof` + ASM-MODEL. | 9–15 |
+| **M6** | Sandbox | **Requires F-12.** <br>• RT-* (including RT-TRACE and RT-BATCH), SH-9 and SH-10 pass on a pinned neard with the reproducible wasm. <br>• `wasm-surface.sh` diff on the reproducible build is clean. <br>• RES measured, with thresholds and both hashes recorded. <br>• RT-METATX outcome documented. <br>• `[assumptions]` statuses filled from observations. <br>• `cargo expand` review of SH-9/RD-6 signed off. <br>• **Statuses:** RT-*, SH-9, SH-10 and RES-3 updated. | 3–5 |
+| **M7** | Deployment and automation | • A testnet deployment with the DEP-1 lock batch and at least one agent key and one approver key registered; `check_deployment.sh` passes; `[deployment.testnet]` filled. <br>• `verifier_rules.pl` encodes VER-1..8; RT-SPOOF and a VER-8 check against the testnet proof demonstrate them. <br>• Every CI job live; pin-bump procedure documented; `docs/architecture.md` gains the Kani, shell and deployment layers. <br>• **Statuses:** DEP-1 and VER-1..8 updated. | 2 |
 
 **Total: M0–M7 about 25–39 days.** Kani precedes Verus because it checks the
 deployed code itself and buys the most assurance per day.
@@ -768,20 +826,20 @@ deployed code itself and buys the most assurance per day.
 
 | Job | Trigger | Fails on |
 |---|---|---|
-| `pin` | PR, push | gitlink ≠ pin; hash drift. Every other job depends on it. |
-| `plain` | PR, push | any failure; drift in generated facts or traces |
-| `kani` | PR touching near-approval; nightly (60 min timeout, matrix by harness group) | any failure; any unsatisfied cover |
+| `pin` | PR, push | gitlink ≠ pin; hash drift; borsh feature gating (ASM-COMPILE). Every other job depends on it. |
+| `plain` | PR, push | any failure; drift in generated `code_facts.pl` |
+| `kani` | PR touching near-approval; nightly (60 min timeout, matrix by harness group) | any failure; any unsatisfied cover; `h_canary` passing |
 | `mutants` | weekly | a core or shell mutant survives; an equivalent mutant is killed |
-| `prolog` | PR, push | any failure; MC-1 state count below the floor |
+| `prolog` | PR, push | any failure; drift in `conformance/traces`; MC-1/MC-1s state count below the floor |
 | `verus` | PR, push (from M5) | any error; count below the floor; canary verifies; a spec mutant verifies; hygiene |
-| `near-unit` | PR, push | any failure; lockfile version mismatch |
-| `sandbox` | nightly; submodule bump; manual | any failure; export or import diff; threshold exceeded |
-| `status-lint` | PR | ID without artifact or PROP tag; `verified*` without a passing harness in this run; `evidence` inconsistent with `layer`; `verified*` K/V without spec sign-off |
+| `near-unit` | PR, push | any failure; lockfile version mismatch; export or import diff (non-reproducible build) |
+| `sandbox` | nightly; submodule bump; manual (from M6) | any failure; export or import diff (reproducible build); threshold exceeded |
+| `status-lint` | PR | a non-`unverified` ID without its artifact or PROP tag; `verified*` without a passing harness in this run; `evidence` not allowed for its `layer` (§12); a K/V property past `unverified` without spec sign-off |
 | `upstream-watch` | weekly | none; opens an issue |
 | `deploy-check` | manual; weekly | any DEP or VER violation |
 
 trust-framework is private, so CI needs a deploy key or fine-grained token for
-the submodule (OQ-7).
+the submodule (OQ-7, resolved in M0).
 
 ## 15. Risks
 
@@ -792,6 +850,7 @@ the submodule (OQ-7).
 | Spec bugs (ASM-SPEC) | Three independent semantics with replay; mutants; traceability; human spec sign-off |
 | Runtime assumptions wrong (META, LIMITS, logs on failure) | Levelled assumptions; M6 tests; conditional statements |
 | Upstream churn (the contract is new) | Provisional pin; per-file staleness; weekly watch |
+| Point-in-time deployment checks miss a later key or code change | DEP-1 lock at deploy; VER-3 since `b₀`; VER-8 per proof; NEP-591 global-contract check |
 | Verus can't handle the real core | M5 path B; Tier 1 and Tier 2 keep full value without M5 |
 | Tool pins conflict (Verus rustc vs cargo-near rustc) | Path A adoption gate; the twin is the steady state |
 | Everything except plain mode needs network access | CI-only jobs; plain mode works offline |
