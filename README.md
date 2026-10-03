@@ -1,6 +1,13 @@
 # formalver
 Formal Verification of repositories, starting with IronClaw
 
+## Projects
+
+| Project | Target | Plan | Status |
+|---|---|---|---|
+| ironclaw | [nearai/ironclaw](https://github.com/nearai/ironclaw) safety modules | [strategy](projects/ironclaw/strategy.md) | [status](projects/ironclaw/status.toml) |
+| near-approval | [trust-framework](https://github.com/difflabai/trust-framework) `contracts/approval` (NEAR action-approval contract) | [strategy](projects/near-approval/strategy.md) | [status](projects/near-approval/status.toml) (plan only) |
+
 ## Running the Scaffolded Proofs
 
 ### Verus (Rust code verification)
