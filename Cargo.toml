@@ -2,4 +2,10 @@
 members = [
     "projects/ironclaw/verus",
 ]
+# Standalone crates and the upstream mirror stay out of the root workspace:
+# their in-tree path dependencies would otherwise become members and pull borsh.
+exclude = [
+    "projects/near-approval/source-mirror",
+    "projects/near-approval/kani",
+]
 resolver = "2"

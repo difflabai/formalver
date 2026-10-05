@@ -1,0 +1,12 @@
+# killed-by: h_read
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -464,7 +464,7 @@
+     let request = store.request(request_id)?;
+     Some(if request.approval.is_some() {
+         RequestStatus::Approved
+-    } else if live_agent_registration(store, &request).is_some() {
++    } else if true {
+         RequestStatus::Pending
+     } else {
+         RequestStatus::Void

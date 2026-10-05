@@ -1,0 +1,11 @@
+# killed-by: h_step_approve
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -449,7 +449,6 @@
+         approved_at: now,
+     });
+     agent.pending = agent.pending.saturating_sub(1);
+-    store.insert_principal(request.agent_key.clone(), agent);
+     store.replace_request(request);
+     store.push_approval(request_id);
+     Ok(proof)

@@ -1,0 +1,11 @@
+# killed-by: h_step_approve
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -414,6 +414,7 @@
+     S: Store<A, K>,
+ {
+     authenticate(store, caller, Role::Approver)?;
++    store.push_approval(request_id);
+     let mut request = store
+         .request(request_id)
+         .ok_or(ApprovalError::RequestNotFound)?;

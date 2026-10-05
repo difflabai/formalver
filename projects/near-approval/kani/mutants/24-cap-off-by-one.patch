@@ -1,0 +1,12 @@
+# killed-by: h_raw_request
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -373,7 +373,7 @@
+     if action.len() > MAX_ACTION_LEN {
+         return Err(ApprovalError::ActionTooLong);
+     }
+-    if principal.pending >= MAX_PENDING_PER_KEY {
++    if principal.pending > MAX_PENDING_PER_KEY {
+         return Err(ApprovalError::TooManyPending);
+     }
+     let id = store.request_count();

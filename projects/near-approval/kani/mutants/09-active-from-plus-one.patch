@@ -1,0 +1,12 @@
+# killed-by: h_step_add
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -270,7 +270,7 @@
+     let principal = Principal {
+         account_id,
+         role,
+-        active_from: store.request_count(),
++        active_from: store.request_count() + 1,
+         pending: 0,
+     };
+     store.insert_principal(key, principal);

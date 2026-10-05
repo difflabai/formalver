@@ -1,0 +1,13 @@
+# killed-by: h_step_request
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -328,9 +328,6 @@
+     if principal.role != role {
+         return Err(ApprovalError::WrongRole);
+     }
+-    if principal.account_id != caller.signer {
+-        return Err(ApprovalError::KeyAccountMismatch);
+-    }
+     Ok(principal)
+ }
+ 

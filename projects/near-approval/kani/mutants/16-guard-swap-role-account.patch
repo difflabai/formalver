@@ -1,0 +1,19 @@
+# killed-by: h_step_request
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -325,12 +325,12 @@
+     let principal = store
+         .principal(&caller.signer_key)
+         .ok_or(ApprovalError::UnknownKey)?;
+-    if principal.role != role {
+-        return Err(ApprovalError::WrongRole);
+-    }
+     if principal.account_id != caller.signer {
+         return Err(ApprovalError::KeyAccountMismatch);
+     }
++    if principal.role != role {
++        return Err(ApprovalError::WrongRole);
++    }
+     Ok(principal)
+ }
+ 

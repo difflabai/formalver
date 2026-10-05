@@ -1,0 +1,13 @@
+# killed-by: h_step_approve
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -424,9 +424,6 @@
+     if request.action != action {
+         return Err(ApprovalError::ActionMismatch);
+     }
+-    if caller.signer == request.agent_account_id {
+-        return Err(ApprovalError::SelfApproval);
+-    }
+     let approval_index = store.approval_count();
+     if approval_index == u64::MAX {
+         return Err(ApprovalError::LogFull);

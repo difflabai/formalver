@@ -1,0 +1,12 @@
+# killed-by: h_step_approve
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -438,7 +438,7 @@
+         agent_account_id: request.agent_account_id.clone(),
+         agent_key: request.agent_key.clone(),
+         requested_at: request.requested_at,
+-        approver_account_id: caller.signer.clone(),
++        approver_account_id: request.agent_account_id.clone(),
+         approver_key: caller.signer_key.clone(),
+         approved_at: now,
+     };
