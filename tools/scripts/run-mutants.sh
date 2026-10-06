@@ -52,7 +52,13 @@ for p in "$proj"/kani/mutants/$glob.patch; do
   if [ $use_kani -eq 1 ]; then
     kres=survived
     for h in $harnesses; do
-      if ! (cd "$work/tree/kani" && timeout "${KANI_TIMEOUT:-3600}" $kani $flags --harness "proofs::$h" --exact >"$work/kani-$h.log" 2>&1); then
+      (cd "$work/tree/kani" && timeout "${KANI_TIMEOUT:-3600}" $kani $flags --harness "proofs::$h" --exact >"$work/kani-$h.log" 2>&1)
+      rc=$?
+      [ -n "${KEEP_LOGS:-}" ] && cp "$work/kani-$h.log" "$KEEP_LOGS/$name.$h.log"
+      # Only a failed property kills; running out of time or memory is no verdict.
+      if [ $rc -eq 124 ] || grep -q 'run out of memory' "$work/kani-$h.log"; then
+        kres=ERROR; break
+      elif [ $rc -ne 0 ]; then
         kres=killed; break
       fi
     done
