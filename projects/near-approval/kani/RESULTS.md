@@ -57,7 +57,15 @@ raw states violate it. The script therefore checks survival with the raw
 harnesses skipped.
 
 <!-- KANI-MUTANTS -->
-Under Kani: not yet run (each mutant against its listed harness).
+Under Kani (`run-mutants.sh near-approval --kani`, each mutant against its
+`killed-by` harness; a run that times out or runs out of memory counts as
+no verdict, not a kill): **24/24 killed, 2/2 equivalent mutants survive**
+`h_step_approve` and `h_read` (which carries LEM-4, the proof that they are
+equivalent under `Inv`).
+
+Mutant 05 (empty-action check dropped) was first labelled for
+`h_step_request` and survived there, correctly: that instance never passes
+`""`. It is relabelled to `h_step_request_empty`, which kills it.
 <!-- /KANI-MUTANTS -->
 
 ## Deviations from strategy.md section 6, and why
