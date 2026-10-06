@@ -465,13 +465,76 @@ pub fn raw_approve(src: &mut impl Src) {
 // h_read
 // ---------------------------------------------------------------------------
 
+/// `h_read` checks the point queries, `h_read_page` the page contents and
+/// `h_read_find` that paged proofs are findable (cost fallback 1: split
+/// further). Plain mode runs all three.
+pub const READ_POINT: u8 = 1;
+pub const READ_PAGE: u8 = 2;
+pub const READ_FIND: u8 = 4;
+
 pub fn read(src: &mut impl Src) {
     let Some((s, _)) = inv_state(src) else { return };
+    let part = src.part();
+    if part & READ_POINT != 0 {
+        read_point(src, &s);
+    }
+    if part & (READ_PAGE | READ_FIND) != 0 {
+        read_page(src, &s, part);
+    }
+}
+
+fn read_point(src: &mut impl Src, s: &S) {
     let id = if src.hint(80) {
         src.below(5) as u64
     } else {
         src.u64()
     };
+
+    // PROP: RD-1
+    let got = core_approval(s, id);
+    let want = r_get(s, id).and_then(spec_proof);
+    assert!(got == want, "RD-1 approval = proof(R[i]) iff approved");
+    if let Some(p) = &got {
+        assert!(
+            s.log(p.approval_index as usize) == id,
+            "RD-1 L[approval_index] = i"
+        );
+    }
+
+    // PROP: RD-7
+    let st = request_status(s, id);
+    let want_st = r_get(s, id).map(|r| match status(s, r) {
+        St::Pending => RequestStatus::Pending,
+        St::Approved => RequestStatus::Approved,
+        St::Void => RequestStatus::Void,
+    });
+    assert!(st == want_st, "RD-7 request_status");
+
+    // PROP: RD-5
+    if let Some(p) = got {
+        let one = approvals(s, p.approval_index, 1);
+        assert!(
+            one.len() == 1 && one[0] == p,
+            "RD-5 proof findable by approval_index"
+        );
+    }
+
+    // PROP: LEM-4
+    let mut i = 0;
+    while i < s.nr() {
+        let r = &s.req(i);
+        let reduced = match p_get(s, &r.agent_key) {
+            Some(p) => p.active_from <= i as u64,
+            None => false,
+        };
+        assert!(live(s, r) == reduced, "LEM-4 liveness is active_from <= i");
+        i += 1;
+    }
+
+    cover!(st == Some(RequestStatus::Void), "read: void status");
+}
+
+fn read_page(src: &mut impl Src, s: &S, part: u8) {
     let from = if src.hint(80) {
         src.below(5) as u64
     } else {
@@ -483,29 +546,19 @@ pub fn read(src: &mut impl Src) {
         src.u64()
     };
 
-    // PROP: RD-1
-    let got = core_approval(&s, id);
-    let want = r_get(&s, id).and_then(spec_proof);
-    assert!(got == want, "RD-1 approval = proof(R[i]) iff approved");
-    if let Some(p) = &got {
-        assert!(
-            s.log(p.approval_index as usize) == id,
-            "RD-1 L[approval_index] = i"
-        );
+    let page = approvals(s, from, limit);
+    if part & READ_PAGE != 0 {
+        page_exact(s, from, limit, &page);
     }
+    if part & READ_FIND != 0 {
+        page_findable(s, &page);
+    }
+    cover!(!page.is_empty(), "read: non-empty page");
+}
 
-    // PROP: RD-7
-    let st = request_status(&s, id);
-    let want_st = r_get(&s, id).map(|r| match status(&s, r) {
-        St::Pending => RequestStatus::Pending,
-        St::Approved => RequestStatus::Approved,
-        St::Void => RequestStatus::Void,
-    });
-    assert!(st == want_st, "RD-7 request_status");
-
+fn page_exact(s: &S, from: u64, limit: u64, page: &[Proof]) {
     // PROP: RD-2
-    let page = approvals(&s, from, limit);
-    let end = from.saturating_add(limit.min(MAX_PAGE_SIZE)).min(n_l(&s));
+    let end = from.saturating_add(limit.min(MAX_PAGE_SIZE)).min(n_l(s));
     assert!(
         page.len() as u64 == end.saturating_sub(from),
         "RD-2 page length e - f"
@@ -515,45 +568,53 @@ pub fn read(src: &mut impl Src) {
     while j < end {
         let i = s.log(j as usize);
         assert!(
-            Some(&page[n]) == spec_proof(&s.req(i as usize)).as_ref(),
+            proof_of(&page[n], s, i),
             "RD-2 page entry = proof(R[L[j]])"
         );
         j += 1;
         n += 1;
     }
 
+}
+
+fn page_findable(s: &S, page: &[Proof]) {
     // PROP: RD-5
     let mut n = 0;
     while n < page.len() {
         let p = &page[n];
         assert!(
-            core_approval(&s, p.request_id).as_ref() == Some(p),
+            core_approval(s, p.request_id).as_ref() == Some(p),
             "RD-5 paged proof findable by request_id"
         );
         n += 1;
     }
-    if let Some(p) = got {
-        let one = approvals(&s, p.approval_index, 1);
-        assert!(
-            one.len() == 1 && one[0] == p,
-            "RD-5 proof findable by approval_index"
-        );
-    }
+}
 
-    // PROP: LEM-4
-    let mut i = 0;
-    while i < s.nr() {
-        let r = &s.req(i);
-        let reduced = match p_get(&s, &r.agent_key) {
-            Some(p) => p.active_from <= i as u64,
-            None => false,
-        };
-        assert!(live(&s, r) == reduced, "LEM-4 liveness is active_from <= i");
-        i += 1;
+/// `p == proof(R[i])`, field by field over concrete slots: no clone, and no
+/// `String` read through a symbolic index.
+fn proof_of(p: &Proof, s: &S, i: u64) -> bool {
+    let mut k = 0;
+    while k < crate::store::CAP_R {
+        if k < s.nr() && i == k as u64 {
+            let r = s.req(k);
+            return match &r.approval {
+                Some(x) => {
+                    p.approval_index == x.approval_index
+                        && p.request_id == r.id
+                        && p.action == r.action
+                        && p.agent_account_id == r.agent_account_id
+                        && p.agent_key == r.agent_key
+                        && p.requested_at == r.requested_at
+                        && p.approver_account_id == x.approver_account_id
+                        && p.approver_key == x.approver_key
+                        && p.approved_at == x.approved_at
+                }
+                None => false,
+            };
+        }
+        k += 1;
     }
-
-    cover!(!page.is_empty(), "read: non-empty page");
-    cover!(st == Some(RequestStatus::Void), "read: void status");
+    false
 }
 
 // ---------------------------------------------------------------------------

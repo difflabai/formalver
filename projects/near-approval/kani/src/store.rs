@@ -167,11 +167,17 @@ impl Store<Acct, Key> for ArrStore {
     }
 
     fn request(&self, id: RequestId) -> Option<ActionRequest<Acct, Key>> {
-        if id < self.nr as u64 {
-            Some(self.r[id as usize].clone())
-        } else {
-            None
+        // A loop over concrete slots, not `self.r[id]`: cloning through a
+        // symbolic index makes CBMC copy each `String` through a pointer
+        // that may alias every slot, which exhausted memory in `h_read`.
+        let mut i = 0;
+        while i < CAP_R {
+            if i < self.nr && id == i as u64 {
+                return Some(self.r[i].clone());
+            }
+            i += 1;
         }
+        None
     }
 
     fn push_request(&mut self, request: ActionRequest<Acct, Key>) {

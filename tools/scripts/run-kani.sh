@@ -3,9 +3,10 @@
 # strategy.md section 6.2 requires: every harness verifies with unwinding
 # assertions on, every cover is SATISFIED, and h_canary FAILS.
 #
-# A harness split into instances (h_step_request and h_step_request_empty)
-# forms a family: a cover must be SATISFIED in at least one instance of its
-# family, and may be UNREACHABLE in the others.
+# A harness split into instances (h_step_request and h_step_request_empty;
+# h_read, h_read_page and h_read_find) forms a family: a cover must be
+# SATISFIED in at least one instance of its family, and may be UNREACHABLE
+# or UNSATISFIABLE in the others.
 #
 # usage: tools/scripts/run-kani.sh near-approval [harness...]
 # env:   KANI (default: cargo kani), KANI_TIMEOUT seconds per harness (default 3600),
@@ -40,7 +41,7 @@ for h in "$@"; do
   rc=$?
   secs=$(( $(date +%s) - start ))
   covers=$(grep -oE '[0-9]+ of [0-9]+ cover properties satisfied' "$log" | tail -1)
-  family=${h%_empty}
+  family=${h%_empty}; family=${family%_page}; family=${family%_find}
   awk -v fam="$family" '/^Check [0-9]+: .*\.cover\./ {c=1; next}
        c && /Status:/ {st=$NF; next}
        c && /Description:/ {sub(/.*Description: /, ""); print fam "\t" $0 "\t" st; c=0}' \

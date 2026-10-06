@@ -74,13 +74,28 @@ fn h_raw_approve() {
 #[kani::proof]
 #[kani::unwind(5)]
 fn h_read() {
-    checks::read(&mut Sym(None, checks::PART_ALL, false));
+    checks::read(&mut Sym(None, checks::READ_POINT, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_read_page() {
+    checks::read(&mut Sym(None, checks::READ_PAGE, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_read_find() {
+    checks::read(&mut Sym(None, checks::READ_FIND, false));
 }
 
 #[kani::proof]
 #[kani::unwind(8)]
 fn h_bmc_from_init() {
-    checks::bmc_from_init(&mut Sym(None, checks::PART_ALL, false));
+    // Ghost only: TX, HIST and INV are proven for one step from any Inv
+    // state by h_step_* (and Init is Inv by h_init), so re-checking them
+    // at every depth here adds cost and no coverage.
+    checks::bmc_from_init(&mut Sym(None, 0, false));
 }
 
 /// Must report FAILED (run-kani.sh inverts it).
