@@ -47,8 +47,17 @@ for h in "$@"; do
        c && /Description:/ {sub(/.*Description: /, ""); print fam "\t" $0 "\t" st; c=0}' \
     "$log" >>"$covers_all"
   if [ "$h" = h_canary ]; then
-    if grep -q 'VERIFICATION:- FAILED' "$log" && grep -q 'canary' "$log"; then
-      result=ok; else result=CANARY-PASSED; fail=1; fi
+    # It must fail on its own assertion and nothing else; failing for any
+    # other reason (an unwinding assertion, a panic in gen) says nothing.
+    failed=$(grep '^Failed Checks:' "$log" | sort -u)
+    if grep -q 'VERIFICATION:- FAILED' "$log" &&
+       [ "$failed" = 'Failed Checks: "canary: no approval is ever recorded"' ]; then
+      result=ok
+    elif grep -q 'VERIFICATION:- SUCCESSFUL' "$log"; then
+      result=CANARY-PASSED; fail=1
+    else
+      result=CANARY-OTHER; fail=1
+    fi
   elif [ $rc -eq 124 ]; then
     result=TIMEOUT; fail=1
   elif grep -q 'VERIFICATION:- SUCCESSFUL' "$log"; then

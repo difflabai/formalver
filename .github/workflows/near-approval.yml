@@ -31,7 +31,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: near-approval-${{ github.ref }}
+  # Scheduled runs get their own group so a push or the other schedule
+  # does not cancel them.
+  group: near-approval-${{ github.ref }}-${{ github.event_name }}-${{ github.event.schedule }}
   cancel-in-progress: true
 
 env:
@@ -86,7 +88,10 @@ jobs:
     # variable to a larger runner label (and KANI_SWAP_GB to 0) to avoid
     # relying on swap.
     runs-on: ${{ vars.KANI_RUNNER || 'ubuntu-latest' }}
-    timeout-minutes: 120
+    # A group runs up to 3 harnesses of KANI_TIMEOUT (60 min) each.
+    timeout-minutes: 200
+    env:
+      KANI_SWAP_GB: ${{ vars.KANI_SWAP_GB || '16' }}
     strategy:
       fail-fast: false
       matrix:
@@ -124,14 +129,13 @@ jobs:
         run: echo "::notice::runner has $(nproc) CPUs and $(free -m | awk '/^Mem:/{print $2}') MB memory"
       - name: Swap (CBMC peaks at 6.5 to 9.5 GB on the step harnesses)
         if: env.KANI_SWAP_GB != '0'
-        env:
-          KANI_SWAP_GB: ${{ vars.KANI_SWAP_GB || '16' }}
         run: |
           # Free preinstalled SDKs this job does not use, then size the swap
           # file to leave 6 GB of disk for the build and logs.
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
           avail=$(df --output=avail -BG / | tail -1 | tr -dc 0-9)
           gb=$(( KANI_SWAP_GB < avail - 6 ? KANI_SWAP_GB : avail - 6 ))
+          if [ "$gb" -lt 1 ]; then echo "::warning::no disk for swap (${avail} GB free)"; exit 0; fi
           sudo swapoff -a || true
           sudo fallocate -l "${gb}G" /kani.swap
           sudo chmod 600 /kani.swap
@@ -155,7 +159,10 @@ jobs:
     needs: pin
     if: github.event.schedule == '41 4 * * 0' || inputs.mutants
     runs-on: ${{ vars.KANI_RUNNER || 'ubuntu-latest' }}
+    # Up to 2 harnesses of KANI_TIMEOUT (60 min) each, plus builds.
     timeout-minutes: 150
+    env:
+      KANI_SWAP_GB: ${{ vars.KANI_SWAP_GB || '16' }}
     strategy:
       fail-fast: false
       matrix:
@@ -181,14 +188,13 @@ jobs:
           cargo kani setup
       - name: Swap (CBMC peaks at 6.5 to 9.5 GB on the step harnesses)
         if: env.KANI_SWAP_GB != '0'
-        env:
-          KANI_SWAP_GB: ${{ vars.KANI_SWAP_GB || '16' }}
         run: |
           # Free preinstalled SDKs this job does not use, then size the swap
           # file to leave 6 GB of disk for the build and logs.
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
           avail=$(df --output=avail -BG / | tail -1 | tr -dc 0-9)
           gb=$(( KANI_SWAP_GB < avail - 6 ? KANI_SWAP_GB : avail - 6 ))
+          if [ "$gb" -lt 1 ]; then echo "::warning::no disk for swap (${avail} GB free)"; exit 0; fi
           sudo swapoff -a || true
           sudo fallocate -l "${gb}G" /kani.swap
           sudo chmod 600 /kani.swap

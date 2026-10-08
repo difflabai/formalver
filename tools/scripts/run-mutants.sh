@@ -56,7 +56,8 @@ for p in "$proj"/kani/mutants/$glob.patch; do
       rc=$?
       [ -n "${KEEP_LOGS:-}" ] && cp "$work/kani-$h.log" "$KEEP_LOGS/$name.$h.log"
       # Only a failed property kills; running out of time or memory is no verdict.
-      if [ $rc -eq 124 ] || grep -q 'run out of memory' "$work/kani-$h.log"; then
+      # rc 137/143: CBMC or the job was killed (usually the OOM killer).
+      if [ $rc -eq 124 ] || [ $rc -eq 137 ] || [ $rc -eq 143 ] || grep -q 'run out of memory' "$work/kani-$h.log"; then
         kres=ERROR; break
       elif [ $rc -ne 0 ]; then
         kres=killed; break
