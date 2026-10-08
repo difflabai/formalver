@@ -81,9 +81,10 @@ jobs:
   kani:
     needs: pin
     if: github.event_name != 'schedule' || github.event.schedule == '17 3 * * *'
-    # The step harnesses peak near 10 GB in CBMC (RESULTS.md). Set the
-    # KANI_RUNNER repository variable to a larger runner if the default
-    # runner for this repository has less memory.
+    # CBMC peaks at 6.5 to 9.5 GB on the step harnesses; this repository's
+    # default runner has 2 CPUs and 7.9 GB. Set the KANI_RUNNER repository
+    # variable to a larger runner label (and KANI_SWAP_GB to 0) to avoid
+    # relying on swap.
     runs-on: ${{ vars.KANI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 120
     strategy:
@@ -121,6 +122,17 @@ jobs:
           "$cbmc_bin" --version | grep -q "^$CBMC" || { echo "CBMC is not $CBMC"; "$cbmc_bin" --version; exit 1; }
       - name: Runner size
         run: echo "::notice::runner has $(nproc) CPUs and $(free -m | awk '/^Mem:/{print $2}') MB memory"
+      - name: Swap (CBMC peaks at 6.5 to 9.5 GB on the step harnesses)
+        if: env.KANI_SWAP_GB != '0'
+        env:
+          KANI_SWAP_GB: ${{ vars.KANI_SWAP_GB || '24' }}
+        run: |
+          sudo swapoff -a || true
+          sudo fallocate -l "${KANI_SWAP_GB}G" /mnt/kani.swap
+          sudo chmod 600 /mnt/kani.swap
+          sudo mkswap /mnt/kani.swap >/dev/null
+          sudo swapon /mnt/kani.swap
+          free -m
       - name: Kani ${{ matrix.group }}
         env:
           KANI_TIMEOUT: "3600"
@@ -162,6 +174,17 @@ jobs:
           . tools/versions.env
           cargo install --locked kani-verifier --version "$KANI"
           cargo kani setup
+      - name: Swap (CBMC peaks at 6.5 to 9.5 GB on the step harnesses)
+        if: env.KANI_SWAP_GB != '0'
+        env:
+          KANI_SWAP_GB: ${{ vars.KANI_SWAP_GB || '24' }}
+        run: |
+          sudo swapoff -a || true
+          sudo fallocate -l "${KANI_SWAP_GB}G" /mnt/kani.swap
+          sudo chmod 600 /mnt/kani.swap
+          sudo mkswap /mnt/kani.swap >/dev/null
+          sudo swapon /mnt/kani.swap
+          free -m
       - name: Mutant ${{ matrix.mutant }} (plain mode and Kani)
         env:
           KANI_TIMEOUT: "3600"
