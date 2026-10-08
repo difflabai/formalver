@@ -79,6 +79,8 @@ jobs:
       - name: Plain mode (random source; testing, not proof)
         working-directory: projects/near-approval/kani
         run: cargo test --release --locked
+      - name: Mutant runner self-test
+        run: tools/scripts/test-run-mutants.sh
 
   kani:
     needs: pin

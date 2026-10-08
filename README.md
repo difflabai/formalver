@@ -50,7 +50,7 @@ from the pinned submodule. The same harness bodies run in two modes.
 git submodule update --init projects/near-approval/source-mirror   # private: needs trust-framework access
 
 # Plain mode: random tests, no Kani needed (not a proof)
-cd projects/near-approval/kani && cargo test --release
+(cd projects/near-approval/kani && cargo test --release)
 
 # Kani: install the pinned version (tools/versions.env), then run every harness
 cargo install --locked kani-verifier --version 0.68.0 && cargo kani setup

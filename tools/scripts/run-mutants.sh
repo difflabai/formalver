@@ -24,6 +24,31 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 export CARGO_TARGET_DIR="$work/target"
 
+# plain_verdict <rc> <log>: survived | killed | ERROR
+plain_verdict() {
+  if [ "$1" -eq 0 ] && grep -q '^test result: ok' "$2" && ! grep -q '^test result: FAILED' "$2"; then
+    echo survived
+  elif [ "$1" -ne 0 ] && grep -q '^test result: FAILED' "$2"; then
+    echo killed
+  else
+    echo ERROR
+  fi
+}
+
+# kani_verdict <rc> <log>: survived | killed | ERROR
+# rc 124: timeout; 137/143: killed by a signal (usually the OOM killer).
+kani_verdict() {
+  if [ "$1" -eq 124 ] || [ "$1" -eq 137 ] || [ "$1" -eq 143 ] || grep -q 'run out of memory' "$2"; then
+    echo ERROR
+  elif [ "$1" -eq 0 ] && grep -q 'VERIFICATION:- SUCCESSFUL' "$2"; then
+    echo survived
+  elif [ "$1" -ne 0 ] && grep -q 'VERIFICATION:- FAILED' "$2" && grep -q '^Failed Checks:' "$2"; then
+    echo killed
+  else
+    echo ERROR
+  fi
+}
+
 fail=0
 printf '%-42s %-14s %-8s %s\n' mutant expect plain kani
 for p in "$proj"/kani/mutants/$glob.patch; do
@@ -44,24 +69,25 @@ for p in "$proj"/kani/mutants/$glob.patch; do
     plain_filter="--skip h_raw_"
   else expect=killed; harnesses=$(sed -n 's/^# killed-by: //p' "$p"); fi
 
-  if (cd "$work/tree/kani" && cargo test --release -q -- $plain_filter >"$work/plain.log" 2>&1); then plain=survived; else plain=killed; fi
+  # A verdict needs evidence: "killed" only when a test or Kani property
+  # actually failed, "survived" only when every check ran and passed.
+  # Anything else (missing tools, build or backend failures, time-outs,
+  # running out of memory) is ERROR.
+  (cd "$work/tree/kani" && cargo test --release -q -- $plain_filter) >"$work/plain.log" 2>&1
+  rc=$?
   [ -n "${KEEP_LOGS:-}" ] && cp "$work/plain.log" "$KEEP_LOGS/$name.plain.log"
-  if grep -q 'error\[E' "$work/plain.log"; then plain=NO-BUILD; fi
+  plain=$(plain_verdict $rc "$work/plain.log")
 
   kres=-
   if [ $use_kani -eq 1 ]; then
-    kres=survived
+    kres=ERROR
+    [ -n "$harnesses" ] && kres=survived
     for h in $harnesses; do
-      (cd "$work/tree/kani" && timeout "${KANI_TIMEOUT:-3600}" $kani $flags --harness "proofs::$h" --exact >"$work/kani-$h.log" 2>&1)
+      (cd "$work/tree/kani" && timeout "${KANI_TIMEOUT:-3600}" $kani $flags --harness "proofs::$h" --exact) >"$work/kani-$h.log" 2>&1
       rc=$?
       [ -n "${KEEP_LOGS:-}" ] && cp "$work/kani-$h.log" "$KEEP_LOGS/$name.$h.log"
-      # Only a failed property kills; running out of time or memory is no verdict.
-      # rc 137/143: CBMC or the job was killed (usually the OOM killer).
-      if [ $rc -eq 124 ] || [ $rc -eq 137 ] || [ $rc -eq 143 ] || grep -q 'run out of memory' "$work/kani-$h.log"; then
-        kres=ERROR; break
-      elif [ $rc -ne 0 ]; then
-        kres=killed; break
-      fi
+      v=$(kani_verdict $rc "$work/kani-$h.log")
+      if [ "$v" != survived ]; then kres=$v; break; fi
     done
   fi
 
