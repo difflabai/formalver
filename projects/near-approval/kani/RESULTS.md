@@ -35,9 +35,38 @@ family. Times are this machine's wall clock, one harness at a time.
 
 Against the M1 exit criterion "< 20 min per harness": all but
 `h_bmc_from_init` meet it here. Section 6.3's fallback 1 (split) was
-applied to `h_read`; `h_bmc_from_init` was reduced to ghost-only checks
-(deviation 8) and still takes 37.5 min. The next ladder rung for it is
-fallback 3 (requests and log bounded at 2); not applied yet.
+applied to `h_read`. For `h_bmc_from_init`, deviation 8 (ghost-only
+checks) and then fallback 3 (requests bounded at 2, deviation 9) were
+applied; the table's 37.5 min is at bound 4, and CI below runs bound 2.
+
+### CI
+
+`.github/workflows/near-approval.yml` runs `pin`, `plain` and one `kani`
+job per cover family on every PR touching the project and nightly, and
+`mutants` (one job per mutant, plain mode and Kani) weekly. The private
+submodule is checked out with the `CROSS_REPO_BUILD_KEY` secret (OQ-7).
+
+This repository's runners have 2 CPUs and 7.9 GB. CBMC peaks above that
+(measured here: `h_raw_approve` 2.5 GB; `h_step_approve` 9.5 GB, and 6.5,
+6.7 and 9.3 GB for its TX, HIST and INV parts alone), so the Kani jobs add
+a swap file of up to 16 GB on the runner's disk. With it, every Kani job
+passed on `4308bd0` (job wall times, including ~3 min of Kani install):
+
+| Job | Time |
+|---|---:|
+| `h_init h_canary` | 2 min |
+| `h_raw_request h_raw_request_empty` | 7 min |
+| `h_raw_add h_raw_revoke h_raw_approve` | 10 min |
+| `h_step_add` | 10 min |
+| `h_step_revoke` | 14 min |
+| `h_step_approve` | 22 min |
+| `h_step_request h_step_request_empty` | 31 min |
+| `h_bmc_from_init` (requests ≤ 2) | 32 min |
+| `h_read h_read_page h_read_find` | 47 min |
+
+`h_bmc_from_init` stays over 20 min on the CI runner even at bound 2.
+A larger runner (set the `KANI_RUNNER` repository variable, and
+`KANI_SWAP_GB` to 0) removes the dependence on swap.
 <!-- /KANI-TABLE -->
 
 ## Plain mode
@@ -102,7 +131,7 @@ A GitHub runner has 16 GB, so the plan as written would not run in CI either.
    capacity, guarded by the counts, instead of iterator chains over slices.
    This cut the `Inv` assumption from 520k to 188k symex steps.
 6. **Bounds.** `#P, #R, #L ≤ 3` in generated states (capacity 4 for the
-   step). `h_bmc_from_init` keeps every trace at `#R ≤ 4`.
+   step). `h_bmc_from_init` keeps every trace at `#R ≤ 2` (deviation 9).
 7. **Kani was built from source** here because GitHub release downloads
    are blocked in this environment; CI should use
    `cargo install kani-verifier --version 0.68.0 && cargo kani setup`.
@@ -114,6 +143,11 @@ A GitHub runner has 16 GB, so the plan as written would not run in CI either.
    asserts GH, TR-2 and the TR-3 witness at every step but not TX, HIST
    and INV, which `h_step_*` prove for one step from any `Inv` state
    (and `Init` is `Inv` by `h_init`).
+9. **`h_bmc_from_init` bounds requests at 2** (section 6.3 fallback 3),
+   down from 4. One request is enough for every TR witness (approved;
+   revoke, re-add, approve the old id fails), and two keep a second id in
+   play for TR-2. The TR properties themselves are proven for one step from
+   any `Inv` state with up to 3 requests by the step harnesses.
 
 ## Status in `status.toml`
 
