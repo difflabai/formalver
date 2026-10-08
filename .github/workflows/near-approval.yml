@@ -119,6 +119,8 @@ jobs:
           . tools/versions.env
           cbmc_bin=$(find ~/.kani -path '*/bin/cbmc' -type f | head -1)
           "$cbmc_bin" --version | grep -q "^$CBMC" || { echo "CBMC is not $CBMC"; "$cbmc_bin" --version; exit 1; }
+      - name: Runner size
+        run: echo "::notice::runner has $(nproc) CPUs and $(free -m | awk '/^Mem:/{print $2}') MB memory"
       - name: Kani ${{ matrix.group }}
         env:
           KANI_TIMEOUT: "3600"

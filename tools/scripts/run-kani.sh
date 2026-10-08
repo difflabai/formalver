@@ -57,6 +57,12 @@ for h in "$@"; do
     result=FAILED; fail=1
   fi
   printf '%-20s %-8s %8s  %s\n' "$h" "$result" "$secs" "${covers:--}"
+  # In GitHub Actions, surface why a harness failed as an annotation (rc
+  # 137/143: the process was killed, usually for memory).
+  if [ -n "${GITHUB_ACTIONS:-}" ] && [ "$result" != ok ]; then
+    why=$(grep -E 'out of memory|Failed Checks:' "$log" | head -3 | tr '\n' ' ')
+    echo "::error title=$h $result::rc=$rc after ${secs}s. ${why:-no diagnostics in log}"
+  fi
 done
 # Covers, per family: each must be SATISFIED somewhere.
 missing=$(awk -F'\t' '{k=$1 "\t" $2; if ($3=="SATISFIED") s[k]=1; else if (!(k in s)) s[k]=s[k]+0}

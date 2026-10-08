@@ -622,6 +622,10 @@ fn proof_of(p: &Proof, s: &S, i: u64) -> bool {
 // ---------------------------------------------------------------------------
 
 pub const BMC_DEPTH: usize = 6;
+/// Requests along a BMC trace (section 6.3 fallback 3: requests and log
+/// bounded at 2). One request suffices for every TR witness; the second
+/// keeps two ids in play for TR-2.
+pub const BMC_MAX_R: usize = 2;
 
 pub fn bmc_from_init(src: &mut impl Src) {
     let mut s: S = crate::store::ArrStore::new(OWNER);
@@ -644,8 +648,8 @@ pub fn bmc_from_init(src: &mut impl Src) {
             gen::op(src, &s, &clock(&h))
         };
         assume!(time_ok(&s, &h, &op));
-        // Harness bound: at most CAP_R requests along a trace.
-        assume!(!matches!(op, Op::Req { .. }) || s.nr() < crate::store::CAP_R);
+        // Harness bound: at most BMC_MAX_R requests along a trace.
+        assume!(!matches!(op, Op::Req { .. }) || s.nr() < BMC_MAX_R);
         let ak = match &op {
             Op::Appr { id, .. } if *id < s.nr() as u64 => {
                 Some(s.req(*id as usize).agent_key.clone())
