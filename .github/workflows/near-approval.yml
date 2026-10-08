@@ -125,14 +125,19 @@ jobs:
       - name: Swap (CBMC peaks at 6.5 to 9.5 GB on the step harnesses)
         if: env.KANI_SWAP_GB != '0'
         env:
-          KANI_SWAP_GB: ${{ vars.KANI_SWAP_GB || '24' }}
+          KANI_SWAP_GB: ${{ vars.KANI_SWAP_GB || '16' }}
         run: |
+          # Free preinstalled SDKs this job does not use, then size the swap
+          # file to leave 6 GB of disk for the build and logs.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          avail=$(df --output=avail -BG / | tail -1 | tr -dc 0-9)
+          gb=$(( KANI_SWAP_GB < avail - 6 ? KANI_SWAP_GB : avail - 6 ))
           sudo swapoff -a || true
-          sudo fallocate -l "${KANI_SWAP_GB}G" /mnt/kani.swap
-          sudo chmod 600 /mnt/kani.swap
-          sudo mkswap /mnt/kani.swap >/dev/null
-          sudo swapon /mnt/kani.swap
-          free -m
+          sudo fallocate -l "${gb}G" /kani.swap
+          sudo chmod 600 /kani.swap
+          sudo mkswap /kani.swap >/dev/null
+          sudo swapon /kani.swap
+          echo "::notice::swap ${gb} GB, disk free $(df --output=avail -BG / | tail -1)"
       - name: Kani ${{ matrix.group }}
         env:
           KANI_TIMEOUT: "3600"
@@ -177,14 +182,19 @@ jobs:
       - name: Swap (CBMC peaks at 6.5 to 9.5 GB on the step harnesses)
         if: env.KANI_SWAP_GB != '0'
         env:
-          KANI_SWAP_GB: ${{ vars.KANI_SWAP_GB || '24' }}
+          KANI_SWAP_GB: ${{ vars.KANI_SWAP_GB || '16' }}
         run: |
+          # Free preinstalled SDKs this job does not use, then size the swap
+          # file to leave 6 GB of disk for the build and logs.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          avail=$(df --output=avail -BG / | tail -1 | tr -dc 0-9)
+          gb=$(( KANI_SWAP_GB < avail - 6 ? KANI_SWAP_GB : avail - 6 ))
           sudo swapoff -a || true
-          sudo fallocate -l "${KANI_SWAP_GB}G" /mnt/kani.swap
-          sudo chmod 600 /mnt/kani.swap
-          sudo mkswap /mnt/kani.swap >/dev/null
-          sudo swapon /mnt/kani.swap
-          free -m
+          sudo fallocate -l "${gb}G" /kani.swap
+          sudo chmod 600 /kani.swap
+          sudo mkswap /kani.swap >/dev/null
+          sudo swapon /kani.swap
+          echo "::notice::swap ${gb} GB, disk free $(df --output=avail -BG / | tail -1)"
       - name: Mutant ${{ matrix.mutant }} (plain mode and Kani)
         env:
           KANI_TIMEOUT: "3600"
