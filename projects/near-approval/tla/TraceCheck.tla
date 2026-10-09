@@ -11,7 +11,7 @@ EXTENDS ApprovalCore, TraceData, TLC
 
 VARIABLES tr, pos
 
-tvars == <<principals, requests, log, epoch, ghost, tr, pos>>
+tvars == <<principals, requests, log, regs, revoked, ghost, tr, pos>>
 
 \* The ghost is not in the traces; the actions maintain it as usual.
 TInit == Init /\ tr \in 1 .. Len(Traces) /\ pos = 0
@@ -20,10 +20,12 @@ Post(e) ==
     /\ principals' = e.post.principals
     /\ requests' = e.post.requests
     /\ log' = e.post.log
+    /\ regs' = e.post.regs
+    /\ revoked' = e.post.revoked
 
 \* A rejected call: the spec's error operator gives the core's error, and
 \* the state does not change.
-Refused(err, e) == err = e.err /\ e.err # "Ok" /\ UNCHANGED <<principals, requests, log, epoch, ghost>>
+Refused(err, e) == err = e.err /\ e.err # "Ok" /\ UNCHANGED vars
 
 Replay(e) ==
     CASE e.op = "add" ->
@@ -36,6 +38,9 @@ Replay(e) ==
       [] e.op = "approve" ->
             IF e.err = "Ok" THEN Approve(e.p, e.s, e.k, e.i, e.x)
             ELSE Refused(ApproveErr(e.p, e.s, e.k, e.i, e.x), e)
+      [] e.op = "reject" ->
+            IF e.err = "Ok" THEN Reject(e.p, e.s, e.k, e.i)
+            ELSE Refused(RejectErr(e.p, e.s, e.k, e.i), e)
 
 TNext ==
     \/ /\ pos < Len(Traces[tr])

@@ -1,0 +1,11 @@
+--- a/ApprovalCore.tla
++++ b/ApprovalCore.tla
+@@ -200,7 +200,7 @@
+     /\ RequestErr(pred, signer, k, x) = "Ok"
+     /\ principals' = [principals EXCEPT ![k].pending = @ + 1]
+     /\ requests' = Append(requests,
+-                    [acct |-> signer, key |-> k, rid |-> principals[k].rid, act |-> x,
++                    [acct |-> signer, key |-> k, rid |-> 0, act |-> x,
+                      appr |-> FALSE, aidx |-> 0, aacct |-> signer, akey |-> k, arid |-> 0,
+                      rj |-> FALSE, racct |-> signer, rkey |-> k, rrid |-> 0])
+     /\ ghost' = Append(ghost, [cont |-> FALSE, decOk |-> FALSE])

@@ -1,0 +1,22 @@
+# Upstreams whose changes can invalidate an assumption's `source` or open a
+# new formal route (strategy.md section 14, `upstream-watch`). The weekly job
+# runs tools/scripts/upstream-watch.sh and opens an issue when a watched path
+# changed since `seen`. After reviewing, move `seen` to the reported commit.
+
+[[watch]]
+name = "near-proof-arena"
+repo = "https://github.com/ilblackdragon/near-proof-arena"
+seen = "cb16c4090a82a6179d8e1a23d6e83e74e9d5d017"
+# The NEAR semantics slices, challenge scopes (their `excludes` are the
+# `arena_excludes` in status.toml) and the submission contract.
+paths = ["spec", "challenges", "docs/AGENT_CONTRACT.md", "docs/CONTRACTS.md", "docs/EVIDENCE_COVERAGE.md"]
+why = "A new slice or a lifted exclusion may give a machine-checked model for an ASM-* in projects/near-approval/status.toml, or change what near-proofs/ submissions must look like."
+
+[[watch]]
+name = "nomicon"
+repo = "https://github.com/near/nearcore"
+seen = "a013a3fc08bdb50c9f39a1c7f62942bcc3107257"
+# nomicon.io is built from nearcore's docs/; these are the pages the
+# near-approval assumptions cite.
+paths = ["docs/DataStructures", "docs/RuntimeSpec", "docs/ChainSpec/Consensus.md", "docs/ChainSpec/BlockProcessing.md", "docs/GenesisConfig", "docs/architecture/how/meta-tx.md"]
+why = "A change to a cited Nomicon page may change what an ASM-* in projects/near-approval/status.toml relies on."

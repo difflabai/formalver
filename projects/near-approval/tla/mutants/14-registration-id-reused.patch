@@ -1,0 +1,11 @@
+--- a/ApprovalCore.tla
++++ b/ApprovalCore.tla
+@@ -187,7 +187,7 @@
+     /\ principals' = [principals EXCEPT ![k] =
+                         [reg |-> TRUE, acct |-> a, role |-> r, rid |-> regs,
+                          from |-> NR, pending |-> 0]]
+-    /\ regs' = regs + 1
++    /\ regs' = regs
+     /\ UNCHANGED <<requests, log, revoked, ghost>>
+ 
+ RevokeKey(c, k) ==

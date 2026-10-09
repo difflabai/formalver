@@ -1,0 +1,11 @@
+# killed-by: h_step_revoke
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -367,7 +367,6 @@
+     let removed = store
+         .remove_principal(key)
+         .ok_or(ApprovalError::KeyNotRegistered)?;
+-    store.insert_revocation(removed.registration_id, now);
+     Ok(removed)
+ }
+ 

@@ -1,0 +1,11 @@
+--- a/ApprovalCore.tla
++++ b/ApprovalCore.tla
+@@ -148,7 +148,7 @@
+ DecideErr(i) ==
+     IF i \notin Ids THEN "RequestNotFound"
+     ELSE IF Req(i).appr THEN "AlreadyApproved"
+-    ELSE IF Req(i).rj THEN "AlreadyRejected"
++    ELSE IF FALSE THEN "AlreadyRejected"
+     ELSE IF ~Live(i) THEN "AgentRevoked"
+     ELSE "Ok"
+ 

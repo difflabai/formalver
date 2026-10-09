@@ -14,14 +14,15 @@ use crate::spec::{Op, C};
 use crate::src::{Rng, Src};
 use crate::tla::{self, TOO_LONG};
 use approval_core::{
-    add_principal, approve, request_action, revoke_key, ApprovalError as E, BlockTime, Caller,
-    MemStore, Role, Store,
+    add_principal, approve, reject, request_action, revoke_key, ApprovalError as E, BlockTime,
+    Caller, MemStore, Role, Store,
 };
 use std::fmt::Write as _;
 
 type M = MemStore<Acct, Key>;
 
-/// Capacity of the abstract state: more than any trace's request count.
+/// Capacity of the abstract state: more than any trace's request or
+/// revocation count.
 pub const CT: usize = 128;
 pub type Abs = tla::T<CT>;
 
@@ -34,23 +35,27 @@ pub fn alpha_mem(s: &M) -> Abs {
                 reg: true,
                 acct: p.account_id.0,
                 role: p.role,
+                rid: p.registration_id,
                 from: p.active_from,
                 pending: p.pending,
             };
         }
     }
     for (i, r) in s.requests.iter().enumerate() {
-        let ap = r
-            .approval
-            .as_ref()
-            .map(|x| (x.approval_index, x.approver_account_id.0, x.approver_key.0));
         t.requests[i] = tla::tr(
             r.agent_account_id.0,
             r.agent_key.0,
+            r.agent_registration_id,
             tla::class(&r.action),
-            ap,
+            r.approval.as_ref().map(tla::t_ap),
+            r.rejection.as_ref().map(tla::t_rj),
         );
     }
+    t.regs = s.registration_count;
+    for (j, (g, _)) in s.revocations.iter().enumerate() {
+        t.revoked[j] = *g;
+    }
+    t.nv = s.revocations.len();
     t.nr = s.requests.len();
     for (j, id) in s.approval_log.iter().enumerate() {
         t.log[j] = *id;
@@ -67,9 +72,10 @@ fn run_core(s: &mut M, op: &Op) -> Option<E> {
             acct,
             role,
         } => add_principal(s, caller, key.clone(), acct.clone(), *role).err(),
-        Op::Revoke { caller, key } => revoke_key(s, caller, key).err(),
+        Op::Revoke { caller, key, t } => revoke_key(s, caller, key, *t).err(),
         Op::Req { c, action, t } => request_action(s, c, action.clone(), *t).err(),
         Op::Appr { c, id, action, t } => approve(s, c, *id, action, *t).err(),
+        Op::Rej { c, id, t } => reject(s, c, *id, *t).err(),
     }
 }
 
@@ -132,6 +138,7 @@ fn call(rng: &mut Rng, s: &M, step: u64) -> Op {
         3 => Op::Revoke {
             caller: admin(rng),
             key: Key(rng.below(NK)),
+            t,
         },
         4..=6 => Op::Req {
             c: caller(rng),
@@ -141,15 +148,22 @@ fn call(rng: &mut Rng, s: &M, step: u64) -> Op {
         _ => {
             let c = caller(rng);
             let n = s.requests.len() as u64;
-            // Mostly unapproved requests, where the guards are interesting.
+            // Mostly undecided requests, where the guards are interesting.
             let open: Vec<u64> = (0..n)
-                .filter(|i| s.requests[*i as usize].approval.is_none())
+                .filter(|i| {
+                    let r = &s.requests[*i as usize];
+                    r.approval.is_none() && r.rejection.is_none()
+                })
                 .collect();
             let id = if !open.is_empty() && rng.hint(70) {
                 open[rng.below(open.len().min(200) as u8) as usize]
             } else {
                 rng.below((n.min(60) + 1) as u8) as u64
             };
+            // One decision in four is a rejection.
+            if rng.hint(25) {
+                return Op::Rej { c, id, t };
+            }
             let action = match s.requests.get(id as usize) {
                 Some(r) if rng.hint(85) => r.action.clone(),
                 _ => action(rng),
@@ -235,11 +249,12 @@ fn abs_tla(t: &Abs) -> String {
         .map(|i| {
             let p = t.principals[i as usize];
             format!(
-                "{} :> [reg |-> {}, acct |-> {}, role |-> {}, from |-> {}, pending |-> {}]",
+                "{} :> [reg |-> {}, acct |-> {}, role |-> {}, rid |-> {}, from |-> {}, pending |-> {}]",
                 k(i),
-                if p.reg { "TRUE" } else { "FALSE" },
+                b(p.reg),
                 a(p.acct),
                 role(p.role),
+                p.rid,
                 p.from,
                 p.pending
             )
@@ -250,21 +265,45 @@ fn abs_tla(t: &Abs) -> String {
         .iter()
         .map(|r| {
             format!(
-                "[acct |-> {}, key |-> {}, act |-> {}, appr |-> {}, aidx |-> {}, aacct |-> {}, akey |-> {}]",
+                "[acct |-> {}, key |-> {}, rid |-> {}, act |-> {}, appr |-> {}, aidx |-> {}, \
+                 aacct |-> {}, akey |-> {}, arid |-> {}, rj |-> {}, racct |-> {}, rkey |-> {}, \
+                 rrid |-> {}]",
                 a(r.acct),
                 k(r.key),
+                r.rid,
                 payload(r.act),
-                if r.appr { "TRUE" } else { "FALSE" },
+                b(r.appr),
                 r.aidx,
                 a(r.aacct),
-                k(r.akey)
+                k(r.akey),
+                r.arid,
+                b(r.rj),
+                a(r.racct),
+                k(r.rkey),
+                r.rrid
             )
         })
         .collect();
     write!(s, ", requests |-> <<{}>>", rs.join(", ")).unwrap();
     let ls: Vec<String> = t.log[..t.nl].iter().map(|i| i.to_string()).collect();
-    write!(s, ", log |-> <<{}>>]", ls.join(", ")).unwrap();
+    write!(s, ", log |-> <<{}>>", ls.join(", ")).unwrap();
+    let vs: Vec<String> = t.revoked[..t.nv].iter().map(|g| g.to_string()).collect();
+    write!(
+        s,
+        ", regs |-> {}, revoked |-> {{{}}}]",
+        t.regs,
+        vs.join(", ")
+    )
+    .unwrap();
     s
+}
+
+fn b(v: bool) -> &'static str {
+    if v {
+        "TRUE"
+    } else {
+        "FALSE"
+    }
 }
 
 fn call_tla(op: &Op) -> String {
@@ -281,7 +320,7 @@ fn call_tla(op: &Op) -> String {
             a(acct.0),
             role(*r)
         ),
-        Op::Revoke { caller, key } => {
+        Op::Revoke { caller, key, .. } => {
             format!(
                 "[op |-> \"revoke\", c |-> {}, k |-> {}",
                 a(caller.0),
@@ -302,6 +341,13 @@ fn call_tla(op: &Op) -> String {
             k(c.signer_key.0),
             id,
             payload(tla::class(action))
+        ),
+        Op::Rej { c, id, .. } => format!(
+            "[op |-> \"reject\", p |-> {}, s |-> {}, k |-> {}, i |-> {}",
+            a(c.predecessor.0),
+            a(c.signer.0),
+            k(c.signer_key.0),
+            id
         ),
     }
 }
@@ -355,9 +401,10 @@ mod tests {
             .unwrap_or(80);
         let traces: Vec<_> = (0..n).map(|i| trace(0xA5A5_0000 + i, len)).collect();
         // Non-vacuity: the traces exercise every error the TLA+ spec can
-        // produce, an approval and a void request.
+        // produce, revival attempts, rejections and revocations.
         let mut seen = std::collections::BTreeSet::new();
         let mut revival = 0;
+        let (mut rejected, mut revoked) = (0, 0);
         for t in &traces {
             let mut pre = Abs::init();
             for st in t {
@@ -365,14 +412,27 @@ mod tests {
                 // TR-3 witness: approving a request whose key is registered
                 // again, to the same account as Agent, under a later
                 // registration. Only active_from rejects it.
-                if let (Op::Appr { id, .. }, Some(E::AgentRevoked)) = (&st.op, st.err) {
-                    let r = pre.requests[*id as usize];
+                let decided = match &st.op {
+                    Op::Appr { id, .. } | Op::Rej { id, .. } => Some(*id),
+                    _ => None,
+                };
+                if let (Some(id), Some(E::AgentRevoked)) = (decided, st.err) {
+                    let r = pre.requests[id as usize];
                     let p = pre.principals[r.key as usize];
                     revival += (p.reg && p.role == Role::Agent && p.acct == r.acct) as u32;
+                }
+                match (&st.op, st.err) {
+                    (Op::Rej { .. }, None) => rejected += 1,
+                    (Op::Revoke { .. }, None) => revoked += 1,
+                    _ => {}
                 }
                 pre = st.post;
             }
         }
+        assert!(
+            rejected >= 20 && revoked >= 20,
+            "REF-5 traces reject {rejected} and revoke {revoked} times"
+        );
         assert!(
             revival >= 5,
             "REF-5 traces attempt a revival only {revival} times"
@@ -390,6 +450,7 @@ mod tests {
             "ActionTooLong",
             "RequestNotFound",
             "AlreadyApproved",
+            "AlreadyRejected",
             "AgentRevoked",
             "ActionMismatch",
             "SelfApproval",

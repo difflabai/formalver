@@ -1,7 +1,7 @@
 # killed-by: h_step_request_empty
 --- a/core/src/lib.rs
 +++ b/core/src/lib.rs
-@@ -367,9 +367,6 @@
+@@ -439,9 +439,6 @@
      S: Store<A, K>,
  {
      let mut principal = authenticate(store, caller, Role::Agent)?;

@@ -67,7 +67,7 @@ check_safety() { # spec dir
   start=$(date +%s)
   tlc "$d" MC_Safety.tla MC_Safety.cfg "$log"
   tlc_ok "$log"; report safety $? "$(states "$log"), $(( $(date +%s) - start ))s" "$log"
-  for w in Witness_Approved Witness_Void Witness_Revival Witness_Cap; do
+  for w in Witness_Approved Witness_Rejected Witness_Void Witness_Revival Witness_Cap; do
     log="$logs/$w.log"
     sed -e "s/^INVARIANT Inv$/INVARIANT $w/" -e '/^PROPERTY /d' "$d/MC_Safety.cfg" >"$d/build/$w.cfg"
     tlc "$d" MC_Safety.tla "build/$w.cfg" "$log"

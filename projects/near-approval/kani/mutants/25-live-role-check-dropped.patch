@@ -1,7 +1,7 @@
 # must-survive: equivalent mutant (F-14)
 --- a/core/src/lib.rs
 +++ b/core/src/lib.rs
-@@ -345,7 +345,7 @@
+@@ -417,7 +417,7 @@
      S: Store<A, K>,
  {
      store.principal(&request.agent_key).filter(|p| {

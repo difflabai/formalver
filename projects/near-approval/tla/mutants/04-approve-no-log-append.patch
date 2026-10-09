@@ -1,11 +1,11 @@
 --- a/ApprovalCore.tla
 +++ b/ApprovalCore.tla
-@@ -178,7 +178,7 @@
+@@ -225,7 +225,7 @@
      /\ requests' = [requests EXCEPT ![i + 1] =
-                     [@ EXCEPT !.appr = TRUE, !.aidx = NL, !.aacct = signer, !.akey = k]]
-     /\ principals' = [principals EXCEPT ![Req(i).key].pending = IF @ > 0 THEN @ - 1 ELSE 0]
+                     [@ EXCEPT !.appr = TRUE, !.aidx = NL, !.aacct = signer, !.akey = k,
+                               !.arid = principals[k].rid]]
 -    /\ log' = Append(log, i)
 +    /\ log' = log
-     /\ ghost' = [ghost EXCEPT ![i + 1].cont = (ghost[i + 1].ep = epoch[Req(i).key]),
-                               ![i + 1].apprOk = principals[k].reg
-                                   /\ principals[k].role = "Approver"
+     /\ Decide(signer, k, i)
+     /\ UNCHANGED <<regs, revoked>>
+ 

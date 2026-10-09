@@ -1,7 +1,7 @@
 # killed-by: h_raw_request
 --- a/core/src/lib.rs
 +++ b/core/src/lib.rs
-@@ -373,7 +373,7 @@
+@@ -445,7 +445,7 @@
      if action.len() > MAX_ACTION_LEN {
          return Err(ApprovalError::ActionTooLong);
      }

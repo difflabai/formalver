@@ -12,12 +12,27 @@ Sym == Permutations({a1, a2}) \cup Permutations(MCKeys)
 
 Bound == NR <= MaxReq
 
-\* The epoch ghost grows without bound, but every property reads it only as
-\* "ghost[i].ep = epoch[key of i]", and that comparison evolves the same way
-\* from any two states that agree on it (epochs only increase, and a new
-\* request takes the current epoch). So fingerprinting states by this view
-\* is a bisimulation quotient: no behaviour is lost, and the graph is finite.
-GhostView == [i \in Ids |-> [same |-> ghost[i + 1].ep = epoch[Req(i).key],
-                              cont |-> ghost[i + 1].cont, apprOk |-> ghost[i + 1].apprOk]]
-View == <<principals, requests, log, GhostView>>
+\* Registration ids grow without bound (every add takes a fresh one), but
+\* the core never reads their values: it only copies them. The properties
+\* compare them only for equality and order, and a new id is always above
+\* every existing one. So two states that agree up to an order-preserving
+\* renaming of the ids they hold behave the same, and fingerprinting states
+\* by their rank form is a bisimulation quotient for everything the
+\* actions and properties read: the graph is finite and no behaviour is
+\* lost. regs and the revoked ids no state field refers to are dropped from
+\* the view; Inv11/12/14/15, which read them, are also proved inductive by
+\* Apalache with nothing dropped (TLA-IND).
+Seen ==
+    {principals[k].rid : k \in {k \in Keys : principals[k].reg}}
+    \cup {Req(i).rid : i \in Ids}
+    \cup {Req(i).arid : i \in {i \in Ids : Req(i).appr}}
+    \cup {Req(i).rrid : i \in {i \in Ids : Req(i).rj}}
+Rank(g) == Cardinality({h \in Seen : h < g})
+View ==
+    <<[k \in Keys |-> [principals[k] EXCEPT !.rid = Rank(@)]],
+      [j \in DOMAIN requests |->
+          [requests[j] EXCEPT !.rid = Rank(@), !.arid = Rank(@), !.rrid = Rank(@)]],
+      log,
+      {Rank(g) : g \in revoked \cap Seen},
+      ghost>>
 =============================================================================

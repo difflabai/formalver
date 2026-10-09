@@ -35,6 +35,13 @@ for name, want in st.get("source_hashes", {}).items():
     if got != want:
         print(f"hash drift: {name}: {got} != {want}"); fail = 1
 
+# ASM-COMPILE: the deployed build must keep overflow checks in release.
+if st["project"].get("release_overflow_checks"):
+    cargo = base / "Cargo.toml"
+    prof = tomllib.loads(cargo.read_text()).get("profile", {}).get("release", {}) if cargo.is_file() else {}
+    if prof.get("overflow-checks") is not True:
+        print(f"ASM-COMPILE: {cargo.relative_to(root)} [profile.release] does not set overflow-checks = true"); fail = 1
+
 print("pin ok" if not fail else "pin check FAILED")
 sys.exit(fail)
 PY

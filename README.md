@@ -8,6 +8,8 @@ Formal Verification of repositories, starting with IronClaw
 | ironclaw | [nearai/ironclaw](https://github.com/nearai/ironclaw) safety modules | [strategy](projects/ironclaw/strategy.md) | [status](projects/ironclaw/status.toml) |
 | near-approval | [trust-framework](https://github.com/difflabai/trust-framework) `contracts/approval` (NEAR action-approval contract) | [strategy](projects/near-approval/strategy.md) | [status](projects/near-approval/status.toml) (M1: Kani on the core) |
 
+Submissions to [NEAR Proof Arena](https://github.com/ilblackdragon/near-proof-arena), aimed at the NEAR assumptions these projects rely on, go in [`near-proofs/`](near-proofs/README.md).
+
 ## Running the Scaffolded Proofs
 
 ### Verus (Rust code verification)

@@ -8,9 +8,10 @@
 (*                                                                         *)
 (* IndInit is any state with at most MaxR requests and log entries (Gen),  *)
 (* constrained only by Inv. Integers are unbounded and symbolic: no bound  *)
-(* on active_from, pending, approval indices or epochs. Together the two   *)
-(* checks cover every reachable state of any depth whose request array has *)
-(* at most MaxR entries. MaxPending is scaled to 2 so that the cap is      *)
+(* on active_from, pending, approval indices or registration ids.          *)
+(* Together the two checks cover every reachable state of any depth whose  *)
+(* request array has at most MaxR entries and with at most 3 revocations.  *)
+(* MaxPending is scaled to 2 so that the cap is                            *)
 (* reachable within MaxR requests (with the real 16 it never binds here;   *)
 (* Kani's h_raw_request covers the real cap boundary).                     *)
 (***************************************************************************)
@@ -28,15 +29,17 @@ MaxPending == 2
 MaxR == 3
 
 VARIABLES
-    \* @type: KEY -> { reg: Bool, acct: ACCT, role: Str, from: Int, pending: Int };
+    \* @type: KEY -> { reg: Bool, acct: ACCT, role: Str, rid: Int, from: Int, pending: Int };
     principals,
-    \* @type: Seq({ acct: ACCT, key: KEY, act: Str, appr: Bool, aidx: Int, aacct: ACCT, akey: KEY });
+    \* @type: Seq({ acct: ACCT, key: KEY, rid: Int, act: Str, appr: Bool, aidx: Int, aacct: ACCT, akey: KEY, arid: Int, rj: Bool, racct: ACCT, rkey: KEY, rrid: Int });
     requests,
     \* @type: Seq(Int);
     log,
-    \* @type: KEY -> Int;
-    epoch,
-    \* @type: Seq({ ep: Int, cont: Bool, apprOk: Bool });
+    \* @type: Int;
+    regs,
+    \* @type: Set(Int);
+    revoked,
+    \* @type: Seq({ cont: Bool, decOk: Bool });
     ghost
 
 INSTANCE ApprovalProps
@@ -45,11 +48,14 @@ IndInit ==
     /\ principals = Gen(3)
     /\ requests = Gen(MaxR)
     /\ log = Gen(MaxR)
-    /\ epoch = Gen(3)
+    /\ regs = Gen(1)
+    /\ revoked = Gen(3)
     /\ ghost = Gen(MaxR)
     /\ Inv
 
-\* Non-vacuity: IndInit contains full states with an approved and a void
-\* request, so the step is checked from them. Must be VIOLATED.
-IndWitness == ~(NR = MaxR /\ \E i \in Ids: Approved(i) /\ \E j \in Ids: Void(j))
+\* Non-vacuity: IndInit contains full states with an approved, a rejected
+\* and a void request and a revocation, so the step is checked from them.
+\* Must be VIOLATED.
+IndWitness == ~(NR = MaxR /\ revoked # {} /\ \E i \in Ids: Approved(i)
+                    /\ \E j \in Ids: Rejected(j) /\ \E h \in Ids: Void(h))
 =============================================================================

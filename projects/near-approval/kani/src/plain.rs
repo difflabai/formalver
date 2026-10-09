@@ -42,6 +42,11 @@ fn h_step_approve() {
 }
 
 #[test]
+fn h_step_reject() {
+    run("h_step_reject", 0x7F4A_7C15, 40_000, checks::step_reject);
+}
+
+#[test]
 fn h_raw_add() {
     run("h_raw_add", 0x1656_67B1, 20_000, checks::raw_add);
 }
@@ -59,6 +64,11 @@ fn h_raw_request() {
 #[test]
 fn h_raw_approve() {
     run("h_raw_approve", 0xB55A_4F09, 40_000, checks::raw_approve);
+}
+
+#[test]
+fn h_raw_reject() {
+    run("h_raw_reject", 0x94D0_49BB, 40_000, checks::raw_reject);
 }
 
 #[test]

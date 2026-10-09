@@ -1,4 +1,4 @@
-# near-approval CI (strategy.md section 14): the jobs M1 and M1.5 have artifacts for.
+# near-approval CI (strategy.md section 14): the jobs M1 has artifacts for.
 # trust-framework is private; CROSS_REPO_BUILD_KEY (a token or an SSH deploy
 # key with read access to it) checks out the submodule (OQ-7).
 name: near-approval
@@ -97,22 +97,30 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # One entry per cover family, so run-kani.sh can check that every
-        # cover is satisfied somewhere in its family.
+        # The slow families (h_read, h_step_request) run one harness per job;
+        # the covers job checks each family's covers across all jobs.
         group:
           - "h_init h_canary"
           - "h_step_add"
           - "h_step_revoke"
-          - "h_step_request h_step_request_empty"
+          - "h_step_request"
+          - "h_step_request_empty"
           - "h_step_approve"
-          - "h_raw_add h_raw_revoke h_raw_approve"
+          - "h_step_reject"
+          - "h_raw_add h_raw_revoke h_raw_approve h_raw_reject"
           - "h_raw_request h_raw_request_empty"
-          - "h_read h_read_page h_read_find"
+          - "h_read"
+          - "h_read_page"
+          - "h_read_find"
           - "h_bmc_from_init"
-          # TLA+ refinement (strategy.md section 17.2), one family per entry.
-          - "h_ref_add h_ref_revoke"
-          - "h_ref_request h_ref_request_empty"
-          - "h_ref_approve h_ref_toolong"
+          # TLA+ refinement (strategy.md section 17.2).
+          - "h_ref_add"
+          - "h_ref_revoke"
+          - "h_ref_request"
+          - "h_ref_request_empty"
+          - "h_ref_approve"
+          - "h_ref_reject"
+          - "h_ref_toolong"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -152,6 +160,7 @@ jobs:
         env:
           KANI_TIMEOUT: "3600"
           KANI_LOG_DIR: ${{ runner.temp }}/kani-logs
+          KANI_DEFER_COVERS: "1"
         run: tools/scripts/run-kani.sh near-approval ${{ matrix.group }}
       - name: Upload logs
         if: always()
@@ -203,6 +212,23 @@ jobs:
           path: ${{ runner.temp }}/tla-logs
           retention-days: 14
 
+  covers:
+    # Every cover SATISFIED in at least one harness of its family, across the
+    # kani jobs (each uploads its covers.tsv with its logs).
+    needs: kani
+    if: ${{ !cancelled() && needs.kani.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: kani-logs-*
+          path: ${{ runner.temp }}/kani-logs
+      - name: Covers per family
+        run: tools/scripts/check-covers.sh ${{ runner.temp }}/kani-logs/*/covers.tsv
+
   mutants:
     needs: pin
     if: github.event.schedule == '41 4 * * 0' || inputs.mutants
@@ -215,7 +241,8 @@ jobs:
       fail-fast: false
       matrix:
         mutant: ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13",
-                 "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26"]
+                 "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26",
+                 "27", "28", "29", "30", "31", "32", "33", "34", "35", "36"]
     steps:
       - uses: actions/checkout@v4
         with:

@@ -1,11 +1,11 @@
 --- a/ApprovalCore.tla
 +++ b/ApprovalCore.tla
-@@ -177,7 +177,7 @@
-     /\ ApproveErr(pred, signer, k, i, x) = "Ok"
-     /\ requests' = [requests EXCEPT ![i + 1] =
-                     [@ EXCEPT !.appr = TRUE, !.aidx = NL, !.aacct = signer, !.akey = k]]
+@@ -214,7 +214,7 @@
+ 
+ \* Common effect of a decision on request i by key k of account signer.
+ Decide(signer, k, i) ==
 -    /\ principals' = [principals EXCEPT ![Req(i).key].pending = IF @ > 0 THEN @ - 1 ELSE 0]
 +    /\ principals' = [principals EXCEPT ![Req(i).key].pending = @]
-     /\ log' = Append(log, i)
-     /\ ghost' = [ghost EXCEPT ![i + 1].cont = (ghost[i + 1].ep = epoch[Req(i).key]),
-                               ![i + 1].apprOk = principals[k].reg
+     /\ ghost' = [ghost EXCEPT ![i + 1] =
+                     [cont |-> Unbroken(i),
+                      decOk |-> principals[k].reg /\ principals[k].role = "Approver"

@@ -43,6 +43,12 @@ fn h_step_approve() {
 
 #[kani::proof]
 #[kani::unwind(5)]
+fn h_step_reject() {
+    checks::step_reject(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
 fn h_raw_add() {
     checks::raw_add(&mut Sym(None, checks::PART_ALL, false));
 }
@@ -69,6 +75,12 @@ fn h_raw_request_empty() {
 #[kani::unwind(5)]
 fn h_raw_approve() {
     checks::raw_approve(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_raw_reject() {
+    checks::raw_reject(&mut Sym(None, checks::PART_ALL, false));
 }
 
 #[kani::proof]
@@ -139,6 +151,12 @@ fn h_ref_request_empty() {
 #[kani::unwind(6)]
 fn h_ref_approve() {
     checks::step_approve(&mut Sym(None, checks::PART_REF, false));
+}
+
+#[kani::proof]
+#[kani::unwind(6)]
+fn h_ref_reject() {
+    checks::step_reject(&mut Sym(None, checks::PART_REF, false));
 }
 
 #[kani::proof]

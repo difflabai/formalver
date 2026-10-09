@@ -7,7 +7,9 @@ use crate::gen;
 use crate::ids::{Key, NK, OWNER};
 use crate::spec::*;
 use crate::src::{assume, Src};
-use approval_core::{approvals, request_status, ApprovalError as E, RequestStatus, Role};
+use approval_core::{
+    approvals, proof_revocations, request_status, ApprovalError as E, RequestStatus, Role,
+};
 use approval_core::{MAX_PAGE_SIZE, MAX_PENDING_PER_KEY};
 
 // ---------------------------------------------------------------------------
@@ -28,6 +30,12 @@ pub fn assert_inv(s: &S) {
     assert!(inv8(s), "INV-8"); // PROP: INV-8
     assert!(inv9(s), "INV-9"); // PROP: INV-9
     assert!(inv10(s), "INV-10"); // PROP: INV-10
+    assert!(inv11(s), "INV-11"); // PROP: INV-11
+    assert!(inv12(s), "INV-12"); // PROP: INV-12
+    assert!(inv13(s), "INV-13"); // PROP: INV-13
+    assert!(inv14(s), "INV-14"); // PROP: INV-14
+    assert!(inv15(s), "INV-15"); // PROP: INV-15
+    assert!(inv16(s), "INV-16"); // PROP: INV-16
     assert!(lem1(s), "LEM-1"); // PROP: LEM-1
     assert!(lem2(s), "LEM-2"); // PROP: LEM-2
     assert!(lem3(s), "LEM-3"); // PROP: LEM-3
@@ -60,7 +68,7 @@ fn clock(h: &Option<Ghost>) -> Ghost {
 /// ASM-TIME: a step's time is not before any time already recorded.
 fn time_ok(s: &S, h: &Option<Ghost>, op: &Op) -> bool {
     let t = match op {
-        Op::Req { t, .. } | Op::Appr { t, .. } => t,
+        Op::Revoke { t, .. } | Op::Req { t, .. } | Op::Appr { t, .. } | Op::Rej { t, .. } => t,
         _ => return true,
     };
     if let Some(h) = h {
@@ -79,7 +87,19 @@ fn time_ok(s: &S, h: &Option<Ghost>, op: &Op) -> bool {
                 return false;
             }
         }
+        if let Some(y) = &r.rejection {
+            if !time_le(&y.rejected_at, t) {
+                return false;
+            }
+        }
         i += 1;
+    }
+    let mut j = 0;
+    while j < s.nv() {
+        if !time_le(&s.rev(j).1, t) {
+            return false;
+        }
+        j += 1;
     }
     true
 }
@@ -119,6 +139,9 @@ fn assert_hist(pre: &Snap, v: &PreViews, post: &S, op: &Op, out: &Out) {
         if q.ap.is_some() {
             assert!(r2.approval == q.ap, "HIST-2 approval immutable");
         }
+        if q.rj.is_some() {
+            assert!(r2.rejection == q.rj, "HIST-2 rejection immutable");
+        }
         // PROP: HIST-5
         if v.proof[i].is_some() {
             assert!(
@@ -129,6 +152,10 @@ fn assert_hist(pre: &Snap, v: &PreViews, post: &S, op: &Op, out: &Out) {
         // PROP: HIST-8
         if v.status[i] == St::Void {
             assert!(status(post, r2) == St::Void, "HIST-8 void terminal");
+        }
+        // PROP: HIST-9
+        if v.status[i] == St::Rejected {
+            assert!(status(post, r2) == St::Rejected, "HIST-9 rejected terminal");
         }
         i += 1;
     }
@@ -150,6 +177,26 @@ fn assert_hist(pre: &Snap, v: &PreViews, post: &S, op: &Op, out: &Out) {
         post.nl() == pre.nl + appr_ok as usize,
         "HIST-4 log counter delta"
     );
+    // PROP: HIST-10
+    let add_ok = matches!(out, Out::Add(Ok(_)));
+    let rev_ok = matches!(out, Out::Revoke(Ok(_)));
+    assert!(
+        post.g() == pre.g + add_ok as u64,
+        "HIST-10 registration counter delta"
+    );
+    assert!(
+        post.nv() == pre.nv + rev_ok as usize,
+        "HIST-10 revocation count delta"
+    );
+    let mut j = 0;
+    while j < pre.nv {
+        let g = pre.v[j].0;
+        assert!(
+            v_get(post, g) == pre.v_get(g),
+            "HIST-10 revocation write-once"
+        );
+        j += 1;
+    }
     // PROP: HIST-6 TX-6
     assert!(post.owner == pre.owner, "HIST-6 owner fixed");
     let mut k = 0;
@@ -164,9 +211,14 @@ fn assert_hist(pre: &Snap, v: &PreViews, post: &S, op: &Op, out: &Out) {
                     },
                     true,
                 )
-                | (Op::Revoke { caller, key: k2 }, true) => *caller == pre.owner && *k2 == key,
+                | (
+                    Op::Revoke {
+                        caller, key: k2, ..
+                    },
+                    true,
+                ) => *caller == pre.owner && *k2 == key,
                 (Op::Req { c, .. }, true) => c.signer_key == key && same_but_pending(&a, &b),
-                (Op::Appr { id, .. }, true) => {
+                (Op::Appr { id, .. } | Op::Rej { id, .. }, true) => {
                     pre.req(*id as usize).ak == key && same_but_pending(&a, &b)
                 }
                 _ => false,
@@ -183,7 +235,10 @@ fn same_but_pending(
 ) -> bool {
     match (a, b) {
         (Some(a), Some(b)) => {
-            a.account_id == b.account_id && a.role == b.role && a.active_from == b.active_from
+            a.account_id == b.account_id
+                && a.role == b.role
+                && a.registration_id == b.registration_id
+                && a.active_from == b.active_from
         }
         _ => false,
     }
@@ -205,10 +260,10 @@ fn assert_phi(p0: i64, post: &S, op: &Op, out: &Out) {
                 ..
             }
         ) && out.is_ok();
-        let appr = matches!(out, Out::Appr(Ok(_)));
+        let decided = matches!(out, Out::Appr(Ok(_)) | Out::Rej(Ok(_)));
         assert!(
-            (appr && p1 == p0 + 1) || (agent_add && p1 == p0 + MAX_PENDING_PER_KEY as i64),
-            "TR-6 potential rises only on approve or agent add"
+            (decided && p1 == p0 + 1) || (agent_add && p1 == p0 + MAX_PENDING_PER_KEY as i64),
+            "TR-6 potential rises only on approve, reject or agent add"
         );
     }
 }
@@ -244,11 +299,11 @@ pub fn check_step(s: &mut S, h: &Option<Ghost>, op: &Op, part: u8) -> (Option<Gh
     };
     let out = apply(s, op);
     if let (Some(exp), Some(pre)) = (&exp, &pre) {
-        assert!(out == *exp, "TX exact result"); // PROP: TX-1 TX-2 TX-3 TX-4 TX-5
+        assert!(out == *exp, "TX exact result"); // PROP: TX-1 TX-2 TX-3 TX-4 TX-5 TX-7
         if !out.is_ok() {
             assert!(same_as(s, pre), "TX-0 atomic failure"); // PROP: TX-0
         }
-        assert!(post_ok(pre, s, op, &out), "TX exact post-state"); // PROP: TX-1 TX-2 TX-4 TX-5
+        assert!(post_ok(pre, s, op, &out), "TX exact post-state"); // PROP: TX-1 TX-2 TX-4 TX-5 TX-7
     }
     if let (true, Some(pre)) = (part & PART_REF != 0, &pre) {
         crate::tla::assert_refines(pre, s, op, out.err());
@@ -302,7 +357,8 @@ pub fn step_revoke(src: &mut impl Src) {
     let Some((mut s, h)) = inv_state(src) else {
         return;
     };
-    let op = gen::op_revoke(src, &s);
+    let op = gen::op_revoke(src, &s, &clock(&h));
+    assume!(time_ok(&s, &h, &op));
     let before = pre_views(&s);
     let (_, out) = check_step(&mut s, &h, &op, src.part());
     cover!(out.is_ok(), "revoke: Ok");
@@ -361,12 +417,47 @@ pub fn step_approve(src: &mut impl Src) {
         out.err() == Some(E::AlreadyApproved),
         "approve: AlreadyApproved"
     );
+    cover!(
+        out.err() == Some(E::AlreadyRejected),
+        "approve: AlreadyRejected"
+    );
     cover!(out.err() == Some(E::AgentRevoked), "approve: AgentRevoked");
     cover!(
         out.err() == Some(E::ActionMismatch),
         "approve: ActionMismatch"
     );
     cover!(out.err() == Some(E::SelfApproval), "approve: SelfApproval");
+}
+
+pub fn step_reject(src: &mut impl Src) {
+    let Some((mut s, h)) = inv_state(src) else {
+        return;
+    };
+    let op = gen::op_rej(src, &s, &clock(&h));
+    assume!(time_ok(&s, &h, &op));
+    let (_, out) = check_step(&mut s, &h, &op, src.part());
+    cover!(out.is_ok(), "reject: Ok");
+    cover!(out.err() == Some(E::IndirectCall), "reject: IndirectCall");
+    cover!(out.err() == Some(E::UnknownKey), "reject: UnknownKey");
+    cover!(out.err() == Some(E::WrongRole), "reject: WrongRole");
+    cover!(
+        out.err() == Some(E::KeyAccountMismatch),
+        "reject: KeyAccountMismatch"
+    );
+    cover!(
+        out.err() == Some(E::RequestNotFound),
+        "reject: RequestNotFound"
+    );
+    cover!(
+        out.err() == Some(E::AlreadyApproved),
+        "reject: AlreadyApproved"
+    );
+    cover!(
+        out.err() == Some(E::AlreadyRejected),
+        "reject: AlreadyRejected"
+    );
+    cover!(out.err() == Some(E::AgentRevoked), "reject: AgentRevoked");
+    cover!(out.err() == Some(E::SelfApproval), "reject: SelfApproval");
 }
 
 // ---------------------------------------------------------------------------
@@ -379,7 +470,7 @@ fn check_raw(s: &mut S, op: &Op) -> (Snap, Out) {
     let exp = expected(s, op);
     let pre = snap(s);
     let out = apply(s, op); // PROP: ROB-1
-    assert!(out == exp, "TX exact result (raw)"); // PROP: TX-1 TX-2 TX-3 TX-4 TX-5
+    assert!(out == exp, "TX exact result (raw)"); // PROP: TX-1 TX-2 TX-3 TX-4 TX-5 TX-7
     if !out.is_ok() {
         assert!(same_as(s, &pre), "TX-0 atomic failure (raw)"); // PROP: TX-0
     }
@@ -415,11 +506,16 @@ pub fn raw_add(src: &mut impl Src) {
     // PROP: HIST-7
     assert!(same_r_l(&s, &pre), "HIST-7 add leaves R, L unchanged");
     cover!(out.is_ok(), "raw add: Ok");
+    // PROP: ROB-2
+    cover!(
+        out.err() == Some(E::LogFull),
+        "raw add: LogFull at G = MAXU"
+    );
 }
 
 pub fn raw_revoke(src: &mut impl Src) {
     let mut s = gen::state(src, true);
-    let op = gen::op_revoke(src, &s);
+    let op = gen::op_revoke(src, &s, &Ghost::init());
     let (pre, out) = check_raw(&mut s, &op);
     // PROP: HIST-7
     assert!(same_r_l(&s, &pre), "HIST-7 revoke leaves R, L unchanged");
@@ -467,6 +563,19 @@ pub fn raw_approve(src: &mut impl Src) {
     cover!(out.is_ok(), "raw approve: Ok");
 }
 
+pub fn raw_reject(src: &mut impl Src) {
+    let mut s = gen::state(src, true);
+    let h = Ghost::init();
+    let op = gen::op_rej(src, &s, &h);
+    let (pre, out) = check_raw(&mut s, &op);
+    // Rejecting never touches the log, from any state.
+    assert!(
+        s.nl() == pre.nl && (0..pre.nl).all(|j| s.log(j) == pre.l[j]),
+        "HIST-7 reject leaves L unchanged"
+    );
+    cover!(out.is_ok(), "raw reject: Ok");
+}
+
 // ---------------------------------------------------------------------------
 // h_read
 // ---------------------------------------------------------------------------
@@ -512,9 +621,33 @@ fn read_point(src: &mut impl Src, s: &S) {
     let want_st = r_get(s, id).map(|r| match status(s, r) {
         St::Pending => RequestStatus::Pending,
         St::Approved => RequestStatus::Approved,
+        St::Rejected => RequestStatus::Rejected,
         St::Void => RequestStatus::Void,
     });
     assert!(st == want_st, "RD-7 request_status");
+
+    // PROP: RD-8
+    let mut revoked_agent = false;
+    if let Some(p) = &got {
+        let pr = proof_revocations(s, p);
+        assert!(
+            pr.agent == v_get(s, p.agent_registration_id)
+                && pr.approver == v_get(s, p.approver_registration_id),
+            "RD-8 proof_revocations = V of the proof's registrations"
+        );
+        // Under Inv (INV-11, 15, 16): None exactly when the registration is
+        // still the key's current one.
+        let cur = |k| p_get(s, k).map(|q| q.registration_id);
+        assert!(
+            pr.agent.is_none() == (cur(&p.agent_key) == Some(p.agent_registration_id)),
+            "RD-8 agent revocation reported iff the registration is gone"
+        );
+        assert!(
+            pr.approver.is_none() == (cur(&p.approver_key) == Some(p.approver_registration_id)),
+            "RD-8 approver revocation reported iff the registration is gone"
+        );
+        revoked_agent = pr.agent.is_some();
+    }
 
     // PROP: RD-5
     if let Some(p) = got {
@@ -538,6 +671,8 @@ fn read_point(src: &mut impl Src, s: &S) {
     }
 
     cover!(st == Some(RequestStatus::Void), "read: void status");
+    cover!(st == Some(RequestStatus::Rejected), "read: rejected status");
+    cover!(revoked_agent, "read: proof whose agent key was revoked");
 }
 
 fn read_page(src: &mut impl Src, s: &S, part: u8) {
@@ -573,14 +708,10 @@ fn page_exact(s: &S, from: u64, limit: u64, page: &[Proof]) {
     let mut n = 0;
     while j < end {
         let i = s.log(j as usize);
-        assert!(
-            proof_of(&page[n], s, i),
-            "RD-2 page entry = proof(R[L[j]])"
-        );
+        assert!(proof_of(&page[n], s, i), "RD-2 page entry = proof(R[L[j]])");
         j += 1;
         n += 1;
     }
-
 }
 
 fn page_findable(s: &S, page: &[Proof]) {
@@ -610,9 +741,11 @@ fn proof_of(p: &Proof, s: &S, i: u64) -> bool {
                         && p.action == r.action
                         && p.agent_account_id == r.agent_account_id
                         && p.agent_key == r.agent_key
+                        && p.agent_registration_id == r.agent_registration_id
                         && p.requested_at == r.requested_at
                         && p.approver_account_id == x.approver_account_id
                         && p.approver_key == x.approver_key
+                        && p.approver_registration_id == x.approver_registration_id
                         && p.approved_at == x.approved_at
                 }
                 None => false,
@@ -636,7 +769,7 @@ pub const BMC_MAX_R: usize = 2;
 pub fn bmc_from_init(src: &mut impl Src) {
     let mut s: S = crate::store::ArrStore::new(OWNER);
     let mut h = Some(Ghost::init());
-    let mut approved_once = [0u8; BMC_DEPTH];
+    let mut decided = [0u8; BMC_DEPTH];
     let mut revoked_then_readded = false;
     let mut d = 0;
     while d < BMC_DEPTH {
@@ -646,7 +779,7 @@ pub fn bmc_from_init(src: &mut impl Src) {
         let op = if src.hint(50) {
             match SCRIPT[d] {
                 0 => gen::op_add(src, &s),
-                1 => gen::op_revoke(src, &s),
+                1 => gen::op_revoke(src, &s, &clock(&h)),
                 2 => gen::op_req(src, &s, &clock(&h)),
                 _ => gen::op_appr(src, &s, &clock(&h)),
             }
@@ -657,23 +790,19 @@ pub fn bmc_from_init(src: &mut impl Src) {
         // Harness bound: at most BMC_MAX_R requests along a trace.
         assume!(!matches!(op, Op::Req { .. }) || s.nr() < BMC_MAX_R);
         let ak = match &op {
-            Op::Appr { id, .. } if *id < s.nr() as u64 => {
+            Op::Appr { id, .. } | Op::Rej { id, .. } if *id < s.nr() as u64 => {
                 Some(s.req(*id as usize).agent_key.clone())
             }
             _ => None,
         };
         let (h2, out) = check_step(&mut s, &h, &op, src.part());
         // PROP: TR-2
-        if let (Op::Appr { id, .. }, true) = (&op, out.is_ok()) {
-            approved_once[*id as usize] += 1;
-            assert!(
-                approved_once[*id as usize] == 1,
-                "TR-2 approved at most once"
-            );
+        if let (Op::Appr { id, .. } | Op::Rej { id, .. }, true) = (&op, out.is_ok()) {
+            decided[*id as usize] += 1;
+            assert!(decided[*id as usize] == 1, "TR-2 decided at most once");
         }
         // PROP: TR-3
-        if let (Op::Appr { id, .. }, Some(E::AgentRevoked)) = (&op, out.err()) {
-            let _ = id;
+        if let (Op::Appr { .. }, Some(E::AgentRevoked)) = (&op, out.err()) {
             revoked_then_readded |= p_get(&s, ak.as_ref().unwrap()).is_some();
         }
         h = h2;
@@ -681,6 +810,10 @@ pub fn bmc_from_init(src: &mut impl Src) {
     }
     // PROP: TR-5
     cover!(n_l(&s) > 0, "bmc: approved");
+    cover!(
+        (0..s.nr()).any(|i| s.req(i).rejection.is_some()),
+        "bmc: rejected"
+    );
     cover!(
         revoked_then_readded,
         "bmc: revoke, re-add, approve old id fails with AgentRevoked"

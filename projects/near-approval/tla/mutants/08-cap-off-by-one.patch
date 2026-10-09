@@ -1,6 +1,6 @@
 --- a/ApprovalCore.tla
 +++ b/ApprovalCore.tla
-@@ -123,7 +123,7 @@
+@@ -135,7 +135,7 @@
      IF a # "Ok" THEN a
      ELSE IF x = Empty THEN "EmptyAction"
      ELSE IF x = TooLong THEN "ActionTooLong"

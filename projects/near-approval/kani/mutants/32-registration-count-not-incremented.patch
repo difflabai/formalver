@@ -1,0 +1,11 @@
+# killed-by: h_step_add
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -339,7 +339,6 @@
+         active_from: store.request_count(),
+         pending: 0,
+     };
+-    store.increment_registration_count();
+     store.insert_principal(key, principal.clone());
+     Ok(principal)
+ }

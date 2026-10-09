@@ -1,0 +1,42 @@
+# Weekly check of upstreams that near-approval's assumptions cite or that
+# near-proofs/ submits to (tools/upstream-watch.toml). Opens or updates one
+# issue when a watched path changed since its `seen` commit.
+name: upstream-watch
+
+on:
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  upstream-watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compare watched upstream paths
+        id: watch
+        run: |
+          set +e
+          tools/scripts/upstream-watch.sh > "$RUNNER_TEMP/report.md"
+          rc=$?
+          cat "$RUNNER_TEMP/report.md"
+          [ $rc -le 1 ] || exit $rc
+          echo "changed=$rc" >> "$GITHUB_OUTPUT"
+      - name: Open or update the issue
+        if: steps.watch.outputs.changed == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Upstream changed: review near-approval sources and near-proofs"
+          n=$(gh issue list --state open --search "in:title \"$title\"" --json number -q '.[0].number')
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --body-file "$RUNNER_TEMP/report.md"
+          else
+            gh issue create --title "$title" --body-file "$RUNNER_TEMP/report.md"
+          fi

@@ -1,0 +1,11 @@
+--- a/ApprovalCore.tla
++++ b/ApprovalCore.tla
+@@ -193,7 +193,7 @@
+ RevokeKey(c, k) ==
+     /\ RevokeErr(c, k) = "Ok"
+     /\ principals' = [principals EXCEPT ![k] = NoPrincipal]
+-    /\ revoked' = revoked \cup {principals[k].rid}
++    /\ revoked' = revoked
+     /\ UNCHANGED <<requests, log, regs, ghost>>
+ 
+ RequestAction(pred, signer, k, x) ==
