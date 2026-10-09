@@ -3,10 +3,11 @@
 # strategy.md section 6.2 requires: every harness verifies with unwinding
 # assertions on, every cover is SATISFIED, and h_canary FAILS.
 #
-# A harness split into instances (h_step_request and h_step_request_empty;
-# h_read, h_read_page and h_read_find) forms a family: a cover must be
-# SATISFIED in at least one instance of its family, and may be UNREACHABLE
-# or UNSATISFIABLE in the others.
+# A harness split into instances forms a family: the parts of a step
+# harness (_tx, _post, _hist, _inv, _reg) and its _empty instance; h_read,
+# h_read_page and h_read_find. A cover must be SATISFIED in at least one
+# instance of its family, and may be UNREACHABLE or UNSATISFIABLE in the
+# others.
 #
 # usage: tools/scripts/run-kani.sh near-approval [harness...]
 # env:   KANI (default: cargo kani), KANI_TIMEOUT seconds per harness (default 3600),
@@ -28,7 +29,9 @@ logs=${KANI_LOG_DIR:-$crate/target/kani-logs}
 mkdir -p "$logs"
 
 if [ $# -eq 0 ]; then
-  set -- $(grep -A3 '#\[kani::proof\]' "$crate/src/proofs.rs" | sed -n 's/^fn \(h_[a-z_]*\)().*/\1/p')
+  # Plain `fn h_*()` harnesses, plus the parts `step_parts!` generates.
+  set -- $( (grep -A3 '#\[kani::proof\]' "$crate/src/proofs.rs" | sed -n 's/^fn \(h_[a-z_]*\)().*/\1/p'
+             grep -oE '\bh_step_[a-z_]+_(tx|post|hist|inv|reg)\b' "$crate/src/proofs.rs") | awk '!seen[$0]++')
 fi
 
 fail=0
@@ -42,7 +45,8 @@ for h in "$@"; do
   rc=$?
   secs=$(( $(date +%s) - start ))
   covers=$(grep -oE '[0-9]+ of [0-9]+ cover properties satisfied' "$log" | tail -1)
-  family=${h%_empty}; family=${family%_page}; family=${family%_find}
+  family=${h%_tx}; family=${family%_post}; family=${family%_hist}; family=${family%_inv}; family=${family%_reg}
+  family=${family%_empty}; family=${family%_page}; family=${family%_find}
   awk -v fam="$family" '/^Check [0-9]+: .*\.cover\./ {c=1; next}
        c && /Status:/ {st=$NF; next}
        c && /Description:/ {sub(/.*Description: /, ""); print fam "\t" $0 "\t" st; c=0}' \

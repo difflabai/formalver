@@ -9,43 +9,97 @@ fn h_init() {
     checks::init(&mut Sym(None, checks::PART_ALL, false));
 }
 
-#[kani::proof]
-#[kani::unwind(5)]
-fn h_step_add() {
-    checks::step_add(&mut Sym(None, checks::PART_ALL, false));
+/// A step harness in five parts (section 6.3 fallback 1: split further):
+/// `_tx` exact result and atomic failure, `_post` exact post-state, `_hist`
+/// history and potential, `_inv`
+/// the `5736251` invariants, `_reg` the registration and decision
+/// invariants. Each part is its own CBMC run; a family's covers are checked
+/// across its parts.
+macro_rules! step_parts {
+    ($body:path, $empty:expr, $tx:ident, $post:ident, $hist:ident, $inv:ident, $reg:ident) => {
+        #[kani::proof]
+        #[kani::unwind(5)]
+        fn $tx() {
+            $body(&mut Sym(None, checks::PART_TX, $empty));
+        }
+        #[kani::proof]
+        #[kani::unwind(5)]
+        fn $post() {
+            $body(&mut Sym(None, checks::PART_POST, $empty));
+        }
+        #[kani::proof]
+        #[kani::unwind(5)]
+        fn $hist() {
+            $body(&mut Sym(None, checks::PART_HIST, $empty));
+        }
+        #[kani::proof]
+        #[kani::unwind(5)]
+        fn $inv() {
+            $body(&mut Sym(None, checks::PART_INV, $empty));
+        }
+        #[kani::proof]
+        #[kani::unwind(5)]
+        fn $reg() {
+            $body(&mut Sym(None, checks::PART_REG, $empty));
+        }
+    };
 }
 
-#[kani::proof]
-#[kani::unwind(5)]
-fn h_step_revoke() {
-    checks::step_revoke(&mut Sym(None, checks::PART_ALL, false));
-}
-
-#[kani::proof]
-#[kani::unwind(5)]
-fn h_step_request() {
-    checks::step_request(&mut Sym(None, checks::PART_ALL, false));
-}
-
-/// `h_step_request` with an empty action argument (lengths stay concrete,
-/// see `Src::empty_action`). Same family for cover checking.
-#[kani::proof]
-#[kani::unwind(5)]
-fn h_step_request_empty() {
-    checks::step_request(&mut Sym(None, checks::PART_ALL, true));
-}
-
-#[kani::proof]
-#[kani::unwind(5)]
-fn h_step_approve() {
-    checks::step_approve(&mut Sym(None, checks::PART_ALL, false));
-}
-
-#[kani::proof]
-#[kani::unwind(5)]
-fn h_step_reject() {
-    checks::step_reject(&mut Sym(None, checks::PART_ALL, false));
-}
+step_parts!(
+    checks::step_add,
+    false,
+    h_step_add_tx,
+    h_step_add_post,
+    h_step_add_hist,
+    h_step_add_inv,
+    h_step_add_reg
+);
+step_parts!(
+    checks::step_revoke,
+    false,
+    h_step_revoke_tx,
+    h_step_revoke_post,
+    h_step_revoke_hist,
+    h_step_revoke_inv,
+    h_step_revoke_reg
+);
+step_parts!(
+    checks::step_request,
+    false,
+    h_step_request_tx,
+    h_step_request_post,
+    h_step_request_hist,
+    h_step_request_inv,
+    h_step_request_reg
+);
+// `""` action instances (lengths stay concrete, see `Src::empty_action`).
+step_parts!(
+    checks::step_request,
+    true,
+    h_step_request_empty_tx,
+    h_step_request_empty_post,
+    h_step_request_empty_hist,
+    h_step_request_empty_inv,
+    h_step_request_empty_reg
+);
+step_parts!(
+    checks::step_approve,
+    false,
+    h_step_approve_tx,
+    h_step_approve_post,
+    h_step_approve_hist,
+    h_step_approve_inv,
+    h_step_approve_reg
+);
+step_parts!(
+    checks::step_reject,
+    false,
+    h_step_reject_tx,
+    h_step_reject_post,
+    h_step_reject_hist,
+    h_step_reject_inv,
+    h_step_reject_reg
+);
 
 #[kani::proof]
 #[kani::unwind(5)]

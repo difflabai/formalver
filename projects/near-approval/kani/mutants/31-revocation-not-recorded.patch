@@ -1,4 +1,4 @@
-# killed-by: h_step_revoke
+# killed-by: h_step_revoke_tx h_step_revoke_post
 --- a/core/src/lib.rs
 +++ b/core/src/lib.rs
 @@ -367,7 +367,6 @@

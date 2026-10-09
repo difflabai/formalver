@@ -1,4 +1,4 @@
-# killed-by: h_step_add
+# killed-by: h_step_add_tx h_step_add_post
 --- a/core/src/lib.rs
 +++ b/core/src/lib.rs
 @@ -339,7 +339,6 @@

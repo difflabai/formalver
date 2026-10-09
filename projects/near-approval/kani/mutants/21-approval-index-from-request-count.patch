@@ -1,4 +1,4 @@
-# killed-by: h_step_approve
+# killed-by: h_step_approve_tx h_step_approve_post
 --- a/core/src/lib.rs
 +++ b/core/src/lib.rs
 @@ -496,7 +496,7 @@

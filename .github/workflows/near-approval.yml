@@ -90,23 +90,48 @@ jobs:
     # variable to a larger runner label (and KANI_SWAP_GB to 0) to avoid
     # relying on swap.
     runs-on: ${{ vars.KANI_RUNNER || 'ubuntu-latest' }}
-    # A group runs up to 3 harnesses of KANI_TIMEOUT (60 min) each.
-    timeout-minutes: 200
+    # A step part may need most of KANI_TIMEOUT (120 min) on swap.
+    timeout-minutes: 300
     env:
       KANI_SWAP_GB: ${{ vars.KANI_SWAP_GB || '16' }}
     strategy:
       fail-fast: false
       matrix:
-        # The slow families (h_read, h_step_request) run one harness per job;
-        # the covers job checks each family's covers across all jobs.
+        # Each step harness runs as five parts (tx, post, hist, inv, reg) and
+        # the slow families one harness per job; the covers job checks each
+        # family's covers across all jobs.
         group:
           - "h_init h_canary"
-          - "h_step_add"
-          - "h_step_revoke"
-          - "h_step_request"
-          - "h_step_request_empty"
-          - "h_step_approve"
-          - "h_step_reject"
+          - "h_step_add_tx"
+          - "h_step_add_post"
+          - "h_step_add_hist"
+          - "h_step_add_inv"
+          - "h_step_add_reg"
+          - "h_step_revoke_tx"
+          - "h_step_revoke_post"
+          - "h_step_revoke_hist"
+          - "h_step_revoke_inv"
+          - "h_step_revoke_reg"
+          - "h_step_request_tx"
+          - "h_step_request_post"
+          - "h_step_request_hist"
+          - "h_step_request_inv"
+          - "h_step_request_reg"
+          - "h_step_request_empty_tx"
+          - "h_step_request_empty_post"
+          - "h_step_request_empty_hist"
+          - "h_step_request_empty_inv"
+          - "h_step_request_empty_reg"
+          - "h_step_approve_tx"
+          - "h_step_approve_post"
+          - "h_step_approve_hist"
+          - "h_step_approve_inv"
+          - "h_step_approve_reg"
+          - "h_step_reject_tx"
+          - "h_step_reject_post"
+          - "h_step_reject_hist"
+          - "h_step_reject_inv"
+          - "h_step_reject_reg"
           - "h_raw_add h_raw_revoke h_raw_approve h_raw_reject"
           - "h_raw_request h_raw_request_empty"
           - "h_read"
@@ -150,7 +175,7 @@ jobs:
           echo "::notice::swap ${gb} GB, disk free $(df --output=avail -BG / | tail -1)"
       - name: Kani ${{ matrix.group }}
         env:
-          KANI_TIMEOUT: "3600"
+          KANI_TIMEOUT: "7200"
           KANI_LOG_DIR: ${{ runner.temp }}/kani-logs
           KANI_DEFER_COVERS: "1"
         run: tools/scripts/run-kani.sh near-approval ${{ matrix.group }}
@@ -183,8 +208,9 @@ jobs:
     needs: pin
     if: github.event.schedule == '41 4 * * 0' || inputs.mutants
     runs-on: ${{ vars.KANI_RUNNER || 'ubuntu-latest' }}
-    # Up to 2 harnesses of KANI_TIMEOUT (60 min) each, plus builds.
-    timeout-minutes: 150
+    # Up to 2 harnesses (6 for the must-survive mutants) of KANI_TIMEOUT
+    # (60 min) each, plus builds.
+    timeout-minutes: 360
     env:
       KANI_SWAP_GB: ${{ vars.KANI_SWAP_GB || '16' }}
     strategy:

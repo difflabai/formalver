@@ -33,6 +33,21 @@ pub fn time(src: &mut impl Src) -> BlockTime {
     }
 }
 
+/// A time stored in a generated state: free in raw states; in `Inv`
+/// states each component is drawn from `0..16`. Times are only copied and
+/// compared (`==`, component-wise `≤`), and a state plus one step holds at
+/// most 10 of them, so any assignment is order-isomorphic to one in range.
+pub fn state_time(src: &mut impl Src, raw: bool) -> BlockTime {
+    if raw {
+        time(src)
+    } else {
+        BlockTime {
+            height: src.below(16) as u64,
+            timestamp_ns: src.below(16) as u64,
+        }
+    }
+}
+
 /// One of [`ACTIONS`], built from its bytes so its length is concrete.
 pub fn alphabet_action(src: &mut impl Src) -> String {
     let b = ACTION_BYTES[src.below(ACTION_BYTES.len() as u8) as usize];
@@ -111,7 +126,7 @@ pub fn state(src: &mut impl Src, raw: bool) -> S {
                 approver_account_id: src.acct(),
                 approver_key: src.key(),
                 approver_registration_id: reg_id(src, raw),
-                approved_at: time(src),
+                approved_at: state_time(src, raw),
             })
         } else {
             None
@@ -121,7 +136,7 @@ pub fn state(src: &mut impl Src, raw: bool) -> S {
                 approver_account_id: src.acct(),
                 approver_key: src.key(),
                 approver_registration_id: reg_id(src, raw),
-                rejected_at: time(src),
+                rejected_at: state_time(src, raw),
             })
         } else {
             None
@@ -132,7 +147,7 @@ pub fn state(src: &mut impl Src, raw: bool) -> S {
             agent_key: src.key(),
             agent_registration_id: reg_id(src, raw),
             action: stored_action(src, raw),
-            requested_at: time(src),
+            requested_at: state_time(src, raw),
             approval,
             rejection,
         });
@@ -147,7 +162,7 @@ pub fn state(src: &mut impl Src, raw: bool) -> S {
     let mut j = 0;
     while j < nv {
         let g = reg_id(src, raw);
-        s.push_rev_raw(g, time(src));
+        s.push_rev_raw(g, state_time(src, raw));
         j += 1;
     }
     s.set_g(if raw {

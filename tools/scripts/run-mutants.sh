@@ -6,7 +6,7 @@
 # usage: tools/scripts/run-mutants.sh near-approval [--kani] [patch-glob]
 #   default: plain mode (cargo test) for every mutant
 #   --kani:  also run the mutant's "killed-by" harness under Kani
-#            (for must-survive mutants: h_step_approve and h_read)
+#            (for must-survive mutants: every h_step_approve part and h_read)
 set -uo pipefail
 
 project=${1:?usage: run-mutants.sh <project> [--kani] [glob]}
@@ -65,7 +65,7 @@ for p in "$proj"/kani/mutants/$glob.patch; do
   # Must-survive mutants are equivalent only under Inv (F-14): raw harnesses
   # see non-Inv states and rightly tell them apart, so they are excluded.
   plain_filter=""
-  if grep -q "^# must-survive" "$p"; then expect=survive; harnesses="h_step_approve h_read"
+  if grep -q "^# must-survive" "$p"; then expect=survive; harnesses="h_step_approve_tx h_step_approve_post h_step_approve_hist h_step_approve_inv h_step_approve_reg h_read"
     plain_filter="--skip h_raw_"
   else expect=killed; harnesses=$(sed -n 's/^# killed-by: //p' "$p"); fi
 

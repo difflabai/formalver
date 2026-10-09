@@ -102,6 +102,17 @@ impl Out {
     }
 }
 
+/// `op` with its time argument (if it has one) replaced by `t`.
+pub fn with_time(op: Op, t: BlockTime) -> Op {
+    match op {
+        Op::Revoke { caller, key, .. } => Op::Revoke { caller, key, t },
+        Op::Req { c, action, .. } => Op::Req { c, action, t },
+        Op::Appr { c, id, action, .. } => Op::Appr { c, id, action, t },
+        Op::Rej { c, id, .. } => Op::Rej { c, id, t },
+        op => op,
+    }
+}
+
 /// Runs `op` through the real core.
 pub fn apply(s: &mut S, op: &Op) -> Out {
     match op {
