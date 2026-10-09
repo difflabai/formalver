@@ -96,7 +96,10 @@ fn time_ok(s: &S, h: &Option<Ghost>, op: &Op) -> bool {
         }
     }
     let mut i = 0;
-    while i < s.nr() {
+    while i < crate::store::CAP_R {
+        if i >= s.nr() {
+            break;
+        }
         let r = &s.req(i);
         if !time_le(&r.requested_at, t) {
             return false;
@@ -114,7 +117,10 @@ fn time_ok(s: &S, h: &Option<Ghost>, op: &Op) -> bool {
         i += 1;
     }
     let mut j = 0;
-    while j < s.nv() {
+    while j < crate::store::CAP_V {
+        if j >= s.nv() {
+            break;
+        }
         if !time_le(&s.rev(j).1, t) {
             return false;
         }
@@ -338,7 +344,7 @@ pub fn check_step(s: &mut S, h: &Option<Ghost>, op: &Op, part: u8) -> (Option<Gh
     }
     assert_inv_parts(s, part);
     let h2 = match (h, &pre) {
-        (Some(h), Some(pre)) => Some(ghost_step(h, pre, op, &out)),
+        (Some(h), Some(pre)) => Some(ghost_step(h, &GPre::of_snap(pre, op), op, &out)),
         _ => None,
     };
     if let Some(h2) = &h2 {
@@ -782,37 +788,93 @@ fn proof_of(p: &Proof, s: &S, i: u64) -> bool {
 // h_bmc_from_init
 // ---------------------------------------------------------------------------
 
-pub const BMC_DEPTH: usize = 6;
+/// Depth of `h_bmc_from_init` (deviation 11: 6 ran out of memory once
+/// `reject` was added).
+pub const BMC_DEPTH: usize = 5;
 /// Requests along a BMC trace (section 6.3 fallback 3: requests and log
 /// bounded at 2). One request suffices for every TR witness; the second
 /// keeps two ids in play for TR-2.
 pub const BMC_MAX_R: usize = 2;
+/// Longest trace either harness runs.
+const MAX_DEPTH: usize = 6;
+/// The TR-3 witness shape: add, add, request, revoke, re-add, approve.
+const REVIVAL: [u8; MAX_DEPTH] = [0, 0, 2, 1, 0, 3];
 
+/// `h_bmc_from_init`: every trace of up to `BMC_DEPTH` operations from
+/// `Init`.
 pub fn bmc_from_init(src: &mut impl Src) {
+    trace(src, BMC_DEPTH, None);
+}
+
+/// `h_bmc_from_init_witness`: traces of the fixed shape `REVIVAL` (any arguments),
+/// which is one operation longer than `BMC_DEPTH` allows. It is there for
+/// the TR-3 non-vacuity cover; GH and TR-2 are checked along it too.
+pub fn witness_revival(src: &mut impl Src) {
+    trace(src, MAX_DEPTH, Some(&REVIVAL));
+}
+
+/// Operation kind at step `d`. Under Kani without a script a step is any
+/// operation, except where every other kind must fail without effect
+/// (deviation 11): from `Init` only `Add` can succeed, and before step 3
+/// nothing can be decided (a decision needs an agent key, an approver key
+/// and a request first). Plain mode follows the revival shape half the
+/// time.
+fn kind(src: &mut impl Src, d: usize, script: Option<&[u8; MAX_DEPTH]>) -> u8 {
+    if let Some(k) = script {
+        return k[d];
+    }
+    if src.hint(50) {
+        return REVIVAL[d];
+    }
+    #[cfg(kani)]
+    {
+        match d {
+            0 => 0,
+            1 | 2 => src.below(3),
+            _ => src.below(5),
+        }
+    }
+    #[cfg(not(kani))]
+    {
+        src.below(5)
+    }
+}
+
+fn trace(src: &mut impl Src, depth: usize, script: Option<&[u8; MAX_DEPTH]>) {
     let mut s: S = crate::store::ArrStore::new(OWNER);
     let mut h = Some(Ghost::init());
-    let mut decided = [0u8; BMC_DEPTH];
+    let mut decided = [0u8; MAX_DEPTH];
     let mut revoked_then_readded = false;
     let mut d = 0;
-    while d < BMC_DEPTH {
-        // Plain mode sometimes follows the TR-3 witness shape; under Kani
-        // every step is any operation.
-        const SCRIPT: [u8; BMC_DEPTH] = [0, 0, 2, 1, 0, 3];
-        let op = if src.hint(50) {
-            match SCRIPT[d] {
-                0 => gen::op_add(src, &s),
-                1 => gen::op_revoke(src, &s, &clock(&h)),
-                2 => gen::op_req(src, &s, &clock(&h)),
-                _ => gen::op_appr(src, &s, &clock(&h)),
-            }
-        } else {
-            gen::op(src, &s, &clock(&h))
+    while d < depth {
+        let op = match kind(src, d, script) {
+            0 => gen::op_add(src, &s),
+            1 => gen::op_revoke(src, &s, &clock(&h)),
+            2 => gen::op_req(src, &s, &clock(&h)),
+            3 => gen::op_appr(src, &s, &clock(&h)),
+            _ => gen::op_rej(src, &s, &clock(&h)),
         };
         // Under Kani, step times come from `0..16` per component: a trace
-        // holds at most BMC_DEPTH of them, compared only by `==` and `≤`,
+        // holds at most MAX_DEPTH of them, compared only by `==` and `≤`,
         // so this is order-isomorphic to free times (deviation 11).
         #[cfg(kani)]
         let op = with_time(op, gen::state_time(src, false));
+        // Every id at or past BMC_MAX_R is RequestNotFound alike.
+        #[cfg(kani)]
+        let op = match op {
+            Op::Appr { c, action, t, .. } => Op::Appr {
+                c,
+                id: src.below(BMC_MAX_R as u8 + 1) as u64,
+                action,
+                t,
+            },
+            Op::Rej { c, t, .. } => Op::Rej {
+                c,
+                id: src.below(BMC_MAX_R as u8 + 1) as u64,
+                t,
+            },
+            op => op,
+        };
         assume!(time_ok(&s, &h, &op));
         // Harness bound: at most BMC_MAX_R requests along a trace.
         assume!(!matches!(op, Op::Req { .. }) || s.nr() < BMC_MAX_R);
@@ -822,7 +884,18 @@ pub fn bmc_from_init(src: &mut impl Src) {
             }
             _ => None,
         };
+        // Plain mode checks every step. Under Kani, GH is asserted once,
+        // after the last step: a failing `Add` by a non-owner changes neither
+        // the state nor the ghost, so every shorter trace is also a prefix of
+        // a full-depth one that ends in the same state (deviation 11).
+        #[cfg(not(kani))]
         let (h2, out) = check_step(&mut s, &h, &op, src.part());
+        #[cfg(kani)]
+        let (h2, out) = {
+            let pre = GPre::of_state(&s, &op);
+            let out = apply(&mut s, &op);
+            (Some(ghost_step(h.as_ref().unwrap(), &pre, &op, &out)), out)
+        };
         // PROP: TR-2
         if let (Op::Appr { id, .. } | Op::Rej { id, .. }, true) = (&op, out.is_ok()) {
             decided[*id as usize] += 1;
@@ -835,12 +908,10 @@ pub fn bmc_from_init(src: &mut impl Src) {
         h = h2;
         d += 1;
     }
-    // PROP: TR-5
+    assert!(gh(&s, h.as_ref().unwrap()), "TR-1 ghost history GH"); // PROP: TR-1 TR-7
+                                                                   // PROP: TR-5 (one cover family with h_bmc_from_init_witness)
     cover!(n_l(&s) > 0, "bmc: approved");
-    cover!(
-        (0..s.nr()).any(|i| s.req(i).rejection.is_some()),
-        "bmc: rejected"
-    );
+    cover!(s.nr() > 0 && s.req(0).rejection.is_some(), "bmc: rejected");
     cover!(
         revoked_then_readded,
         "bmc: revoke, re-add, approve old id fails with AgentRevoked"

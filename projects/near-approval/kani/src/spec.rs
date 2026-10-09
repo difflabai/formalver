@@ -1130,8 +1130,55 @@ impl Ghost {
     }
 }
 
-/// `H'` after `op` ran on the pre-state `pre` with result `out`.
-pub fn ghost_step(h: &Ghost, pre: &Snap, op: &Op, out: &Out) -> Ghost {
+/// What `ghost_step` reads from the pre-state: the caller key's
+/// registration, the agent key of the decided request, and `#L`. Taken
+/// before the step, without snapshotting the whole store.
+#[derive(Clone, Debug)]
+pub struct GPre {
+    pub signer: Option<Principal<Acct>>,
+    pub ak: Option<Key>,
+    pub nl: u64,
+}
+
+impl GPre {
+    pub fn of_state(s: &S, op: &Op) -> Self {
+        let (signer, ak) = match op {
+            Op::Req { c, .. } => (p_get(s, &c.signer_key), None),
+            Op::Appr { c, id, .. } | Op::Rej { c, id, .. } => (
+                p_get(s, &c.signer_key),
+                r_get(s, *id).map(|r| r.agent_key.clone()),
+            ),
+            _ => (None, None),
+        };
+        GPre {
+            signer,
+            ak,
+            nl: n_l(s),
+        }
+    }
+    pub fn of_snap(pre: &Snap, op: &Op) -> Self {
+        let (signer, ak) = match op {
+            Op::Req { c, .. } => (pre.p_get(&c.signer_key), None),
+            Op::Appr { c, id, .. } | Op::Rej { c, id, .. } => (
+                pre.p_get(&c.signer_key),
+                if (*id as usize) < pre.nr {
+                    Some(pre.req(*id as usize).ak.clone())
+                } else {
+                    None
+                },
+            ),
+            _ => (None, None),
+        };
+        GPre {
+            signer,
+            ak,
+            nl: pre.nl as u64,
+        }
+    }
+}
+
+/// `H'` after `op` ran on a pre-state (seen through `pre`) with result `out`.
+pub fn ghost_step(h: &Ghost, pre: &GPre, op: &Op, out: &Out) -> Ghost {
     let mut h = *h;
     match op {
         Op::Revoke { t, .. } | Op::Req { t, .. } | Op::Appr { t, .. } | Op::Rej { t, .. } => {
@@ -1153,7 +1200,7 @@ pub fn ghost_step(h: &Ghost, pre: &Snap, op: &Op, out: &Out) -> Ghost {
             h.reg[key.0 as usize] = None;
         }
         Op::Req { c, action, t } => {
-            let p = pre.p_get(&c.signer_key).unwrap();
+            let p = pre.signer.as_ref().unwrap();
             h.req[h.n] = Some(ReqRec {
                 c: CallRec::of(c),
                 act: act_code(action),
@@ -1167,10 +1214,10 @@ pub fn ghost_step(h: &Ghost, pre: &Snap, op: &Op, out: &Out) -> Ghost {
             h.n += 1;
         }
         Op::Appr { c, id, action, t } => {
-            h.appr[*id as usize] = Some(dec_rec(&h, pre, c, *id, act_code(action), *t));
+            h.appr[*id as usize] = Some(dec_rec(&h, pre, c, act_code(action), *t));
         }
         Op::Rej { c, id, t } => {
-            let mut d = dec_rec(&h, pre, c, *id, 0, *t);
+            let mut d = dec_rec(&h, pre, c, 0, *t);
             d.log_len = 0;
             h.rej[*id as usize] = Some(d);
         }
@@ -1178,9 +1225,9 @@ pub fn ghost_step(h: &Ghost, pre: &Snap, op: &Op, out: &Out) -> Ghost {
     h
 }
 
-fn dec_rec(h: &Ghost, pre: &Snap, c: &C, id: u64, act: u8, t: BlockTime) -> DecRec {
-    let p = pre.p_get(&c.signer_key).unwrap();
-    let ak = &pre.req(id as usize).ak;
+fn dec_rec(h: &Ghost, pre: &GPre, c: &C, act: u8, t: BlockTime) -> DecRec {
+    let p = pre.signer.as_ref().unwrap();
+    let ak = pre.ak.as_ref().unwrap();
     DecRec {
         c: CallRec::of(c),
         act,
@@ -1189,7 +1236,7 @@ fn dec_rec(h: &Ghost, pre: &Snap, c: &C, id: u64, act: u8, t: BlockTime) -> DecR
         role: p.role,
         reg: h.reg[c.signer_key.0 as usize],
         agent_reg: h.reg[ak.0 as usize],
-        log_len: pre.nl as u64,
+        log_len: pre.nl,
     }
 }
 
@@ -1265,7 +1312,10 @@ pub fn gh(s: &S, h: &Ghost) -> bool {
         return false;
     }
     let mut j = 0;
-    while j < h.nrev {
+    while j < CV {
+        if j >= h.nrev {
+            break;
+        }
         let Some((g, t)) = h.rev[j] else { return false };
         if s.rev(j) != (g as u64, t) || !time_le(&t, &h.now) {
             return false;
@@ -1273,7 +1323,10 @@ pub fn gh(s: &S, h: &Ghost) -> bool {
         j += 1;
     }
     let mut i = 0;
-    while i < h.n {
+    while i < CR {
+        if i >= h.n {
+            break;
+        }
         let r = &s.req(i);
         let Some(q) = &h.req[i] else { return false };
         // Times never exceed the clock.
