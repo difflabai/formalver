@@ -359,7 +359,7 @@ within bounds), VC/VM (unbounded), PM and Kp.
 |---|---|---|
 | **TR-1** | **Provenance (headline).** If `approval(s,i) = Some(π)` for `s ∈ Reach`, there are steps `k₁ < k₂` where: <br>(a) `ops[k₁]` is a successful `Req(c₁, π.action, π.requested_at)` creating `i`, with `c₁.pred = c₁.sig = π.agent_account_id`, `c₁.key = π.agent_key`, and `P_{k₁}(π.agent_key)` an Agent registration of that account; <br>(b) `ops[k₂]` is a successful `Appr(c₂, i, π.action, π.approved_at)` with `c₂.pred = c₂.sig = π.approver_account_id ≠ π.agent_account_id`, `P_{k₂}(π.approver_key)` an Approver registration of that account, and `π.approval_index = #L_{k₂}`; <br>(c) `π.agent_key` was registered **continuously** (same registration) over `[k₁, k₂]`; <br>(d) `π.agent_registration_id` is the registration of (a) and (c), and `π.approver_registration_id` the one of (b). <br>With ASM-SIGNER and ASM-PRED: each key holder signed a tx from its own account that reached `C` directly, or through code on that account (F-9; excluded by VER-8). | K: ghost-history invariant `GH` (§6.1) checked in `h_init` and every `h_step_*` inductive step, plus `h_bmc_from_init` witnesses / VC, PM |
 | TR-2 | At most once: each `i` has at most one successful `Appr` or `Rej` in any trace. | K (HIST-2, INV-13, `AlreadyApproved`/`AlreadyRejected` in `h_step_approve` and `h_step_reject`; `h_bmc_from_init`) / VC, PM |
-| TR-3 | **Durable revocation:** if the registration of `R[i].ak` under which `i` was made is removed while `R[i]` is pending, then `R[i]` is never approved in any extension. This holds even if the key is re-registered to the same account and role. | K (HIST-8 + `AgentRevoked` in `h_step_*`; `h_bmc_from_init` witness: revoke, re-add, approve fails) / VC, PM (MC-1 must find **no** revival) |
+| TR-3 | **Durable revocation:** if the registration of `R[i].ak` under which `i` was made is removed while `R[i]` is pending, then `R[i]` is never approved in any extension. This holds even if the key is re-registered to the same account and role. | K (HIST-8 + `AgentRevoked` in `h_step_*`; `h_bmc_from_init_witness`: revoke, re-add, approve fails) / VC, PM (MC-1 must find **no** revival) |
 | TR-4 | Time order along the log (ASM-TIME): `j₁ < j₂ ⇒ approved_at(L[j₁]) ≤ approved_at(L[j₂])` | K / VC |
 | TR-5 | **Non-vacuity:** <br>• a witness reaches an approved, a rejected and a void state; <br>• every `ApprovalError` is produced by some reachable step, except `approve`'s `LogFull` (LEM-3); <br>• `request_action`'s `LogFull` only at `#R = MAXU` (ghost store). | K covers / VC, PM |
 | TR-6 | **Agent storage bound,** as a one-step potential: `Φ(s) = Σ_{k agent} (MAXP − pend_k) ≥ 0` (INV-9). A successful `Req` decreases `Φ` by exactly 1. `Φ` increases only on a successful `Appr` or `Rej` (by 1) or `Add` of an agent key (by `MAXP`). So a trace segment without decisions or `Add` makes at most `Φ` successful requests: storage growth without approver or owner action is bounded. | K (`h_step_*` for the `Φ` step; `h_raw_request` for the cap boundary) / VC |
@@ -542,6 +542,11 @@ against the pinned API.
 `run-kani.sh` fails the run on any `UNSATISFIABLE`/`UNREACHABLE` cover. Use
 `--fail-uncoverable` if the pinned Kani has it [conf: low-med].
 
+Each `h_step_{op}` row runs as five Kani harnesses, `_tx` (exact result,
+TX-0), `_post` (exact post-state), `_hist` (HIST, `Φ`), `_inv` (INV-0..10,
+LEM, TR-4) and `_reg` (INV-11..16): one CBMC run for all of them needed
+more than 15 GB once PR #15's state was added. They form one cover family.
+
 | Harness | Pre-state | Properties | Covers (must be SATISFIED) |
 |---|---|---|---|
 | `h_init` | `MemStore::new(OWNER)`, empty `H` | INV and GH at init | none |
@@ -551,7 +556,8 @@ against the pinned API.
 | `h_step_approve` | same; time monotone | TX-0, TX-3, TX-5, TX-6, HIST-*, INV, GH and LEM-1..3 step, INV-10, TR-2, TR-3, TR-4 steps, TR-6 `Φ` step | Ok, the 4 TX-3 errors, RequestNotFound, AlreadyApproved, AlreadyRejected, AgentRevoked, ActionMismatch, SelfApproval |
 | `h_step_reject` | same; time monotone | TX-0, TX-3, TX-7, TX-6, HIST-* (HIST-9), INV (INV-13), TR-2 step, TR-6 `Φ` step | Ok, the 4 TX-3 errors, RequestNotFound, AlreadyApproved, AlreadyRejected, AgentRevoked, SelfApproval |
 | `h_raw_{op}` | arbitrary store, **no** `assume(inv)`; `pend` any `u32`, `from`, `G` and registration ids any `u64` | ROB-1, TX-0, TX-1..5 and TX-7 exact result via `expected`, HIST-7 (add, revoke, reject); for request: the INV-9 bound step (`Ok ⇒ pend < MAXP ∧ pend' = pend + 1`) and the TX-4 cap boundary | Ok per op; add: LogFull at `G = MAXU`; request: Ok at `pend = MAXP − 1` and TooManyPending at `pend = MAXP` |
-| `h_bmc_from_init` | `Init` + ≤ 6 ops, ghost history | TR-1, TR-2, TR-3, TR-7 witnesses (bounded) | approved; rejected; revoke → re-add → approve old id fails with AgentRevoked |
+| `h_bmc_from_init` | `Init` + ≤ 5 ops (any kind, ≤ 2 requests), ghost history | GH (TR-1, TR-7) and TR-2 over every such trace | approved; rejected |
+| `h_bmc_from_init_witness` | `Init` + the 6 ops add, add, request, revoke, add, approve (any arguments) | the same, along that shape | revoke → re-add → approve old id fails with AgentRevoked |
 | `h_read` | like `h_step`; `id`, `from`, `limit` any `u64` | RD-1, RD-2, RD-5, RD-7, RD-8, LEM-4 | non-empty page; void status; rejected status; a proof whose agent key was revoked |
 | `h_page_arith` | `Window`: `from`, `limit`, `count`, `offset` any `u64`; out-of-page reads and any write panic; `#[kani::unwind(102)]` | RD-3, RD-6, and the page clamp | non-empty page at `count = MAXU` |
 | `h_proto_{request,approve}` | `Sparse` **raw** state (no `assume(inv)`), counters any `u64` ≥ stored size. ST-2 is also checked from `Inv` states with counters equal to size. | ST-2, ROB-2 | Ok; LogFull (approve's only from non-`Inv` states, per LEM-3) |

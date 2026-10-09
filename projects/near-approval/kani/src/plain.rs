@@ -78,12 +78,11 @@ fn h_read() {
 
 #[test]
 fn h_bmc_from_init() {
-    run(
-        "h_bmc_from_init",
-        0x6C8E_9CF5,
-        400_000,
-        checks::bmc_from_init,
-    );
+    // With its _witness instance: one cover family, as under Kani.
+    run("h_bmc_from_init", 0x6C8E_9CF5, 400_000, |r| {
+        checks::bmc_from_init(r);
+        checks::witness_revival(r);
+    });
 }
 
 #[test]

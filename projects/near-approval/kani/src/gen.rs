@@ -8,7 +8,7 @@
 
 use crate::ids::{Acct, ACTION_BYTES, OWNER};
 #[cfg(not(kani))]
-use crate::spec::{apply, ghost_step, snap};
+use crate::spec::{apply, ghost_step, GPre};
 use crate::spec::{Ghost, Op, C, S};
 use crate::src::Src;
 use crate::store::ArrStore;
@@ -333,7 +333,7 @@ pub fn random_walk(src: &mut impl Src, steps: usize) -> (S, Ghost) {
         if next.np() > MAX_P as usize || next.nr() > MAX_R as usize || next.nv() > MAX_V as usize {
             continue;
         }
-        h = ghost_step(&h, &snap(&s), &o, &out);
+        h = ghost_step(&h, &GPre::of_state(&s, &o), &o, &out);
         s = next;
     }
     (s, h)

@@ -138,6 +138,7 @@ jobs:
           - "h_read_page"
           - "h_read_find"
           - "h_bmc_from_init"
+          - "h_bmc_from_init_witness"
     steps:
       - uses: actions/checkout@v4
         with:

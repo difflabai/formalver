@@ -164,6 +164,13 @@ fn h_bmc_from_init() {
     checks::bmc_from_init(&mut Sym(None, 0, false));
 }
 
+/// The TR-3 witness, one step longer than `h_bmc_from_init`.
+#[kani::proof]
+#[kani::unwind(8)]
+fn h_bmc_from_init_witness() {
+    checks::witness_revival(&mut Sym(None, 0, false));
+}
+
 /// Must report FAILED (run-kani.sh inverts it).
 #[kani::proof]
 #[kani::unwind(5)]

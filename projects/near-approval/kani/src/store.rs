@@ -151,10 +151,12 @@ impl Store<Acct, Key> for ArrStore {
         &self.owner
     }
 
+    // Loops run to the fixed capacity, guarded by the count, so CBMC
+    // unrolls them exactly `CAP_P` times whatever the harness's unwind bound.
     fn principal(&self, key: &Key) -> Option<Principal<Acct>> {
         let mut i = 0;
-        while i < self.np {
-            if self.p[i].0 == *key {
+        while i < CAP_P {
+            if i < self.np && self.p[i].0 == *key {
                 return Some(self.p[i].1.clone());
             }
             i += 1;
@@ -164,8 +166,8 @@ impl Store<Acct, Key> for ArrStore {
 
     fn insert_principal(&mut self, key: Key, principal: Principal<Acct>) {
         let mut i = 0;
-        while i < self.np {
-            if self.p[i].0 == key {
+        while i < CAP_P {
+            if i < self.np && self.p[i].0 == key {
                 self.p[i].1 = principal;
                 return;
             }
@@ -176,12 +178,14 @@ impl Store<Acct, Key> for ArrStore {
 
     fn remove_principal(&mut self, key: &Key) -> Option<Principal<Acct>> {
         let mut i = 0;
-        while i < self.np {
-            if self.p[i].0 == *key {
+        while i < CAP_P {
+            if i < self.np && self.p[i].0 == *key {
                 let out = self.p[i].1.clone();
-                let mut j = i;
-                while j + 1 < self.np {
-                    self.p[j] = self.p[j + 1].clone();
+                let mut j = 0;
+                while j + 1 < CAP_P {
+                    if j >= i && j + 1 < self.np {
+                        self.p[j] = self.p[j + 1].clone();
+                    }
                     j += 1;
                 }
                 self.np -= 1;
