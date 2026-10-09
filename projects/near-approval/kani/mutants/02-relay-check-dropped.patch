@@ -1,7 +1,7 @@
 # killed-by: h_step_request
 --- a/core/src/lib.rs
 +++ b/core/src/lib.rs
-@@ -319,9 +319,6 @@
+@@ -391,9 +391,6 @@
      A: PartialEq,
      S: Store<A, K>,
  {

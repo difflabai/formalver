@@ -13,12 +13,13 @@
 use crate::ids::{Acct, Key, NA, NK};
 use crate::spec::{Ghost, S};
 
-/// Sizes of a generated state: `#P`, `#R`, `#L`.
+/// Sizes of a generated state: `#P`, `#R`, `#L`, `#V`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Shape {
     pub np: u8,
     pub nr: u8,
     pub nl: u8,
+    pub nv: u8,
 }
 
 pub trait Src {
@@ -36,7 +37,7 @@ pub trait Src {
     /// Plain mode only: a state reached from `Init` by a random walk, with
     /// its ghost history. Always `None` under Kani.
     fn reach(&mut self) -> Option<(S, Ghost)>;
-    /// Sizes `(#P, #R, #L)` of a generated state. Fixed per harness instance
+    /// Sizes `(#P, #R, #L, #V)` of a generated state. Fixed per harness instance
     /// under Kani (see `proofs.rs`), random in plain mode.
     fn shape(&mut self) -> Shape;
     /// Which groups of step checks to run (`checks::PART_*`). Kani splits
@@ -127,6 +128,7 @@ impl Src for Sym {
                 np: self.below(4),
                 nr: self.below(4),
                 nl: self.below(4),
+                nv: self.below(4),
             },
         }
     }
@@ -180,7 +182,7 @@ impl Src for Rng {
         if !self.hint(85) {
             return None;
         }
-        let steps = (self.next() % 24) as usize;
+        let steps = (self.next() % 40) as usize;
         Some(crate::gen::random_walk(self, steps))
     }
     fn part(&self) -> u8 {
@@ -194,6 +196,7 @@ impl Src for Rng {
             np: self.below(4),
             nr: self.below(4),
             nl: self.below(4),
+            nv: self.below(4),
         }
     }
 }

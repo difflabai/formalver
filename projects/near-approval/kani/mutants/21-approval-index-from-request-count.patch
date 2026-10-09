@@ -1,7 +1,7 @@
 # killed-by: h_step_approve
 --- a/core/src/lib.rs
 +++ b/core/src/lib.rs
-@@ -427,7 +427,7 @@
+@@ -496,7 +496,7 @@
      if caller.signer == request.agent_account_id {
          return Err(ApprovalError::SelfApproval);
      }

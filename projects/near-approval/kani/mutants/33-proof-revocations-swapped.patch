@@ -1,0 +1,14 @@
+# killed-by: h_read
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -608,8 +608,8 @@
+     S: Store<A, K>,
+ {
+     ProofRevocations {
+-        agent: store.revocation(proof.agent_registration_id),
+-        approver: store.revocation(proof.approver_registration_id),
++        agent: store.revocation(proof.approver_registration_id),
++        approver: store.revocation(proof.agent_registration_id),
+     }
+ }
+ 

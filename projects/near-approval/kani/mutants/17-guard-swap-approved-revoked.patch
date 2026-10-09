@@ -1,15 +1,11 @@
 # killed-by: h_step_approve
 --- a/core/src/lib.rs
 +++ b/core/src/lib.rs
-@@ -417,10 +417,10 @@
-     let mut request = store
+@@ -566,6 +566,7 @@
+     let request = store
          .request(request_id)
          .ok_or(ApprovalError::RequestNotFound)?;
-+    let mut agent = live_agent_registration(store, &request).ok_or(ApprovalError::AgentRevoked)?;
++    live_agent_registration(store, &request).ok_or(ApprovalError::AgentRevoked)?;
      if request.approval.is_some() {
          return Err(ApprovalError::AlreadyApproved);
-     }
--    let mut agent = live_agent_registration(store, &request).ok_or(ApprovalError::AgentRevoked)?;
-     if request.action != action {
-         return Err(ApprovalError::ActionMismatch);
      }

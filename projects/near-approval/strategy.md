@@ -10,8 +10,8 @@ readable per request or as a paged log.
 
 | | |
 |---|---|
-| Pinned commit | `5736251d65c6bc11c20e5f27ddc869db27bd7299`. This pin is **provisional**: it is on branch `claude/near-approval-contract-qin858`. Re-pin when the branch merges (OQ-1). |
-| Crates | `approval-core` (`core/src/lib.rs`, 584 lines incl. docs). A dependency-free state machine, generic over account `A` and key `K`, holding *all* authorization and transition logic. `approval-contract` (`contract/src/lib.rs`, 660 lines incl. tests). A near-sdk 5.29 shell: env → `Caller`, `Store` over `LookupMap`, NEP-297 events, JSON views. |
+| Pinned commit | `3426c9246cee98dbfaa3ff7980bd85ff839d60d6`, the head of trust-framework PR #15 (adds `reject`, registration ids and revocation times, key events). This pin is **provisional**: it is on branch `claude/near-approval-contract-qin858`. Re-pin when the branch merges (OQ-1). Previous pin: `5736251`. |
+| Crates | `approval-core` (`core/src/lib.rs`, 749 lines incl. docs). A dependency-free state machine, generic over account `A` and key `K`, holding *all* authorization and transition logic. `approval-contract` (`contract/src/lib.rs`, 976 lines incl. tests). A near-sdk 5.29 shell: env → `Caller`, `Store` over `LookupMap`, NEP-297 events, JSON views. |
 | In the TCB via `Cargo.lock` | near-sdk 5.29.1, near-sdk-macros 5.29.1, near-sdk-core 4.2.3, near-sdk-env 0.1.6, near-account-id 2.6.0, near-sys 0.2.14, borsh 1.8.1, serde_json 1.0.151 |
 | Mirror | git submodule `projects/near-approval/source-mirror` (same pattern as ironclaw) |
 
@@ -222,6 +222,14 @@ These were found by review and planning on the first draft, and fixed in
 | R-5 | Any agent key could drain the storage balance | `MAX_PENDING_PER_KEY = 16`, plus `TooManyPending` |
 | R-6 | The randomized test checked only ok/err, not which error | Exact first-failing-guard oracle |
 
+Fixed in `3426c92` (PR #15):
+
+| | Finding | Fix |
+|---|---|---|
+| R-7 (was F-8) | Key registry changes emitted no events | `key_added` / `key_revoked` events |
+| R-8 (was F-12) | No `[package.metadata.near.reproducible_build]` or `repository` | Both added (pinned `cargo-near` image and digest); upstream CI builds the reproducible wasm |
+| R-9 (was F-13) | `approval-contract` had never been built against real near-sdk | Upstream CI runs `cargo test -p approval-contract`, the reproducible build and near-workspaces sandbox tests |
+
 ### Open
 
 | ID | Finding | Resolution path |
@@ -229,11 +237,10 @@ These were found by review and planning on the first draft, and fixed in
 | F-4 | `MAX_ACTION_LEN` is coupled to the 16 KiB log limit. The worst-case `action_approved` line is about 13.0 KB (2048 control bytes escaped to `\u00XX`, 64-char accounts, secp256k1 keys, max `u64`s). The limit breaks above about 2.6 KB. Upstream has a doc comment but no test. | RES-2 unit test (OQ-4) |
 | F-6 | `revoke_key` calls `remove_principal` before knowing the key exists. The core's "no writes on `Err`" holds only because removing an absent key is a no-op (L-REMOVE-ABSENT). On-chain the call panics before any flush, so nothing is written. | ST-2 records it. Optionally reorder upstream (OQ-5). |
 | F-7 | `approve`'s `LogFull` branch is unreachable under `Inv`: a pending request implies `#L < #R ≤ MAXU`. | Kept as defence in depth. LEM-3. |
-| F-8 | Key registry changes emit no events. | Accepted risk (upstream README). C-4 records it. |
 | F-9 | `predecessor == signer` also admits code deployed on the signer's own account. | DEP-1 requires registered keys to be function-call keys with receiver `C`. RT-SELFACCT. |
 | F-10 | **formalver tooling defects:** <br>(a) `run-prolog.sh` ends with `\|\| true` and runs `-g "run_tests, halt."`; a failing `run_tests` falls through to the toplevel, which exits 0 at EOF. Failures never fail the script. <br>(b) `run-verus.sh` and the README's direct `verus` command omit `--cfg 'feature="verus"'`, so ironclaw's `cfg(feature="verus")` spec and proof modules are never compiled [conf: high]. The README's `./tools/get-z3.sh` lives under `source/` in the Verus repo. <br>(c) ironclaw proofs take their conclusion as a `requires`. <br>(d) ironclaw's gitlink `d313f44` ≠ recorded pin `34550ad`. <br>(e) No CI. | M0 fixes (a), (b) and (e), and decides (d) (OQ-6). Rule for this project: no proof assumes its conclusion. |
-| F-12 | `contract/Cargo.toml` has no `[package.metadata.near.reproducible_build]` (image, digest, command) and no `repository`. `cargo near build reproducible-wasm` needs both [conf: med-high]. Everything code-hash related depends on this. | OQ-2. Until then every sandbox (S) property (SH-9, SH-10, RES-3, RT-*), DEP-1, VER-2 and VER-3 have `blocked_by = "OQ-2"`. |
-| F-13 | `approval-contract` has **never been compiled against real near-sdk**: crate downloads were blocked when it was written. It type-checks against a hand-written near-sdk shim, but the real macros, ABI generation and wasm build are unverified. | M0 gate: `cargo test -p approval-contract` and `cargo near build` succeed in CI (OQ-3) |
+| F-15 | PR #15 changes the shell: a `reject` method, `action_rejected`, `key_added` and `key_revoked` events, `agent_key_revoked_at` / `approver_key_revoked_at` on proof views, `get_revocation`, and a `v` storage prefix for revocations. SH-4..SH-8, SH-10, SH-11 (export count), C-4, ST-5 and RES-1 still describe the `5736251` shell. | Rewrite them at M3, before any is checked. The core-level properties (§5.1–5.5) are already updated. |
+| F-16 | `insert_revocation` is "written at most once per id" by contract, and the stores disagree otherwise: `MemStore` keeps the first write, the contract's `LookupMap` the last. The core writes `P(k).reg` on revoke, which INV-11 keeps out of `V`, so the case is unreachable from `Init`. | INV-11/INV-12 prove the law holds on reachable states. ST-2 records the call. |
 | F-14 | Two equivalent mutants. In `live_agent_registration`, dropping the role check or the account check survives all tests: under INV-8 both are implied by `active_from ≤ id`. They are kept as defence in depth. | LEM-4 proves the redundancy, so the equivalence is established and not merely assumed. |
 
 ---
@@ -242,13 +249,16 @@ These were found by review and planning on the first draft, and fixed in
 
 ### 5.0 Notation
 
-- **State** `s = ⟨o, P, R, L⟩`:
+- **State** `s = ⟨o, P, R, L, G, V⟩`:
   - `o` is the owner.
-  - `P : K ⇀ ⟨acct, role, from, pend⟩` is the registry. `from` is
-    `active_from` and `pend` is `pending`.
-  - `R[i] = ⟨id, aa, ak, act, rt, ap⟩` is a request, with
-    `ap : Option⟨ix, ba, bk, at⟩`.
+  - `P : K ⇀ ⟨acct, role, reg, from, pend⟩` is the registry. `reg` is
+    `registration_id`, `from` is `active_from` and `pend` is `pending`.
+  - `R[i] = ⟨id, aa, ak, ag, act, rt, ap, rj⟩` is a request, with `ag` the
+    agent's registration id, `ap : Option⟨ix, ba, bk, bg, at⟩` and
+    `rj : Option⟨ba, bk, bg, at⟩` (`bg` the approver's registration id).
   - `L : Seq<u64>` is the approval log.
+  - `G : u64` is the registration counter; `V : RegId ⇀ BlockTime` records
+    when each revoked registration was revoked.
 - **Constants:** `#R`, `#L` are the store counters. `MAXU = 2⁶⁴−1`,
   `N = 2048`, `MAXP = 16`, `PG = 100`, `DPG = 50`. `len` is the UTF-8 byte
   length. `⊕` is saturating `u64` addition (`saturating_add`), and `∸` is
@@ -257,12 +267,15 @@ These were found by review and planning on the first draft, and fixed in
 - **Predicates:**
   - `Holds(s,c,ρ) ≜ c.pred = c.sig ∧ P(c.key).acct = c.sig ∧ P(c.key).role = ρ`
   - `Live(s,i) ≜ P(R[i].ak) = ⟨R[i].aa, Agent, f, _⟩ ∧ f ≤ i`
-  - `Pend(s,k) ≜ #{i ≥ P(k).from : R[i].ak = k ∧ R[i].ap = None}`
-  - `Status(s,i)`: `Approved` if `R[i].ap ≠ None`, `Pending` if `Live(s,i)`,
-    otherwise `Void`.
-- **Operations:** `Add(a,k,acct,ρ)`, `Revoke(a,k)`, `Req(c,act,t)`,
-  `Appr(c,i,act,t)`. `next(s,op)` is the post-state, equal to `s` on failure.
-  `Init(o) = ⟨o,∅,[],[]⟩`. `Reach` is the set of states reachable from
+  - `Pend(s,k) ≜ #{i ≥ P(k).from : R[i].ak = k ∧ R[i].ap = None ∧ R[i].rj = None}`
+  - `Decidable(s,i)`: the first failing guard of `RequestNotFound`
+    (`i ≥ #R`), `AlreadyApproved`, `AlreadyRejected`, `AgentRevoked`
+    (`¬Live(s,i)`), shared by `approve` and `reject`.
+  - `Status(s,i)`: `Approved` if `R[i].ap ≠ None`, else `Rejected` if
+    `R[i].rj ≠ None`, else `Pending` if `Live(s,i)`, otherwise `Void`.
+- **Operations:** `Add(a,k,acct,ρ)`, `Revoke(a,k,t)`, `Req(c,act,t)`,
+  `Appr(c,i,act,t)`, `Rej(c,i,t)`. `next(s,op)` is the post-state, equal to
+  `s` on failure. `Init(o) = ⟨o,∅,[],[],0,∅⟩`. `Reach` is the set of states reachable from
   `Init`, and `Inv` is the conjunction of the INV properties.
 
 **Technique codes:**
@@ -287,12 +300,13 @@ being the first failing guard in the listed order. Panic strings are API.
 
 | ID | Function | Statement | Check |
 |---|---|---|---|
-| TX-0 | all four mutators | **Atomic failure:** `Err ⇒ s' = s`. No `Store` mutator runs on failure, except `remove_principal` of an absent key in `revoke_key` (F-6, a no-op). | K / VC, Kp |
-| TX-1 | `add_principal(s,a,k,acct,ρ)` | `Ok ⇔ a = o ∧ k ∉ dom P`. Errors: `NotOwner`, `KeyAlreadyRegistered`. `P' = P[k ↦ ⟨acct,ρ,#R,0⟩]`. `R`, `L`, `o` unchanged. | K / VC, PM |
-| TX-2 | `revoke_key(s,a,k)` | `Ok(P(k)) ⇔ a = o ∧ k ∈ dom P`. Errors: `NotOwner`, `KeyNotRegistered`. `P' = P \ {k}`. | K / VC, PM |
+| TX-0 | all five mutators | **Atomic failure:** `Err ⇒ s' = s`. No `Store` mutator runs on failure, except `remove_principal` of an absent key in `revoke_key` (F-6, a no-op). | K / VC, Kp |
+| TX-1 | `add_principal(s,a,k,acct,ρ)` | `Ok(p) ⇔ a = o ∧ k ∉ dom P ∧ G ≠ MAXU`. Errors: `NotOwner`, `KeyAlreadyRegistered`, `LogFull`. `p = ⟨acct,ρ,G,#R,0⟩`, `P' = P[k ↦ p]`, `G' = G+1`. `R`, `L`, `V`, `o` unchanged. | K / VC, PM |
+| TX-2 | `revoke_key(s,a,k,t)` | `Ok(P(k)) ⇔ a = o ∧ k ∈ dom P`. Errors: `NotOwner`, `KeyNotRegistered`. `P' = P \ {k}`, `V' = V[P(k).reg ↦ t]`. | K / VC, PM |
 | TX-3 | `authenticate(s,c,ρ)` | `Ok(P(c.key)) ⇔ Holds(s,c,ρ)`. Read-only. Errors: `IndirectCall`, `UnknownKey`, `WrongRole`, `KeyAccountMismatch`. | K (through TX-4, TX-5) |
-| TX-4 | `request_action(s,c,a,t)` | `Ok(r) ⇔ Holds(s,c,Agent) ∧ 1 ≤ len(a) ≤ N ∧ P(c.key).pend < MAXP ∧ #R ≠ MAXU`. Errors: TX-3, then `EmptyAction`, `ActionTooLong`, `TooManyPending`, `LogFull`. <br>`r = ⟨#R, c.sig, c.key, a, t, None⟩`, `R' = R·r`, `P' = P[c.key ↦ pend+1]`. `L`, `o` unchanged. | K / VC, PM |
-| TX-5 | `approve(s,c,i,a,t)` | `Ok(π) ⇔ Holds(s,c,Approver) ∧ i < #R ∧ R[i].ap = None ∧ Live(s,i) ∧ R[i].act = a ∧ c.sig ≠ R[i].aa ∧ #L ≠ MAXU`. Errors: TX-3, then `RequestNotFound`, `AlreadyApproved`, `AgentRevoked`, `ActionMismatch`, `SelfApproval`, `LogFull`. <br>`R' = R[i].ap ↦ Some⟨#L, c.sig, c.key, t⟩`, `L' = L·i`, `P' = P[R[i].ak ↦ pend−1]`. `π = proof(R'[i]) = approval(s',i)`. | K / VC, PM |
+| TX-4 | `request_action(s,c,a,t)` | `Ok(r) ⇔ Holds(s,c,Agent) ∧ 1 ≤ len(a) ≤ N ∧ P(c.key).pend < MAXP ∧ #R ≠ MAXU`. Errors: TX-3, then `EmptyAction`, `ActionTooLong`, `TooManyPending`, `LogFull`. <br>`r = ⟨#R, c.sig, c.key, P(c.key).reg, a, t, None, None⟩`, `R' = R·r`, `P' = P[c.key ↦ pend+1]`. `L`, `o` unchanged. | K / VC, PM |
+| TX-5 | `approve(s,c,i,a,t)` | `Ok(π) ⇔ Holds(s,c,Approver) ∧ Decidable(s,i) ∧ R[i].act = a ∧ c.sig ≠ R[i].aa ∧ #L ≠ MAXU`. Errors: TX-3, then `RequestNotFound`, `AlreadyApproved`, `AlreadyRejected`, `AgentRevoked`, `ActionMismatch`, `SelfApproval`, `LogFull`. <br>`R' = R[i].ap ↦ Some⟨#L, c.sig, c.key, P(c.key).reg, t⟩`, `L' = L·i`, `P' = P[R[i].ak ↦ pend−1]`. `π = proof(R'[i]) = approval(s',i)`; its `request_id` is the stored `R[i].id` (`= i` by INV-1). | K / VC, PM |
+| TX-7 | `reject(s,c,i,t)` | `Ok(r) ⇔ Holds(s,c,Approver) ∧ Decidable(s,i) ∧ c.sig ≠ R[i].aa`. Errors: TX-3, then `RequestNotFound`, `AlreadyApproved`, `AlreadyRejected`, `AgentRevoked`, `SelfApproval`. <br>`R' = R[i].rj ↦ Some⟨c.sig, c.key, P(c.key).reg, t⟩`, `P' = P[R[i].ak ↦ pend−1]`, `r = R'[i]`. `L`, `G`, `V`, `o` unchanged. | K / VC, PM |
 | TX-6 | owner authority | `o` is set only at init and never changes. Owner checks compare the caller account the shell passes with `o`. That the shell passes the **predecessor** is SH-1. | K / R |
 
 ### 5.2 State invariants (INV): for every `s ∈ Reach`
@@ -307,15 +321,21 @@ within bounds), VC/VM (unbounded), PM and Kp.
 | INV-2 | `∀i<#R. 1 ≤ len(R[i].act) ≤ N` |
 | INV-3 | Log → request: `∀j<#L. L[j] < #R ∧ R[L[j]].ap = Some(x) ∧ x.ix = j` |
 | INV-4 | Request → log: `R[i].ap = Some(x) ⇒ x.ix < #L ∧ L[x.ix] = i` |
-| INV-5 | Separation of duties: `R[i].ap = Some(x) ⇒ x.ba ≠ R[i].aa` |
-| INV-6 | Distinct keys: `R[i].ap = Some(x) ⇒ x.bk ≠ R[i].ak` |
+| INV-5 | Separation of duties: `R[i].ap = Some(x) ⇒ x.ba ≠ R[i].aa`, and the same for `R[i].rj` |
+| INV-6 | Distinct keys: `R[i].ap = Some(x) ⇒ x.bk ≠ R[i].ak`, and the same for `R[i].rj` |
 | INV-7 | Registration bound: `∀k ∈ dom P. P(k).from ≤ #R` |
-| INV-8 | **Registration provenance:** `k ∈ dom P ∧ R[i].ak = k ∧ i ≥ P(k).from ⇒ R[i].aa = P(k).acct ∧ P(k).role = Agent` |
+| INV-8 | **Registration provenance:** `k ∈ dom P ∧ R[i].ak = k ∧ i ≥ P(k).from ⇒ R[i].aa = P(k).acct ∧ P(k).role = Agent ∧ R[i].ag = P(k).reg` |
 | INV-9 | **Pending count:** `∀k ∈ dom P. P(k).pend = Pend(s,k) ≤ MAXP`. For approver keys this is 0, by INV-8. |
-| INV-10 | Time order (traces with non-decreasing time, ASM-TIME): `R[i].ap = Some(x) ⇒ x.at ≥ R[i].rt` component-wise |
+| INV-10 | Time order (traces with non-decreasing time, ASM-TIME): `R[i].ap = Some(x) ⇒ x.at ≥ R[i].rt` component-wise, and the same for `R[i].rj` |
+| INV-11 | Live registrations: `∀k ∈ dom P. P(k).reg < G ∧ P(k).reg ∉ dom V`, and `reg` is injective on `dom P` |
+| INV-12 | Revocations: `∀g ∈ dom V. g < G`, and each id is revoked once (`insert_revocation`'s write-once law, F-16) |
+| INV-13 | **One decision:** `¬(R[i].ap ≠ None ∧ R[i].rj ≠ None)` |
+| INV-14 | Recorded ids were issued: `R[i].ag < G`, and `bg < G` on every approval and rejection |
+| INV-15 | **Registration accounting:** `#dom P + #dom V = G`. With INV-11/12, every issued registration is exactly one of live or revoked. |
+| INV-16 | **Registration binding:** `P(k).reg = R[i].ag ⇒ k = R[i].ak ∧ P(k) = ⟨R[i].aa, Agent, …⟩`; `P(k).reg = x.bg ⇒ k = x.bk ∧ P(k) = ⟨x.ba, Approver, …⟩` for every approval or rejection `x` |
 | LEM-1 | `L` has no duplicates. |
 | LEM-2 | `#L = #{i : R[i].ap ≠ None} ≤ #R` |
-| LEM-3 | A pending request exists ⇒ `#L < #R ≤ MAXU`, so `approve`'s `LogFull` is unreachable (F-7). |
+| LEM-3 | An unapproved request exists ⇒ `#L < #R ≤ MAXU`, so `approve`'s `LogFull` is unreachable (F-7). |
 | LEM-4 | Under INV-8: `Live(s,i) ⇔ i < #R ∧ R[i].ak ∈ dom P ∧ P(R[i].ak).from ≤ i`. The role and account conjuncts are redundant (F-14). |
 
 ### 5.3 History properties (HIST): `s → s'`, transitively closed
@@ -323,24 +343,27 @@ within bounds), VC/VM (unbounded), PM and Kp.
 | ID | Statement | Check |
 |---|---|---|
 | HIST-1 | Request content is immutable and never removed: `#R' ≥ #R` and `R'[i].{id,aa,ak,act,rt} = R[i].{…}` | K / VC, Kp |
-| HIST-2 | Approvals are immutable: `R[i].ap = Some(x) ⇒ R'[i].ap = Some(x)` | K / VC |
+| HIST-2 | Decisions are immutable: `R[i].ap = Some(x) ⇒ R'[i].ap = Some(x)`, and the same for `rj` | K / VC |
 | HIST-3 | The log is append-only: `L ⊑ L'` | K / VC |
 | HIST-4 | Counter deltas: `#R` grows by 1 exactly on a successful `Req`, and `#L` grows by 1 exactly on a successful `Appr`. Otherwise both deltas are 0. | K / VC |
 | HIST-5 | Proof stability: `approval(s,i) = Some(π) ⇒ approval(s',i) = Some(π)` | K / VC |
-| HIST-6 | Registry discipline: `o' = o`. `P'` differs from `P` only by (a) a successful `Add`/`Revoke` with caller `o`, or (b) the `pend` field of the requesting or requested agent key on a successful `Req`/`Appr`. | K / VC |
-| HIST-7 | The owner can't rewrite history: `Add`/`Revoke` leave `R`, `L` unchanged from **any** state. | K |
+| HIST-6 | Registry discipline: `o' = o`. `P'` differs from `P` only by (a) a successful `Add`/`Revoke` with caller `o`, or (b) the `pend` field of the requesting or decided request's agent key on a successful `Req`/`Appr`/`Rej`. | K / VC |
+| HIST-7 | The owner can't rewrite history: `Add`/`Revoke` leave `R`, `L` unchanged, and `Rej` leaves `L` unchanged, from **any** state. | K |
 | HIST-8 | **Void is terminal:** `Status(s,i) = Void ⇒ Status(s',i) = Void` | K / VC, PM |
+| HIST-9 | **Rejected is terminal:** `Status(s,i) = Rejected ⇒ Status(s',i) = Rejected` | K / VC, PM |
+| HIST-10 | Registration and revocation records: `G' = G + [successful Add]`; `V` gains one entry exactly on a successful `Revoke`; `V(g) = Some(t) ⇒ V'(g) = Some(t)`. | K / VC |
 
 ### 5.4 Trace properties (TR): over `run(o, ops)`
 
 | ID | Statement | Check |
 |---|---|---|
-| **TR-1** | **Provenance (headline).** If `approval(s,i) = Some(π)` for `s ∈ Reach`, there are steps `k₁ < k₂` where: <br>(a) `ops[k₁]` is a successful `Req(c₁, π.action, π.requested_at)` creating `i`, with `c₁.pred = c₁.sig = π.agent_account_id`, `c₁.key = π.agent_key`, and `P_{k₁}(π.agent_key)` an Agent registration of that account; <br>(b) `ops[k₂]` is a successful `Appr(c₂, i, π.action, π.approved_at)` with `c₂.pred = c₂.sig = π.approver_account_id ≠ π.agent_account_id`, `P_{k₂}(π.approver_key)` an Approver registration of that account, and `π.approval_index = #L_{k₂}`; <br>(c) `π.agent_key` was registered **continuously** (same registration) over `[k₁, k₂]`. <br>With ASM-SIGNER and ASM-PRED: each key holder signed a tx from its own account that reached `C` directly, or through code on that account (F-9; excluded by VER-8). | K: ghost-history invariant `GH` (§6.1) checked in `h_init` and every `h_step_*` inductive step, plus `h_bmc_from_init` witnesses / VC, PM |
-| TR-2 | At most once: each `i` has at most one successful `Appr` in any trace. | K (HIST-2 + `AlreadyApproved` in `h_step_approve`; `h_bmc_from_init`) / VC, PM |
+| **TR-1** | **Provenance (headline).** If `approval(s,i) = Some(π)` for `s ∈ Reach`, there are steps `k₁ < k₂` where: <br>(a) `ops[k₁]` is a successful `Req(c₁, π.action, π.requested_at)` creating `i`, with `c₁.pred = c₁.sig = π.agent_account_id`, `c₁.key = π.agent_key`, and `P_{k₁}(π.agent_key)` an Agent registration of that account; <br>(b) `ops[k₂]` is a successful `Appr(c₂, i, π.action, π.approved_at)` with `c₂.pred = c₂.sig = π.approver_account_id ≠ π.agent_account_id`, `P_{k₂}(π.approver_key)` an Approver registration of that account, and `π.approval_index = #L_{k₂}`; <br>(c) `π.agent_key` was registered **continuously** (same registration) over `[k₁, k₂]`; <br>(d) `π.agent_registration_id` is the registration of (a) and (c), and `π.approver_registration_id` the one of (b). <br>With ASM-SIGNER and ASM-PRED: each key holder signed a tx from its own account that reached `C` directly, or through code on that account (F-9; excluded by VER-8). | K: ghost-history invariant `GH` (§6.1) checked in `h_init` and every `h_step_*` inductive step, plus `h_bmc_from_init` witnesses / VC, PM |
+| TR-2 | At most once: each `i` has at most one successful `Appr` or `Rej` in any trace. | K (HIST-2, INV-13, `AlreadyApproved`/`AlreadyRejected` in `h_step_approve` and `h_step_reject`; `h_bmc_from_init`) / VC, PM |
 | TR-3 | **Durable revocation:** if the registration of `R[i].ak` under which `i` was made is removed while `R[i]` is pending, then `R[i]` is never approved in any extension. This holds even if the key is re-registered to the same account and role. | K (HIST-8 + `AgentRevoked` in `h_step_*`; `h_bmc_from_init` witness: revoke, re-add, approve fails) / VC, PM (MC-1 must find **no** revival) |
 | TR-4 | Time order along the log (ASM-TIME): `j₁ < j₂ ⇒ approved_at(L[j₁]) ≤ approved_at(L[j₂])` | K / VC |
-| TR-5 | **Non-vacuity:** <br>• a witness reaches an approved state and a void state; <br>• every `ApprovalError` is produced by some reachable step, except `approve`'s `LogFull` (LEM-3); <br>• `request_action`'s `LogFull` only at `#R = MAXU` (ghost store). | K covers / VC, PM |
-| TR-6 | **Agent storage bound,** as a one-step potential: `Φ(s) = Σ_{k agent} (MAXP − pend_k) ≥ 0` (INV-9). A successful `Req` decreases `Φ` by exactly 1. `Φ` increases only on a successful `Appr` (by 1) or `Add` of an agent key (by `MAXP`). So a trace segment without approvals or `Add` makes at most `Φ` successful requests: storage growth without approver or owner action is bounded. | K (`h_step_*` for the `Φ` step; `h_raw_request` for the cap boundary) / VC |
+| TR-5 | **Non-vacuity:** <br>• a witness reaches an approved, a rejected and a void state; <br>• every `ApprovalError` is produced by some reachable step, except `approve`'s `LogFull` (LEM-3); <br>• `request_action`'s `LogFull` only at `#R = MAXU` (ghost store). | K covers / VC, PM |
+| TR-6 | **Agent storage bound,** as a one-step potential: `Φ(s) = Σ_{k agent} (MAXP − pend_k) ≥ 0` (INV-9). A successful `Req` decreases `Φ` by exactly 1. `Φ` increases only on a successful `Appr` or `Rej` (by 1) or `Add` of an agent key (by `MAXP`). So a trace segment without decisions or `Add` makes at most `Φ` successful requests: storage growth without approver or owner action is bounded. | K (`h_step_*` for the `Φ` step; `h_raw_request` for the cap boundary) / VC |
+| TR-7 | **Revocation record:** `V` lists exactly the successful `Revoke`s of the trace, each under the registration id it removed (as issued, fresh, by `Add`) and with its time. With RD-8, a verifier learns from `proof_revocations` whether, and when, either key behind a proof was later revoked. | K: `GH` (ghost revocation log) in `h_init` and `h_bmc_from_init` / VC |
 
 ### 5.5 Reads (RD)
 
@@ -353,6 +376,7 @@ within bounds), VC/VM (unbounded), PM and Kp.
 | RD-5 | View consistency: `p ∈ approvals(s,f,l) ⇒ approval(s, p.request_id) = Some(p)`, and `approval(s,i) = Some(π) ⇒ approvals(s, π.approval_index, 1) = [π]`. So a proof is findable by `request_id` (from `approval_requested`) or by `approval_index` (from `action_approved`). | K / VC |
 | RD-6 | Views are pure: the core reads take `&S`, and every `get_*` takes `&self`. | K / R |
 | RD-7 | `request_status(s,i) = Some(Status(s,i))` for `i < #R`, and `None` otherwise. | K / VC |
+| RD-8 | `proof_revocations(s,π) = ⟨V(π.ag), V(π.bg)⟩`. Under `Inv` (INV-11, 15, 16), for `π = approval(s,i)` each component is `None` exactly when that registration is still its key's current one. | K / VC |
 
 ### 5.6 Robustness and the store contract (ROB, ST)
 
@@ -363,7 +387,7 @@ within bounds), VC/VM (unbounded), PM and Kp.
 | ROB-3 | Length boundaries in **bytes**: 0 → `EmptyAction`; 1 → ok; N → ok; N+1 → `ActionTooLong`; 1025 two-byte characters (2050 bytes) → `ActionTooLong`. | K (`h_action_len`) / Kp |
 | ROB-4 | Bounded work: each mutator makes ≤ 4 `Store` reads (approve: caller principal, request, agent principal, approval count) and ≤ 3 writes. `approvals` makes ≤ `2·min(l,PG)+1` reads. No unbounded loops in mutators. | K (`Counting` store) |
 | ST-1 | **Store laws** that every `Store` must satisfy: map semantics for principals (with L-REMOVE-ABSENT); `push_request` appends at `request_count()`; `replace_request` overwrites at `r.id`; the log is a sequence; reads are pure. | K (`MemStore`, `Sparse`) |
-| ST-2 | **Store protocol (the correspondence hinge).** The core's mutating `Store` calls are exactly: <br>• add → `[insert_principal(k)]`, with `k ∉ dom P`; <br>• revoke → `[remove_principal(k)]`, also on failure with `k ∉ dom P` (F-6); <br>• request → `[insert_principal(c.key, pend+1), push_request(r)]`, with `r.id = #R < MAXU`; <br>• approve → `[insert_principal(R[i].ak, pend−1), replace_request(r), push_approval(i)]`, with `r.id = i < #R`, `r` equal to `R[i]` except `ap` going from `None` to `Some`, and `#L < MAXU`; <br>• any other failure → no calls. <br>This makes the on-chain impl's differences from `MemStore` unreachable: `replace_request` inserts unconditionally (`MemStore` drops an out-of-range write), and `+= 1` at `u64::MAX` panics under overflow-checks instead of returning `LogFull`. | K (recording `Sparse`) |
+| ST-2 | **Store protocol (the correspondence hinge).** The core's mutating `Store` calls are exactly: <br>• add → `[increment_registration_count(), insert_principal(k)]`, with `k ∉ dom P` and `G < MAXU`; <br>• revoke → `[remove_principal(k), insert_revocation(P(k).reg, t)]`, the first also on failure with `k ∉ dom P` (F-6), the second with `P(k).reg ∉ dom V` (F-16); <br>• request → `[insert_principal(c.key, pend+1), push_request(r)]`, with `r.id = #R < MAXU`; <br>• approve → `[insert_principal(R[i].ak, pend−1), replace_request(r), push_approval(i)]`, with `r.id = i < #R`, `r` equal to `R[i]` except `ap` going from `None` to `Some`, and `#L < MAXU`; <br>• reject → `[insert_principal(R[i].ak, pend−1), replace_request(r)]`, with `r.id = i < #R` and `r` equal to `R[i]` except `rj` going from `None` to `Some`; <br>• any other failure → no calls. <br>This makes the on-chain impl's differences from `MemStore` unreachable: `replace_request` inserts unconditionally (`MemStore` drops an out-of-range write), and `+= 1` at `u64::MAX` panics under overflow-checks instead of returning `LogFull`. | K (recording `Sparse`) |
 | ST-3 | `Sparse`, a line-by-line transliteration of `impl Store for ApprovalContract` with each `LookupMap` replaced by an association list, refines `MemStore`: same results, same abstraction `α`. | K (`h_refine_*`) |
 | ST-4 | **The real store refines `MemStore`:** `ApprovalContract` and `MemStore<AccountId,PublicKey>` run random op sequences (10k × 50) through the core and through the public methods. **Before each step the contract is persisted and reloaded** (`state_write`, drop, `state_read`), so every step reads Borsh from cold storage. After every step, results and `α` are equal. | D (`store_diff.rs`) |
 | ST-5 | Storage layout: prefixes `p`, `r`, `a` are pairwise distinct and distinct from `STATE`. After random runs, every key is `STATE` or `p|r|a ‖ borsh(key)`. | D / R |
@@ -407,8 +431,8 @@ within bounds), VC/VM (unbounded), PM and Kp.
 | RT-BATCH | One tx `[request_action("a"), request_action("")]`, signed by a **full-access** key of the agent account that is also its registered agent key (a function-call key can sign only single-action txs). The outcome fails at action index 1 with "action is empty", and the counters are unchanged. Record whether the first event appears. | ASM-ATOMIC |
 | RT-RESET | Delete and recreate `C`: counters reset. VER-3 (a full-access key or a `DeleteAccount` since `b₀`) detects it. VER-6 is only a heuristic that catches it while counters are below cached values. | ASM-CODE |
 | RT-SPOOF | A spoofer contract logs a forged `EVENT_JSON`. The VER-1 `executor_id` rule rejects it. | VER-1 |
-| RT-CODEHASH | The wasm under test is the `cargo near build reproducible-wasm` output. Record its sha256 (hex) **and** the NEAR `code_hash` (base58 of sha256). *Blocked by F-12.* | ASM-DEPLOY, ASM-COMPILE |
-| RT-TRACE | **Main flows on the deployed artifact.** Replay every `conformance/traces/*.txt`, plus 200 random sequences of ≤30 ops, on the reproducible wasm. For each step, these must equal `spec.rs`: the result or return value, the exact failure message, the receipt logs, and the `get_*` views (including `{}` args, nulls, `limit = 0`, and values > 2⁵³). *Blocked by F-12.* | ASM-COMPILE, ASM-SDK |
+| RT-CODEHASH | The wasm under test is the `cargo near build reproducible-wasm` output. Record its sha256 (hex) **and** the NEAR `code_hash` (base58 of sha256). *Was blocked by F-12 (resolved upstream, R-8).* | ASM-DEPLOY, ASM-COMPILE |
+| RT-TRACE | **Main flows on the deployed artifact.** Replay every `conformance/traces/*.txt`, plus 200 random sequences of ≤30 ops, on the reproducible wasm. For each step, these must equal `spec.rs`: the result or return value, the exact failure message, the receipt logs, and the `get_*` views (including `{}` args, nulls, `limit = 0`, and values > 2⁵³). *Was blocked by F-12 (resolved upstream, R-8).* | ASM-COMPILE, ASM-SDK |
 
 ### 5.10 Deployment and verifier rules (DEP, VER)
 
@@ -452,7 +476,7 @@ within bounds), VC/VM (unbounded), PM and Kp.
 | C-1 | **Authority matrix:** each change method has exactly one authority; owner, agent and approver method sets are disjoint; no key can both request and approve. | P |
 | C-2 | **Guard table:** every `ApprovalError` comes from ≥1 guard. Each guard yields one error. Specified precedence = generated `code_precedence/2`. | P |
 | C-3 | Error messages are pairwise distinct and substring-free (R-2; expected to pass). | P |
-| C-4 | Each event comes from exactly one method. Every authority- or proof-changing operation emits an event, or has an `accepted_risk` (admin operations: F-8). | P |
+| C-4 | Each event comes from exactly one method. Every authority- or proof-changing operation emits an event, or has an `accepted_risk`. Since `3426c92` admin operations emit `key_added` / `key_revoked` (R-7). | P |
 | C-5 | Generated constants equal the requirement constants: `DPG ≤ PG`, `MAXP ≥ 1`, and `N` within the RES-2 bound. | P |
 | C-6 | The generated API surface (wasm exports and ABI) equals the requirements' API table. | P |
 | C-7 | Traceability both ways: every requirement maps to ≥1 property, and every property to ≥1 requirement or threat. | P |
@@ -524,10 +548,11 @@ against the pinned API.
 | `h_step_add` | arbitrary `Inv ∧ GH` state, `#P,#R,#L ≤ 3` | TX-0, TX-1, TX-6, HIST-*, INV, GH and LEM-1..2 step, TR-6 `Φ` step | Ok, NotOwner, KeyAlreadyRegistered |
 | `h_step_revoke` | same | TX-0, TX-2, TX-6, HIST-*, HIST-8, INV, GH and LEM-1..2 step, TR-3 step, TR-6 `Φ` step | Ok, NotOwner, KeyNotRegistered, a pending request becomes void |
 | `h_step_request` | same; actions from the §6.3 alphabet | TX-0, TX-3, TX-4 (except the cap boundary), TX-6, HIST-*, INV, GH and LEM-1..2 step, TR-6 `Φ` step | Ok, the 4 TX-3 errors, EmptyAction |
-| `h_step_approve` | same; time monotone | TX-0, TX-3, TX-5, TX-6, HIST-*, INV, GH and LEM-1..3 step, INV-10, TR-2, TR-3, TR-4 steps, TR-6 `Φ` step | Ok, the 4 TX-3 errors, RequestNotFound, AlreadyApproved, AgentRevoked, ActionMismatch, SelfApproval |
-| `h_raw_{op}` | arbitrary `MemStore`, **no** `assume(inv)`; `pend` any `u32`, `from` any `u64` | ROB-1, TX-0, TX-1..5 exact result via `expected`, HIST-7 (add, revoke); for request: the INV-9 bound step (`Ok ⇒ pend < MAXP ∧ pend' = pend + 1`) and the TX-4 cap boundary | Ok per op; request: Ok at `pend = MAXP − 1` and TooManyPending at `pend = MAXP` |
-| `h_bmc_from_init` | `Init` + ≤ 6 ops, ghost history | TR-1, TR-2, TR-3 witnesses (bounded) | approved; revoke → re-add → approve old id fails with AgentRevoked |
-| `h_read` | like `h_step`; `id`, `from`, `limit` any `u64` | RD-1, RD-2, RD-5, RD-7, LEM-4 | non-empty page; void status |
+| `h_step_approve` | same; time monotone | TX-0, TX-3, TX-5, TX-6, HIST-*, INV, GH and LEM-1..3 step, INV-10, TR-2, TR-3, TR-4 steps, TR-6 `Φ` step | Ok, the 4 TX-3 errors, RequestNotFound, AlreadyApproved, AlreadyRejected, AgentRevoked, ActionMismatch, SelfApproval |
+| `h_step_reject` | same; time monotone | TX-0, TX-3, TX-7, TX-6, HIST-* (HIST-9), INV (INV-13), TR-2 step, TR-6 `Φ` step | Ok, the 4 TX-3 errors, RequestNotFound, AlreadyApproved, AlreadyRejected, AgentRevoked, SelfApproval |
+| `h_raw_{op}` | arbitrary store, **no** `assume(inv)`; `pend` any `u32`, `from`, `G` and registration ids any `u64` | ROB-1, TX-0, TX-1..5 and TX-7 exact result via `expected`, HIST-7 (add, revoke, reject); for request: the INV-9 bound step (`Ok ⇒ pend < MAXP ∧ pend' = pend + 1`) and the TX-4 cap boundary | Ok per op; add: LogFull at `G = MAXU`; request: Ok at `pend = MAXP − 1` and TooManyPending at `pend = MAXP` |
+| `h_bmc_from_init` | `Init` + ≤ 6 ops, ghost history | TR-1, TR-2, TR-3, TR-7 witnesses (bounded) | approved; rejected; revoke → re-add → approve old id fails with AgentRevoked |
+| `h_read` | like `h_step`; `id`, `from`, `limit` any `u64` | RD-1, RD-2, RD-5, RD-7, RD-8, LEM-4 | non-empty page; void status; rejected status; a proof whose agent key was revoked |
 | `h_page_arith` | `Window`: `from`, `limit`, `count`, `offset` any `u64`; out-of-page reads and any write panic; `#[kani::unwind(102)]` | RD-3, RD-6, and the page clamp | non-empty page at `count = MAXU` |
 | `h_proto_{request,approve}` | `Sparse` **raw** state (no `assume(inv)`), counters any `u64` ≥ stored size. ST-2 is also checked from `Inv` states with counters equal to size. | ST-2, ROB-2 | Ok; LogFull (approve's only from non-`Inv` states, per LEM-3) |
 | `h_proto_{add,revoke}` | same | ST-2 | Ok, each error |
@@ -543,7 +568,8 @@ against the pinned API.
 |---|---|---|
 | Accounts | 4 (owner = 0) | ASM-IDENT parametricity. `approve` reads 5 account terms: predecessor, signer, `P(c.key).acct`, `R[i].aa`, `P(R[i].ak).acct`. The guard order forces predecessor = signer = `P(c.key).acct` before the last two comparisons, so at most 3 values plus the owner are ever distinguished, and 4 values realize every reachable pattern. |
 | Keys | 4 | ≤ 3 stored keys plus one "absent" value. |
-| Principals / requests / log | ≤ 3 each | A step touches ≤ 2 principals (caller, agent), ≤ 1 request, ≤ 1 log slot. Any one-step violation of an INV involves the touched elements plus ≤ 1 witness. |
+| Principals / requests / log / revocations | ≤ 3 each | A step touches ≤ 2 principals (caller, agent), ≤ 1 request, ≤ 1 log slot, ≤ 1 revocation. Any one-step violation of an INV involves the touched elements plus ≤ 1 witness. |
+| Registration ids, `G` | `Inv` states: ids from `0..8`, `G = #P + #V`; raw states: any `u64` | INV-15 forces `G = #P + #V ≤ 6` and INV-11/12/14 put every id below `G`, so `0..8` loses nothing within the other bounds. Ids are only compared for equality and with `G`. `G = MAXU` (add's `LogFull`) needs a raw state. |
 | `from`, `pend` | In `Inv` states, `from ≤ #R` and INV-9 forces `pend = Pend(s,k) ≤ #R ≤ 3`. The cap boundary (`pend` near `MAXP`) is reachable only in `h_raw_request`, where `pend` is any `u32`. | INV-7, INV-9 |
 | Ids, counters, `from_index`, `limit` | **any `u64`** | `Sparse`/`Window` stores. These are the only arithmetic-dependent paths. |
 | Action | content from `{"a", " ", "é"}` in step harnesses (whitespace kills the `trim`-empty mutant; two one-byte values for equality; one multi-byte value) | The core uses only `is_empty`, `len`, `==` and `clone`. |
@@ -573,7 +599,8 @@ seeded against the upstream suite during planning (27/27 killed).
 | Killed by (milestone) | Mutants |
 |---|---|
 | `h_step_*` (M1) | self-approval check; relay check; key-account binding; double log push; drop-empty; `trim`-empty; `active_from` dropped / strict / +1 / 0; no increment; no decrement; no principal write-back; action-mismatch dropped; already-approved dropped; three guard swaps; void reported as pending (`h_read`); revoke not owner-only; `approval_index` from request count; proof copies agent as approver; `push_approval` before the checks |
-| `h_raw_request` (M1) | cap off-by-one (`>=` changed to `>`) |
+| `h_step_*`, `h_read` (M1, PR #15 API) | reject: self-approval check dropped, no decrement, rejection records the agent's registration; already-rejected dropped; revocation not recorded; registration count not incremented; request records registration 0; `proof_revocations` swapped (`h_read`); rejected reported as pending (`h_read`) |
+| `h_raw_*` (M1) | cap off-by-one (`>=` changed to `>`) (`h_raw_request`); add's `LogFull` dropped (`h_raw_add`: the counter overflows) |
 | `h_action_len` (M2) | length off-by-one; chars-vs-bytes |
 | `h_page_arith` (M2) | page clamp removed; page addition wraps |
 | `h_proto_*` (M2) | `LogFull` request dropped; `LogFull` approve dropped |
@@ -685,8 +712,8 @@ formalver three-file pattern:
     - `request_view` sets `requested_at_block` from `timestamp_ns`.
 - **`tools/scripts/wasm-surface.sh`:** the exports (SH-11) and imports (SH-12)
   of the `cargo near build non-reproducible-wasm` output, in the near-unit job
-  (M3). It is repeated on the reproducible wasm in the sandbox job once OQ-2
-  lands (M6).
+  (M3). It is repeated on the reproducible wasm in the sandbox job (M6; OQ-2
+  is answered upstream).
 - **`sandbox/`** (standalone, near-workspaces, same lockfile rule):
   - **Tests:** RT-*, SH-9, SH-10, RES-1..3.
   - **Contracts in `res/`:** `relay/`, `selfacct/` and `spoofer/`, about 30
@@ -824,7 +851,7 @@ M3 run in parallel. Each milestone ends by updating the statuses it lists.
 | **M3** | near-sdk shell and store | • `store_diff.rs` (10k × 50, with reload) passes. <br>• `shell.rs` passes. <br>• All shell mutants are killed. <br>• Golden Borsh bytes are committed. <br>• `wasm-surface.sh` diff on the non-reproducible build is clean. <br>• `api_facts.pl` generated. <br>• **Statuses:** ST-4..6, SH-1..8, SH-11, SH-12, RES-1 and RES-2 updated. | 2–3 |
 | **M4** | Prolog | • `run-prolog.sh near-approval` exits 0 (strict). <br>• C-1..10 pass, or each failure has a recorded decision (C-4/F-8). <br>• MC-1 and MC-1s meet the §5.11 criteria, each in < 5 min, and `mc1_state_floor` is recorded. <br>• Traces checked in; MC-2 replay passes on the core and `spec.rs`. <br>• `code_facts.pl` regeneration shows no diff. <br>• **Statuses:** C-1..10, MC-1 and MC-2 updated. | 3–4 |
 | **M5** | Verus (2-day spike, then path A or B) | • Spike decision recorded. <br>• `verus/canary/false_lemma.rs` fails. <br>• **Path A:** the twin verifies with refinement `ensures` for every public core fn and `MemStore`; the erasure check passes; every `REWRITES.toml` entry has a passing Kani equivalence harness. Core properties become `verified-with-assumptions` / `proof`, with trusted ASM-IDENT, ASM-STRLEN and listed std specs. <br>• **Path B:** all lemmas in §7 are proved under the hygiene gate; spec mutants each break a lemma. Status becomes `verified-with-assumptions` / `model-proof` + ASM-MODEL. | 9–15 |
-| **M6** | Sandbox | **Requires F-12.** <br>• RT-* (including RT-TRACE and RT-BATCH), SH-9 and SH-10 pass on a pinned neard with the reproducible wasm. <br>• `wasm-surface.sh` diff on the reproducible build is clean. <br>• RES measured, with thresholds and both hashes recorded. <br>• RT-METATX outcome documented. <br>• `[assumptions]` statuses filled from observations. <br>• `cargo expand` review of SH-9/RD-6 signed off. <br>• **Statuses:** RT-*, SH-9, SH-10 and RES-3 updated. | 3–5 |
+| **M6** | Sandbox | Needed F-12, resolved upstream (R-8). <br>• RT-* (including RT-TRACE and RT-BATCH), SH-9 and SH-10 pass on a pinned neard with the reproducible wasm. <br>• `wasm-surface.sh` diff on the reproducible build is clean. <br>• RES measured, with thresholds and both hashes recorded. <br>• RT-METATX outcome documented. <br>• `[assumptions]` statuses filled from observations. <br>• `cargo expand` review of SH-9/RD-6 signed off. <br>• **Statuses:** RT-*, SH-9, SH-10 and RES-3 updated. | 3–5 |
 | **M7** | Deployment and automation | • A testnet deployment with the DEP-1 lock batch and at least one agent key and one approver key registered; `check_deployment.sh` passes; `[deployment.testnet]` filled. <br>• `verifier_rules.pl` encodes VER-1..8; RT-SPOOF and a VER-8 check against the testnet proof demonstrate them. <br>• Every CI job live; pin-bump procedure documented; `docs/architecture.md` gains the Kani, shell and deployment layers. <br>• **Statuses:** DEP-1 and VER-1..8 updated. | 2 |
 
 **Total: M0–M7 about 25–39 days.** Kani precedes Verus because it checks the
@@ -867,10 +894,8 @@ the submodule (OQ-7, resolved in M0).
 
 1. **OQ-1:** Merge `claude/near-approval-contract-qin858` and re-pin to the
    merge commit.
-2. **OQ-2 (F-12):** Add `[package.metadata.near.reproducible_build]` (pinned
-   image and digest) and `repository` upstream.
-3. **OQ-3 (F-13):** Who runs the first real near-sdk build, and where?
-   Upstream CI is preferable.
+2. **OQ-2 (F-12):** *Answered in `3426c92` (R-8).*
+3. **OQ-3 (F-13):** *Answered in `3426c92`: upstream CI (R-9).*
 4. **OQ-4 (F-4):** Keep `MAX_ACTION_LEN = 2048` behind the RES-2 test, or
    lower it?
 5. **OQ-5 (F-6):** Reorder `revoke_key` to check before removing, or keep it
@@ -881,5 +906,5 @@ the submodule (OQ-7, resolved in M0).
    reproducible builds) and an archival RPC (for VER-2/3).
 8. **OQ-8:** Is separation by account id enough, or should the owner account
    be barred from holding agent or approver keys? MC-1 can flag it.
-9. **OQ-9:** Admin events (F-8): keep as accepted risk, or add `key_added` /
-   `key_revoked`? Adding them changes C-4 and SH-6.
+9. **OQ-9:** Admin events (F-8): *answered in `3426c92` (R-7); C-4 and the
+   SH rows follow at M3 (F-15).*

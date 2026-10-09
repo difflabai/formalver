@@ -106,7 +106,8 @@ jobs:
           - "h_step_request"
           - "h_step_request_empty"
           - "h_step_approve"
-          - "h_raw_add h_raw_revoke h_raw_approve"
+          - "h_step_reject"
+          - "h_raw_add h_raw_revoke h_raw_approve h_raw_reject"
           - "h_raw_request h_raw_request_empty"
           - "h_read"
           - "h_read_page"
@@ -190,7 +191,8 @@ jobs:
       fail-fast: false
       matrix:
         mutant: ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13",
-                 "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26"]
+                 "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26",
+                 "27", "28", "29", "30", "31", "32", "33", "34", "35", "36"]
     steps:
       - uses: actions/checkout@v4
         with:

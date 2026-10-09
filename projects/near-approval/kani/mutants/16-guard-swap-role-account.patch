@@ -1,7 +1,7 @@
 # killed-by: h_step_request
 --- a/core/src/lib.rs
 +++ b/core/src/lib.rs
-@@ -325,12 +325,12 @@
+@@ -397,12 +397,12 @@
      let principal = store
          .principal(&caller.signer_key)
          .ok_or(ApprovalError::UnknownKey)?;

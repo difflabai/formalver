@@ -10,15 +10,17 @@
 //! It implements the `Store` laws exactly as `MemStore` does: principals are
 //! an ordered list with "first match" lookup, insert-or-overwrite and
 //! order-preserving removal; requests and the log are append-only sequences
-//! read by position; `replace_request` ignores an out-of-range id. Pushing
+//! read by position; `replace_request` ignores an out-of-range id;
+//! revocations are an append-only list with "first match" lookup. Pushing
 //! past capacity panics, which the harness bounds rule out. That it refines
 //! `MemStore` (and the contract's store) is ST-1/ST-3, milestone M2.
 
 use crate::ids::{Acct, Key};
-use approval_core::{ActionRequest, BlockTime, Principal, RequestId, Role, Store};
+use approval_core::{ActionRequest, BlockTime, Principal, RegistrationId, RequestId, Role, Store};
 
 pub const CAP_P: usize = 4;
 pub const CAP_R: usize = 4;
+pub const CAP_V: usize = 4;
 
 #[derive(Clone, Debug)]
 pub struct ArrStore {
@@ -29,7 +31,15 @@ pub struct ArrStore {
     r: [ActionRequest<Acct, Key>; CAP_R],
     nl: usize,
     l: [u64; CAP_R],
+    g: u64,
+    nv: usize,
+    v: [(RegistrationId, BlockTime); CAP_V],
 }
+
+pub const T0: BlockTime = BlockTime {
+    height: 0,
+    timestamp_ns: 0,
+};
 
 fn blank_p() -> (Key, Principal<Acct>) {
     (
@@ -37,6 +47,7 @@ fn blank_p() -> (Key, Principal<Acct>) {
         Principal {
             account_id: Acct(0),
             role: Role::Agent,
+            registration_id: 0,
             active_from: 0,
             pending: 0,
         },
@@ -48,12 +59,11 @@ fn blank_r() -> ActionRequest<Acct, Key> {
         id: 0,
         agent_account_id: Acct(0),
         agent_key: Key(0),
+        agent_registration_id: 0,
         action: String::new(),
-        requested_at: BlockTime {
-            height: 0,
-            timestamp_ns: 0,
-        },
+        requested_at: T0,
         approval: None,
+        rejection: None,
     }
 }
 
@@ -67,6 +77,9 @@ impl ArrStore {
             r: [blank_r(), blank_r(), blank_r(), blank_r()],
             nl: 0,
             l: [0; CAP_R],
+            g: 0,
+            nv: 0,
+            v: [(0, T0); CAP_V],
         }
     }
     // Fixed-bound accessors. Harness code loops `0..CAP` and guards on the
@@ -89,6 +102,18 @@ impl ArrStore {
     }
     pub fn log(&self, j: usize) -> u64 {
         self.l[j]
+    }
+    pub fn g(&self) -> u64 {
+        self.g
+    }
+    pub fn nv(&self) -> usize {
+        self.nv
+    }
+    pub fn rev(&self, j: usize) -> (RegistrationId, BlockTime) {
+        self.v[j]
+    }
+    pub fn set_g(&mut self, g: u64) {
+        self.g = g;
     }
     pub fn principals(&self) -> &[(Key, Principal<Acct>)] {
         &self.p[..self.np]
@@ -113,6 +138,11 @@ impl ArrStore {
         assert!(self.nl < CAP_R, "harness bound: log");
         self.l[self.nl] = id;
         self.nl += 1;
+    }
+    pub fn push_rev_raw(&mut self, id: RegistrationId, at: BlockTime) {
+        assert!(self.nv < CAP_V, "harness bound: revocations");
+        self.v[self.nv] = (id, at);
+        self.nv += 1;
     }
 }
 
@@ -205,5 +235,28 @@ impl Store<Acct, Key> for ArrStore {
 
     fn push_approval(&mut self, request_id: RequestId) {
         self.push_log_raw(request_id);
+    }
+
+    fn registration_count(&self) -> u64 {
+        self.g
+    }
+
+    fn increment_registration_count(&mut self) {
+        self.g += 1;
+    }
+
+    fn revocation(&self, registration_id: RegistrationId) -> Option<BlockTime> {
+        let mut i = 0;
+        while i < CAP_V {
+            if i < self.nv && self.v[i].0 == registration_id {
+                return Some(self.v[i].1);
+            }
+            i += 1;
+        }
+        None
+    }
+
+    fn insert_revocation(&mut self, registration_id: RegistrationId, revoked_at: BlockTime) {
+        self.push_rev_raw(registration_id, revoked_at);
     }
 }

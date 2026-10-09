@@ -1,7 +1,7 @@
 # killed-by: h_step_approve
 --- a/core/src/lib.rs
 +++ b/core/src/lib.rs
-@@ -424,9 +424,6 @@
+@@ -493,9 +493,6 @@
      if request.action != action {
          return Err(ApprovalError::ActionMismatch);
      }

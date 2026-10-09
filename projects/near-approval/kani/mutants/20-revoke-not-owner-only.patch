@@ -1,7 +1,7 @@
 # killed-by: h_step_revoke
 --- a/core/src/lib.rs
 +++ b/core/src/lib.rs
-@@ -291,9 +291,7 @@
+@@ -361,9 +361,7 @@
      A: PartialEq,
      S: Store<A, K>,
  {
@@ -9,6 +9,6 @@
 -        return Err(ApprovalError::NotOwner);
 -    }
 +    let _ = caller;
-     store
+     let removed = store
          .remove_principal(key)
-         .ok_or(ApprovalError::KeyNotRegistered)
+         .ok_or(ApprovalError::KeyNotRegistered)?;

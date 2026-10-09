@@ -125,13 +125,17 @@ A GitHub runner has 16 GB, so the plan as written would not run in CI either.
    or approval requires `Holds` and records exactly the caller, key,
    action, time and log position), the stored request is immutable
    (HIST-1), and (c) continuity follows from HIST-8 (void is terminal) plus
-   `approve` requiring `Live`. `GH` itself is still asserted at every step
-   of `h_bmc_from_init`, where the ghost starts concrete at `Init`.
+   `approve` requiring `Live`. (d), the registration ids in the proof, is
+   TX-4/TX-5 (each records the caller's current `registration_id`) plus
+   INV-8 and INV-16 (a live registration id belongs to the key it was
+   recorded with). `GH` itself, including the revocation log of TR-7, is
+   still asserted at every step of `h_bmc_from_init`, where the ghost
+   starts concrete at `Init`.
 5. **Invariants are written as fixed-bound loops** over the store's
    capacity, guarded by the counts, instead of iterator chains over slices.
    This cut the `Inv` assumption from 520k to 188k symex steps.
-6. **Bounds.** `#P, #R, #L ≤ 3` in generated states (capacity 4 for the
-   step). `h_bmc_from_init` keeps every trace at `#R ≤ 2` (deviation 9).
+6. **Bounds.** `#P, #R, #L, #V ≤ 3` in generated states (capacity 4 for
+   the step). `h_bmc_from_init` keeps every trace at `#R ≤ 2` (deviation 9).
 7. **Kani was built from source** here because GitHub release downloads
    are blocked in this environment; CI should use
    `cargo install kani-verifier --version 0.68.0 && cargo kani setup`.
@@ -148,6 +152,13 @@ A GitHub runner has 16 GB, so the plan as written would not run in CI either.
    revoke, re-add, approve the old id fails), and two keep a second id in
    play for TR-2. The TR properties themselves are proven for one step from
    any `Inv` state with up to 3 requests by the step harnesses.
+10. **Registration ids in `Inv` states are drawn from `0..8`, and `G` is
+    set to `#P + #V`** (since `3426c92`). INV-15 forces `G = #P + #V ≤ 6`
+    and INV-11/12/14 keep every id below `G`, so within the other bounds
+    nothing is lost; the narrower draw keeps the extra fields of PR #15
+    (two registration ids per request, the rejection, the revocation
+    list) affordable for CBMC. Raw states keep every id and `G` free, so
+    `add_principal`'s `LogFull` at `G = MAXU` is checked (`h_raw_add`).
 
 ## Status in `status.toml`
 
