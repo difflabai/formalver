@@ -97,17 +97,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # One entry per cover family, so run-kani.sh can check that every
-        # cover is satisfied somewhere in its family.
+        # The slow families (h_read, h_step_request) run one harness per job;
+        # the covers job checks each family's covers across all jobs.
         group:
           - "h_init h_canary"
           - "h_step_add"
           - "h_step_revoke"
-          - "h_step_request h_step_request_empty"
+          - "h_step_request"
+          - "h_step_request_empty"
           - "h_step_approve"
           - "h_raw_add h_raw_revoke h_raw_approve"
           - "h_raw_request h_raw_request_empty"
-          - "h_read h_read_page h_read_find"
+          - "h_read"
+          - "h_read_page"
+          - "h_read_find"
           - "h_bmc_from_init"
     steps:
       - uses: actions/checkout@v4
@@ -148,6 +151,7 @@ jobs:
         env:
           KANI_TIMEOUT: "3600"
           KANI_LOG_DIR: ${{ runner.temp }}/kani-logs
+          KANI_DEFER_COVERS: "1"
         run: tools/scripts/run-kani.sh near-approval ${{ matrix.group }}
       - name: Upload logs
         if: always()
@@ -156,6 +160,23 @@ jobs:
           name: kani-logs-${{ strategy.job-index }}
           path: ${{ runner.temp }}/kani-logs
           retention-days: 14
+
+  covers:
+    # Every cover SATISFIED in at least one harness of its family, across the
+    # kani jobs (each uploads its covers.tsv with its logs).
+    needs: kani
+    if: ${{ !cancelled() && needs.kani.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: kani-logs-*
+          path: ${{ runner.temp }}/kani-logs
+      - name: Covers per family
+        run: tools/scripts/check-covers.sh ${{ runner.temp }}/kani-logs/*/covers.tsv
 
   mutants:
     needs: pin

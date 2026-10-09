@@ -10,7 +10,8 @@
 #
 # usage: tools/scripts/run-kani.sh near-approval [harness...]
 # env:   KANI (default: cargo kani), KANI_TIMEOUT seconds per harness (default 3600),
-#        KANI_LOG_DIR (default: target/kani-logs under the crate)
+#        KANI_LOG_DIR (default: target/kani-logs under the crate),
+#        KANI_DEFER_COVERS=1 to leave the family cover check to check-covers.sh
 set -uo pipefail
 
 project=${1:?usage: run-kani.sh <project> [harness...]}
@@ -73,10 +74,10 @@ for h in "$@"; do
     echo "::error title=$h $result::rc=$rc after ${secs}s. ${why:-no diagnostics in log}"
   fi
 done
-# Covers, per family: each must be SATISFIED somewhere.
-missing=$(awk -F'\t' '{k=$1 "\t" $2; if ($3=="SATISFIED") s[k]=1; else if (!(k in s)) s[k]=s[k]+0}
-                     END {for (k in s) if (!s[k]) print k}' "$covers_all")
-if [ -n "$missing" ]; then
-  echo "unsatisfied covers:"; echo "$missing"; fail=1
+# Covers, per family: each must be SATISFIED somewhere. KANI_DEFER_COVERS=1
+# skips this when a family's harnesses run in separate invocations (CI); the
+# caller then runs check-covers.sh over all of their covers.tsv files.
+if [ "${KANI_DEFER_COVERS:-0}" != 1 ]; then
+  "$root/tools/scripts/check-covers.sh" "$covers_all" || fail=1
 fi
 exit $fail
