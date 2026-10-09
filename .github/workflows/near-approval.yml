@@ -82,9 +82,43 @@ jobs:
       - name: Mutant runner self-test
         run: tools/scripts/test-run-mutants.sh
 
+  kani-quick:
+    # Pull requests: the fast harnesses only. The full matrix (kani, below)
+    # runs nightly, on pushes to main and on manual dispatch.
+    needs: pin
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        group:
+          - "h_init h_canary"
+          - "h_raw_add h_raw_revoke h_raw_approve h_raw_reject"
+          - "h_raw_request h_raw_request_empty"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out trust-framework at the pin
+        env:
+          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+        run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
+      - name: Install Kani (and the CBMC it bundles)
+        run: |
+          . tools/versions.env
+          cargo install --locked kani-verifier --version "$KANI"
+          cargo kani setup
+      - name: Kani ${{ matrix.group }}
+        env:
+          KANI_TIMEOUT: "1800"
+        run: tools/scripts/run-kani.sh near-approval ${{ matrix.group }}
+
   kani:
     needs: pin
-    if: github.event_name != 'schedule' || github.event.schedule == '17 3 * * *'
+    if: >-
+      github.event_name != 'pull_request' &&
+      (github.event_name != 'schedule' || github.event.schedule == '17 3 * * *')
     # CBMC peaks at 6.5 to 9.5 GB on the step harnesses; this repository's
     # default runner has 2 CPUs and 7.9 GB. Set the KANI_RUNNER repository
     # variable to a larger runner label (and KANI_SWAP_GB to 0) to avoid

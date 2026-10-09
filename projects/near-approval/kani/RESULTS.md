@@ -1,84 +1,61 @@
 # near-approval: M1 results (Kani on the real core)
 
-Pin: trust-framework `5736251d65c6bc11c20e5f27ddc869db27bd7299`,
-`core/src/lib.rs` sha256 `6b3f53d5…6c24`. Tools: Kani 0.68.0 (built from
-tag `kani-0.68.0`), CBMC 6.11.0 (CaDiCaL), rustc nightly-2026-08-21 for Kani,
-stable 1.97.0 for plain mode. Machine: 4 cores, 15 GB memory cgroup.
+Pin: trust-framework `3426c9246cee98dbfaa3ff7980bd85ff839d60d6` (PR #15),
+`core/src/lib.rs` sha256 `f5d72cc7…0d0c`. Previous pin `5736251`; the
+results for it are in this file's history. Tools: Kani 0.68.0 (built from
+tag `kani-0.68.0`), CBMC 6.11.0 (CaDiCaL), rustc nightly-2026-08-21 for
+Kani, stable 1.97.0 for plain mode. Machine: 4 cores, 15 GB memory cgroup.
 
 ## Kani
 
 `tools/scripts/run-kani.sh near-approval`, harnesses run one at a time.
 
 <!-- KANI-TABLE -->
-All 16 pass (`exit=0`): every harness verifies with unwinding assertions
-on, `h_canary` fails as required, and every cover is SATISFIED in its
-family. Times are this machine's wall clock, one harness at a time.
+Every harness verifies with unwinding assertions on, and `h_canary` fails
+as required. Step harnesses run as five parts each (deviation 12). CI times
+are wall clock on this repository's 2-CPU, 7.9 GB runners with 16 GB of
+swap, including about 3 min of Kani install; local times are this
+machine, one harness at a time.
 
-| Harness | Result | Time | Covers | Properties |
+| Harness | Result | CI | Local (peak memory) | Properties |
 |---|---|---:|---|---|
-| `h_init` | verified | 4 s | none | INV at `Init`, GH at `Init` |
-| `h_step_add` | verified | 10.5 min | 3/3 | TX-0..5, HIST, INV-1..10, LEM-1..3 for `add_principal` |
-| `h_step_revoke` | verified | 10.2 min | 4/4 | same, `revoke_principal` |
-| `h_step_request` | verified | 11.4 min | 5/6 | same, `request_action` |
-| `h_step_request_empty` | verified | 8.5 min | 5/6 | `""` action instance; family 6/6 |
-| `h_step_approve` | verified | 15.7 min | 10/10 | same, `approve`; TR-2 step, TR-3 step |
-| `h_raw_add` | verified | 35 s | 1/1 | ROB-1, no panic from any state |
-| `h_raw_revoke` | verified | 39 s | 1/1 | ROB-1 |
-| `h_raw_request` | verified | 67 s | 3/3 | ROB-1, INV-9 cap boundary (`pend` any `u32`) |
-| `h_raw_request_empty` | verified | 37 s | 0/3 | `""` instance; family 3/3 |
-| `h_raw_approve` | verified | 113 s | 1/1 | ROB-1 |
-| `h_read` | verified | 10.4 min | 1/2 | RD-1, RD-7, RD-5 (by index), LEM-4; family 2/2 |
-| `h_read_page` | verified | 10.4 min | 1/2 | RD-2 for any `from`, `limit` |
-| `h_read_find` | verified | 10.9 min | 1/2 | RD-5 (by request id) |
-| `h_bmc_from_init` | verified | 37.5 min | 2/2 | GH (TR-1) at every step, TR-2, TR-3 witness, depth 6 |
-| `h_canary` | FAILED (required) | 54 s | none | setup is not vacuous |
+| `h_init`, `h_canary` | verified; canary FAILED (required) | 3 min | 41 s, 127 s | INV and GH at `Init`; setup is not vacuous |
+| `h_step_add_{tx,post,hist,inv,reg}` | verified | 3, 7, 10, 4, 4 min | whole harness before the split: 26 min (13.6 GB) | TX-0, TX-1, HIST, INV for `add_principal` |
+| `h_step_revoke_*` | verified | 6, 6, 16, 10, 4 min | | TX-2, HIST-8, HIST-10, INV-11/12/15 |
+| `h_step_request_*` | verified | 6, 7, 20, 7, 5 min | | TX-3, TX-4 |
+| `h_step_request_empty_*` | verified | 5, 8, 9, 5, 4 min | | `""` action instance |
+| `h_step_approve_*` | verified | 36, 22, 24, 11, 6 min | tx 17 min (11.9 GB), post 17 min (12.7 GB), inv 13 min (10.0 GB), reg 10 min (7.0 GB) | TX-5, TR-2/3/4 steps; 11/11 covers |
+| `h_step_reject_*` | verified | 7, 9, 22, 8, 4 min | | TX-7, HIST-9, INV-13 |
+| `h_raw_add`, `h_raw_revoke`, `h_raw_approve`, `h_raw_reject` | verified | 8 min | 79 s, 94 s, 657 s, 345 s | ROB-1, HIST-7; add's `LogFull` at `G = MAXU` |
+| `h_raw_request`, `h_raw_request_empty` | verified | 5 min | 164 s, 122 s | ROB-1, INV-9 cap boundary |
+| `h_read` | verified | 59 min | | RD-1, RD-5, RD-7, RD-8, LEM-4 |
+| `h_read_page` | verified | 20 min | | RD-2 |
+| `h_read_find` | verified | 34 min | | RD-5 by request id |
+| `h_bmc_from_init` (depth 5) | verified | not yet run (billing) | 26 min (11.2 GB); covers approved, rejected | GH (TR-1, TR-7), TR-2 on every trace of ≤ 5 ops |
+| `h_bmc_from_init_witness` | verified | not yet run (billing) | 7 min (3.9 GB); revival cover satisfied | TR-3 witness, GH along it |
 
-Against the M1 exit criterion "< 20 min per harness": all but
-`h_bmc_from_init` meet it here. Section 6.3's fallback 1 (split) was
-applied to `h_read`. For `h_bmc_from_init`, deviation 8 (ghost-only
-checks) and then fallback 3 (requests bounded at 2, deviation 9) were
-applied; the table's 37.5 min is at bound 4, and CI below runs bound 2.
+The step, raw and read rows ran green in CI on `2199a1e`, whose harness
+code equals `4557423` apart from the BMC. GitHub then stopped starting
+jobs on this repository (spending limit), so `4557423`, the CI `covers`
+job and the mutants under Kani are still to run there.
 
-### CI
-
-`.github/workflows/near-approval.yml` runs `pin`, `plain` and one `kani`
-job per cover family on every PR touching the project and nightly, and
-`mutants` (one job per mutant, plain mode and Kani) weekly. The private
-submodule is checked out with the `CROSS_REPO_BUILD_KEY` secret (OQ-7).
-
-This repository's runners have 2 CPUs and 7.9 GB. CBMC peaks above that
-(measured here: `h_raw_approve` 2.5 GB; `h_step_approve` 9.5 GB, and 6.5,
-6.7 and 9.3 GB for its TX, HIST and INV parts alone), so the Kani jobs add
-a swap file of up to 16 GB on the runner's disk. With it, every Kani job
-passed on `4308bd0` (job wall times, including ~3 min of Kani install):
-
-| Job | Time |
-|---|---:|
-| `h_init h_canary` | 2 min |
-| `h_raw_request h_raw_request_empty` | 7 min |
-| `h_raw_add h_raw_revoke h_raw_approve` | 10 min |
-| `h_step_add` | 10 min |
-| `h_step_revoke` | 14 min |
-| `h_step_approve` | 22 min |
-| `h_step_request h_step_request_empty` | 31 min |
-| `h_bmc_from_init` (requests ≤ 2) | 32 min |
-| `h_read h_read_page h_read_find` | 47 min |
-
-`h_bmc_from_init` stays over 20 min on the CI runner even at bound 2.
-A larger runner (set the `KANI_RUNNER` repository variable, and
-`KANI_SWAP_GB` to 0) removes the dependence on swap.
+A full `kani` run is about 40 jobs and 9 runner-hours, so pull requests
+run only `kani-quick` (`h_init`, `h_canary`, `h_raw_*`) and the full
+matrix runs nightly, on main and on manual dispatch.
 <!-- /KANI-TABLE -->
 
 ## Plain mode
 
-`cargo test --release`: all 12 harness bodies with the random source
-(20k to 400k samples each). Every cover each body evaluates fires at least
+`cargo test --release`: 14 tests over the harness bodies with the random
+source (20k to 400k samples each), including `h_step_reject`, `h_raw_reject`
+and the BMC test, which runs both the depth-5 body and the revival witness. Every cover each body evaluates fires at least
 once; `h_canary` panics as it must. **This is testing, not proof.**
 
 ## Mutants
 
-`tools/scripts/run-mutants.sh near-approval` (plain mode): 26 core mutants
-in `mutants/`. All 24 that must die are killed; the 2 equivalent ones
+`tools/scripts/run-mutants.sh near-approval` (plain mode): 36 core mutants
+in `mutants/`, regenerated against `3426c92` (26 carried over, 10 new for
+reject, registration ids and revocations). All 34 that must die are killed; the 2 equivalent ones
 (F-14: role or account check dropped from `live_agent_registration`)
 survive the `Inv`-based harnesses. They are killed by the `h_raw_*`
 harnesses, which is expected: the equivalence holds only under INV-8, and
@@ -86,15 +63,10 @@ raw states violate it. The script therefore checks survival with the raw
 harnesses skipped.
 
 <!-- KANI-MUTANTS -->
-Under Kani (`run-mutants.sh near-approval --kani`, each mutant against its
-`killed-by` harness; a run that times out or runs out of memory counts as
-no verdict, not a kill): **24/24 killed, 2/2 equivalent mutants survive**
-`h_step_approve` and `h_read` (which carries LEM-4, the proof that they are
-equivalent under `Inv`).
-
-Mutant 05 (empty-action check dropped) was first labelled for
-`h_step_request` and survived there, correctly: that instance never passes
-`""`. It is relabelled to `h_step_request_empty`, which kills it.
+Under Kani (`run-mutants.sh near-approval --kani`, each mutant against the
+`_tx` and `_post` parts of its `killed-by` harness): not yet run at
+`3426c92`; the dispatched CI run was blocked by billing. At `5736251` all
+24 were killed and both equivalent mutants survived.
 <!-- /KANI-MUTANTS -->
 
 ## Deviations from strategy.md section 6, and why
@@ -144,7 +116,7 @@ A GitHub runner has 16 GB, so the plan as written would not run in CI either.
    core's `approvals` building a `Vec` of proofs, and `String`s cloned
    through a symbolic slot index; `ArrStore::request` and the RD-2
    comparison now read over concrete slots (same semantics). The BMC
-   asserts GH, TR-2 and the TR-3 witness at every step but not TX, HIST
+   asserts GH and TR-2 (at the end of the trace, see 11) but not TX, HIST
    and INV, which `h_step_*` prove for one step from any `Inv` state
    (and `Init` is `Inv` by `h_init`).
 9. **`h_bmc_from_init` bounds requests at 2** (section 6.3 fallback 3),
@@ -159,10 +131,30 @@ A GitHub runner has 16 GB, so the plan as written would not run in CI either.
     (two registration ids per request, the rejection, the revocation
     list) affordable for CBMC. Raw states keep every id and `G` free, so
     `add_principal`'s `LogFull` at `G = MAXU` is checked (`h_raw_add`).
+11. **Times are drawn from `0..16`, and the BMC is depth 5 plus a scripted
+    witness** (since `3426c92`). Stored times in `Inv` states and the time
+    of each BMC step come from `0..16` per component; every property
+    compares times only by order, and 16 values exceed what any bounded
+    state can hold, so this loses nothing (order isomorphism). At depth 6
+    the BMC's CNF exceeded 15 GB; `h_bmc_from_init` now runs 5 steps,
+    with step 0 an Add and steps 1-2 one of Add, Revoke, Request, ids
+    drawn from `0..3`, and asserts GH once at the end (a failing step is a
+    no-op, so every shorter trace is a prefix of one it checks). The TR-3
+    revival (add, request, revoke, re-add, approve the old id) needs 6
+    steps; `h_bmc_from_init_witness` runs that one scripted shape with
+    symbolic arguments and checks GH and the cover.
+12. **Step harnesses run in five parts.** Each `h_step_X` is
+    `h_step_X_{tx,post,hist,inv,reg}` (`step_parts!` in `src/proofs.rs`):
+    the exact result and TX-0; `post_ok`; HIST and the history-only
+    lemmas; INV-0..10, LEM and TR-4; INV-11..16. Same state, same op,
+    disjoint assertions, so their conjunction is the single harness. As
+    one harness `h_step_add` peaked at 13.6 GB and `h_step_approve` was
+    killed in CI; each part fits a 7.9 GB runner. A part's covers count
+    for the family (`run-kani.sh`, `check-covers.sh`).
 
 ## Status in `status.toml`
 
-The 39 M1 properties are `in-progress`, not `verified-with-assumptions`:
+The 50 M1 properties are `in-progress`, not `verified-with-assumptions`:
 strategy.md section 12 requires a named spec reviewer (someone who did not
 write `approval-core`) before any K property leaves `unverified`, and that
 sign-off has not happened. Once it has, the flip is mechanical for every
