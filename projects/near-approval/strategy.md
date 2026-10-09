@@ -171,6 +171,14 @@ field (`high | med | low | policy | n/a`) for C-10. A mixed level is recorded
 as its lowest component. Any Verus `external_body`
 or `assume_specification` must cite one of these IDs.
 
+No NEAR-maintained formal model of the protocol exists to cite (checked
+2026-10-09). Each NEAR-facing entry therefore carries `source` (the Nomicon
+pages, or NEPs and near-sdk docs, it relies on, read at
+`[protocol_reference].nomicon_commit`) and, where relevant, `arena_excludes`
+(the [near-proof-arena](https://github.com/ilblackdragon/near-proof-arena)
+scope exclusions that keep a machine-checked model of it out of reach; see
+`near-proofs/`). `upstream-watch` reports changes to both.
+
 | ID | Assumption | Level | Checked by |
 |---|---|---|---|
 | ASM-SIGNER | `signer_account_pk()` is the key whose signature over the originating tx was verified, and it was an access key of `signer_account_id()` at that time. Signatures are unforgeable. | high | RT-KEY |
@@ -826,7 +834,7 @@ deployed code itself and buys the most assurance per day.
 
 | Job | Trigger | Fails on |
 |---|---|---|
-| `pin` | PR, push | gitlink ≠ pin; hash drift; borsh feature gating (ASM-COMPILE). Every other job depends on it. |
+| `pin` | PR, push | gitlink ≠ pin; hash drift; release profile without `overflow-checks = true` or borsh feature gating (ASM-COMPILE). Every other job depends on it. |
 | `plain` | PR, push | any failure; drift in generated `code_facts.pl` |
 | `kani` | PR touching near-approval; nightly (60 min timeout, matrix by harness group) | any failure; any unsatisfied cover; `h_canary` passing |
 | `mutants` | weekly | a core or shell mutant survives; an equivalent mutant is killed |
@@ -835,7 +843,7 @@ deployed code itself and buys the most assurance per day.
 | `near-unit` | PR, push | any failure; lockfile version mismatch; export or import diff (non-reproducible build) |
 | `sandbox` | nightly; submodule bump; manual (from M6) | any failure; export or import diff (reproducible build); threshold exceeded |
 | `status-lint` | PR | a non-`unverified` ID without its artifact or PROP tag; `verified*` without a passing harness in this run; `evidence` not allowed for its `layer` (§12); a K/V property past `unverified` without spec sign-off |
-| `upstream-watch` | weekly | none; opens an issue |
+| `upstream-watch` | weekly (`.github/workflows/upstream-watch.yml`) | none; opens an issue when a path in `tools/upstream-watch.toml` changed (near-proof-arena specs and challenges; the Nomicon pages the assumptions cite) |
 | `deploy-check` | manual; weekly | any DEP or VER violation |
 
 trust-framework is private, so CI needs a deploy key or fine-grained token for

@@ -6,8 +6,13 @@ pinned_commit = "5736251d65c6bc11c20e5f27ddc869db27bd7299"   # provisional: bran
 last_reviewed = "2026-10-03"
 verus_min_verified = 0      # raised at M5; run-verus.sh fails below it
 mc1_state_floor = 0         # recorded at M4 sign-off; MC-1 fails below it
+release_overflow_checks = true  # ASM-COMPILE: check-pin.sh fails unless upstream [profile.release] sets overflow-checks = true
 
 # Status values: unverified | in-progress | verified | verified-with-assumptions | stale
+# Assumption keys: `source` cites where the NEAR behaviour (or tool behaviour) an
+# assumption relies on is specified, checked against [protocol_reference];
+# `arena_excludes` names the near-proof-arena scope exclusions that currently
+# keep a machine-checked model of it out of reach (see near-proofs/).
 # Optional property keys (backward-compatible with the ironclaw format), see strategy.md section 12:
 #   id, evidence (proof | model-proof | bounded-proof | model-check | test | review | check), layer, cross,
 #   harness, depends_on (relative to upstream_path), assumptions, blocked_by
@@ -30,6 +35,12 @@ cargo_near = ""
 near_sandbox = ""
 near_sdk = "5.29.1"         # from source-mirror Cargo.lock
 borsh = "1.8.1"             # from source-mirror Cargo.lock
+
+[protocol_reference]        # what each assumption's `source` was read against
+nomicon_commit = "a013a3fc08bdb50c9f39a1c7f62942bcc3107257"   # near/nearcore master (docs/ is nomicon.io), read 2026-10-09
+nearcore = ""               # release the RT-* tests run on (near_sandbox pin, M6)
+protocol_version = ""       # ditto
+near_proof_arena = "cb16c4090a82a6179d8e1a23d6e83e74e9d5d017"  # contract v1; tools/upstream-watch.toml tracks changes
 
 [source_hashes]             # sha256 at pinned_commit; check-pin.sh recomputes
 "Cargo.toml" = "88621c546c7631dcfa579c83c27a236de975577a4bc3a99ee0202b173f68418a"
@@ -54,90 +65,116 @@ wasm_sha256 = ""            # hex
 statement = "signer_account_pk() is the key whose signature over the originating tx was verified, an access key of signer_account_id(); signatures unforgeable"
 level = "high"
 checked_by = ["RT-KEY"]
+source = ["https://nomicon.io/DataStructures/AccessKey.html", "https://nomicon.io/RuntimeSpec/Transactions.html", "https://nomicon.io/RuntimeSpec/Components/BindingsSpec/ContextAPI.html"]
+arena_excludes = ["transactions", "signature_verification"]
 status = "unverified"
 
 [assumptions.ASM-PRED]
 statement = "predecessor_account_id() is unforgeable; equals the signer for the first receipt and when code on the signer's own account calls (F-9)"
 level = "high"
 checked_by = ["RT-RELAY", "RT-SELFACCT"]
+source = ["https://nomicon.io/RuntimeSpec/Receipts.html", "https://nomicon.io/RuntimeSpec/Components/BindingsSpec/ContextAPI.html", "https://nomicon.io/RuntimeSpec/Scenarios/CrossContractCall.html"]
+arena_excludes = ["function_calls_and_wasm"]
 status = "unverified"
 
 [assumptions.ASM-ATOMIC]
 statement = "Atomicity is per receipt: panic, out-of-gas or LackBalanceForState reverts all writes, including earlier actions batched in the same receipt; logs of a failed receipt may remain"
 level = "med"
 checked_by = ["RT-REVERT", "RT-BATCH"]
+source = ["https://nomicon.io/RuntimeSpec/Receipts.html", "https://nomicon.io/RuntimeSpec/Actions.html", "https://nomicon.io/DataStructures/Account.html"]
+arena_excludes = ["failure_paths_and_rollback", "function_calls_and_wasm"]
 status = "unverified"
 
 [assumptions.ASM-SEQ]
 statement = "Receipts on one account execute one at a time; the contract creates no promises, so no reentrancy; each successful action is one model step"
 level = "high"
 checked_by = ["SH-12"]
+source = ["https://nomicon.io/RuntimeSpec/ApplyingChunk.html", "https://nomicon.io/RuntimeSpec/Runtime.html", "https://nomicon.io/RuntimeSpec/Components/BindingsSpec/PromisesAPI.html"]
+arena_excludes = ["function_calls_and_wasm", "delayed_receipt_queue"]
 status = "unverified"
 
 [assumptions.ASM-TIME]
 statement = "block_height and block_timestamp never decrease across receipts on one account"
 level = "med"
 checked_by = []
+source = ["https://nomicon.io/RuntimeSpec/Components/BindingsSpec/ContextAPI.html", "https://nomicon.io/ChainSpec/BlockProcessing.html"]
+arena_excludes = ["block_finality"]
 status = "unverified"
 
 [assumptions.ASM-FINAL]
 statement = "State at finality 'final' is never reverted"
 level = "high"
 checked_by = []
+source = ["https://nomicon.io/ChainSpec/Consensus.html"]
+arena_excludes = ["block_finality"]
 status = "unverified"
 
 [assumptions.ASM-CODE]
 statement = "Code changes only via DeployContract or UseGlobalContract on C (both need a full-access key on C), or via DeployGlobalContract by the owner of a NEP-591 global contract C references by account id; DeleteAccount erases state and a recreated account starts empty"
 level = "med"
 checked_by = ["RT-RESET", "DEP-1"]
+source = ["https://nomicon.io/RuntimeSpec/Actions.html", "https://github.com/near/NEPs/blob/master/neps/nep-0591.md"]
+arena_excludes = ["non_transfer_actions", "account_v2_global_contracts"]
 status = "unverified"
 
 [assumptions.ASM-SDK]
 statement = "#[init] panics if state exists; #[private] requires predecessor = current account; non-payable change methods reject deposits; &self never writes; only #[near] impl methods exported; PanicOnDefault blocks default init"
 level = "high"
 checked_by = ["SH-9", "SH-10", "SH-11"]
+source = ["https://docs.rs/near-sdk/5.29.1/near_sdk/"]
 status = "unverified"
 
 [assumptions.ASM-STORE]
 statement = "store::LookupMap is a map keyed prefix ++ borsh(key); writes flushed when the contract struct drops after state_write"
 level = "med"
 checked_by = ["ST-4", "ST-5", "ST-6"]
+source = ["https://docs.rs/near-sdk/5.29.1/near_sdk/store/struct.LookupMap.html", "https://nomicon.io/RuntimeSpec/Components/BindingsSpec/TrieAPI.html"]
 status = "unverified"
 
 [assumptions.ASM-IDENT]
 statement = "PartialEq on AccountId/PublicKey is an equivalence matching Borsh-byte equality; the core uses A/K only via Clone and PartialEq (parametricity justifies small identities); harnesses use opaque newtypes so a new trait bound breaks the build"
 level = "high"
 checked_by = []
+source = ["https://docs.rs/near-sdk/5.29.1/near_sdk/struct.PublicKey.html", "https://nomicon.io/DataStructures/Account.html"]
 status = "unverified"
 
 [assumptions.ASM-STAKE]
 statement = "Account must hold storage_usage * 1e19 yocto; ~40 B overhead per record"
 level = "med"
 checked_by = ["RES-1"]
+source = ["https://nomicon.io/DataStructures/Account.html", "https://nomicon.io/GenesisConfig/RuntimeConfig.html"]
+arena_excludes = ["non_transfer_actions"]
 status = "unverified"
 
 [assumptions.ASM-LIMITS]
 statement = "max_total_log_length 16384 B; 100 logs; 4 MiB return data; 300 TGas per call; view gas cap per node"
 level = "med"
 checked_by = ["RES-2", "RES-3"]
+source = ["https://nomicon.io/GenesisConfig/VMConfig.html", "https://nomicon.io/RuntimeSpec/Components/BindingsSpec/MiscellaneousAPI.html"]
+arena_excludes = ["function_calls_and_wasm"]
 status = "unverified"
 
 [assumptions.ASM-META]
 statement = "NEP-366 (and NEP-518 eth-implicit) inner receipts carry the relayer as signer, so relayed calls fail IndirectCall"
 level = "med"
 checked_by = ["RT-METATX"]
+source = ["https://github.com/near/NEPs/blob/master/neps/nep-0366.md", "https://github.com/near/NEPs/blob/master/neps/nep-0518.md", "https://nomicon.io/RuntimeSpec/Actions.html#delegateaction", "https://nomicon.io/architecture/how/meta-tx.html"]
+arena_excludes = ["transactions", "signature_verification", "non_transfer_actions"]
 status = "unverified"
 
 [assumptions.ASM-FCKEY]
 statement = "Function-call keys restrict receiver and methods, cannot attach deposits, have an allowance, and cannot add keys"
 level = "high"
 checked_by = ["RT-FCKEY"]
+source = ["https://nomicon.io/DataStructures/AccessKey.html#accesskeypermissionfunctioncall", "https://nomicon.io/RuntimeSpec/Transactions.html"]
+arena_excludes = ["transactions", "signature_verification", "non_transfer_actions"]
 status = "unverified"
 
 [assumptions.ASM-COMPILE]
 statement = "rustc/LLVM/wasm-opt preserve core semantics host -> wasm32; overflow-checks on in release; the only on-chain usize use is action.len() > MAX_ACTION_LEN; cfg(feature=\"borsh\") gates only use/derive"
 level = "n/a"
 checked_by = ["RT-CODEHASH", "RT-TRACE"]
+source = ["https://doc.rust-lang.org/cargo/reference/profiles.html#overflow-checks"]
 status = "unverified"
 
 [assumptions.ASM-MODEL]
