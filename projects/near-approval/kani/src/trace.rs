@@ -171,7 +171,7 @@ pub fn trace(seed: u64, len: usize) -> Vec<Step> {
     let mut rng = Rng(seed | 1);
     let mut s: M = MemStore::new(OWNER);
     let mut t = alpha_mem(&s);
-    assert!(t == Abs::init(), "REF-5 Init");
+    assert!(tla::same(&t, &Abs::init()), "REF-5 Init");
     let mut out = Vec::with_capacity(len);
     for n in 0..len {
         let op = call(&mut rng, &s, n as u64);
@@ -185,7 +185,7 @@ pub fn trace(seed: u64, len: usize) -> Vec<Step> {
             t
         };
         assert!(
-            post == want_post,
+            tla::same(&post, &want_post),
             "REF-5 post-state, step {n} of seed {seed}: {op:?}"
         );
         t = post;

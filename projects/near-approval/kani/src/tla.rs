@@ -312,6 +312,38 @@ pub fn next<const C: usize>(t: &T<C>, op: &Op) -> T<C> {
     u
 }
 
+/// `a = b` as TLA+ values: field by field, up to the counts. Not the derived
+/// `PartialEq`, which compares the arrays with `memcmp` over all bytes (a
+/// loop CBMC can't bound cheaply) and also compares unused slots.
+pub fn same<const C: usize>(a: &T<C>, b: &T<C>) -> bool {
+    let mut ok = a.nr == b.nr && a.nl == b.nl;
+    let mut k = 0;
+    while k < NK as usize {
+        let (p, q) = (&a.principals[k], &b.principals[k]);
+        ok &= p.reg == q.reg
+            && p.acct == q.acct
+            && p.role == q.role
+            && p.from == q.from
+            && p.pending == q.pending;
+        k += 1;
+    }
+    let mut i = 0;
+    while i < C {
+        let (r, q) = (&a.requests[i], &b.requests[i]);
+        ok &= i >= a.nr
+            || (r.acct == q.acct
+                && r.key == q.key
+                && r.act == q.act
+                && r.appr == q.appr
+                && r.aidx == q.aidx
+                && r.aacct == q.aacct
+                && r.akey == q.akey);
+        ok &= i >= a.nl || a.log[i] == b.log[i];
+        i += 1;
+    }
+    ok
+}
+
 /// REF-1..4 for one step: `pre` is the snapshot before, `post` the store
 /// after, `core_err` the core's error.
 pub fn assert_refines(pre: &Snap, post: &S, op: &Op, core_err: Option<E>) {
@@ -320,8 +352,8 @@ pub fn assert_refines(pre: &Snap, post: &S, op: &Op, core_err: Option<E>) {
     assert!(core_err == want, "REF-1 guard exactness"); // PROP: REF-1 REF-4
     let after = alpha(post);
     if want.is_none() {
-        assert!(after == next(&t, op), "REF-2 effect exactness"); // PROP: REF-2 REF-4
+        assert!(same(&after, &next(&t, op)), "REF-2 effect exactness"); // PROP: REF-2 REF-4
     } else {
-        assert!(after == t, "REF-3 rejected call stutters"); // PROP: REF-3
+        assert!(same(&after, &t), "REF-3 rejected call stutters"); // PROP: REF-3
     }
 }
