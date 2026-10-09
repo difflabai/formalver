@@ -18,6 +18,22 @@ use approval_core::{MAX_PAGE_SIZE, MAX_PENDING_PER_KEY};
 
 /// Every state invariant, asserted one by one so Kani reports each.
 pub fn assert_inv(s: &S) {
+    assert_inv_parts(s, PART_INV | PART_REG);
+}
+
+/// `PART_INV`: the invariants of the `5736251` core (INV-0..10, LEM-1..3,
+/// TR-4); `PART_REG`: the registration and decision invariants PR #15 added
+/// (INV-11..16).
+pub fn assert_inv_parts(s: &S, part: u8) {
+    if part & PART_INV != 0 {
+        assert_inv_base(s);
+    }
+    if part & PART_REG != 0 {
+        assert_inv_reg(s);
+    }
+}
+
+fn assert_inv_base(s: &S) {
     assert!(s.owner == OWNER, "TX-6 owner fixed"); // PROP: TX-6
     assert!(inv0(s), "INV-0"); // PROP: INV-0
     assert!(inv1(s), "INV-1"); // PROP: INV-1
@@ -30,16 +46,19 @@ pub fn assert_inv(s: &S) {
     assert!(inv8(s), "INV-8"); // PROP: INV-8
     assert!(inv9(s), "INV-9"); // PROP: INV-9
     assert!(inv10(s), "INV-10"); // PROP: INV-10
+    assert!(lem1(s), "LEM-1"); // PROP: LEM-1
+    assert!(lem2(s), "LEM-2"); // PROP: LEM-2
+    assert!(lem3(s), "LEM-3"); // PROP: LEM-3
+    assert!(tr4(s), "TR-4"); // PROP: TR-4
+}
+
+fn assert_inv_reg(s: &S) {
     assert!(inv11(s), "INV-11"); // PROP: INV-11
     assert!(inv12(s), "INV-12"); // PROP: INV-12
     assert!(inv13(s), "INV-13"); // PROP: INV-13
     assert!(inv14(s), "INV-14"); // PROP: INV-14
     assert!(inv15(s), "INV-15"); // PROP: INV-15
     assert!(inv16(s), "INV-16"); // PROP: INV-16
-    assert!(lem1(s), "LEM-1"); // PROP: LEM-1
-    assert!(lem2(s), "LEM-2"); // PROP: LEM-2
-    assert!(lem3(s), "LEM-3"); // PROP: LEM-3
-    assert!(tr4(s), "TR-4"); // PROP: TR-4
 }
 
 /// An `Inv` state within the bounds, with its ghost history in plain mode.
@@ -269,25 +288,28 @@ fn assert_phi(p0: i64, post: &S, op: &Op, out: &Out) {
 }
 
 /// Step check groups. Each is a separate Kani harness (section 6.3 ladder,
-/// step 1: split further); plain mode runs all three in one.
+/// step 1: split further); plain mode runs them all in one.
 pub const PART_TX: u8 = 1;
 pub const PART_HIST: u8 = 2;
 pub const PART_INV: u8 = 4;
-pub const PART_ALL: u8 = PART_TX | PART_HIST | PART_INV;
+pub const PART_REG: u8 = 8;
+pub const PART_POST: u8 = 16;
+pub const PART_ALL: u8 = PART_TX | PART_HIST | PART_INV | PART_REG | PART_POST;
 /// Refinement of the TLA+ spec (REF-1..4, `tla.rs`). Its own harnesses
 /// (`h_ref_*`), so the existing step harnesses keep their cost.
-pub const PART_REF: u8 = 8;
+pub const PART_REF: u8 = 32;
 
 /// One inductive step from an `Inv` state `s`, in place. `PART_TX`: exact
-/// result, exact post-state, atomic failure. `PART_HIST`: history and `Φ`.
-/// `PART_INV`: every invariant afterwards, and `GH` when a ghost is given.
+/// result and atomic failure. `PART_POST`: exact post-state. `PART_HIST`: history and `Φ`.
+/// `PART_INV` / `PART_REG`: the invariants afterwards (see
+/// `assert_inv_parts`). `GH` is checked whenever a ghost is given.
 pub fn check_step(s: &mut S, h: &Option<Ghost>, op: &Op, part: u8) -> (Option<Ghost>, Out) {
     let exp = if part & PART_TX != 0 {
         Some(expected(s, op))
     } else {
         None
     };
-    let pre = if part & PART_ALL != PART_INV || h.is_some() {
+    let pre = if part & (PART_TX | PART_HIST | PART_POST | PART_REF) != 0 || h.is_some() {
         Some(snap(s))
     } else {
         None
@@ -303,6 +325,8 @@ pub fn check_step(s: &mut S, h: &Option<Ghost>, op: &Op, part: u8) -> (Option<Gh
         if !out.is_ok() {
             assert!(same_as(s, pre), "TX-0 atomic failure"); // PROP: TX-0
         }
+    }
+    if let (true, Some(pre)) = (part & PART_POST != 0, &pre) {
         assert!(post_ok(pre, s, op, &out), "TX exact post-state"); // PROP: TX-1 TX-2 TX-4 TX-5 TX-7
     }
     if let (true, Some(pre)) = (part & PART_REF != 0, &pre) {
@@ -312,9 +336,7 @@ pub fn check_step(s: &mut S, h: &Option<Ghost>, op: &Op, part: u8) -> (Option<Gh
         assert_hist(pre, v, s, op, &out);
         assert_phi(v.phi, s, op, &out);
     }
-    if part & PART_INV != 0 {
-        assert_inv(s);
-    }
+    assert_inv_parts(s, part);
     let h2 = match (h, &pre) {
         (Some(h), Some(pre)) => Some(ghost_step(h, pre, op, &out)),
         _ => None,
@@ -786,6 +808,11 @@ pub fn bmc_from_init(src: &mut impl Src) {
         } else {
             gen::op(src, &s, &clock(&h))
         };
+        // Under Kani, step times come from `0..16` per component: a trace
+        // holds at most BMC_DEPTH of them, compared only by `==` and `≤`,
+        // so this is order-isomorphic to free times (deviation 11).
+        #[cfg(kani)]
+        let op = with_time(op, gen::state_time(src, false));
         assume!(time_ok(&s, &h, &op));
         // Harness bound: at most BMC_MAX_R requests along a trace.
         assume!(!matches!(op, Op::Req { .. }) || s.nr() < BMC_MAX_R);

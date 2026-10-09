@@ -1,4 +1,4 @@
-# killed-by: h_step_request_empty
+# killed-by: h_step_request_empty_tx h_step_request_empty_post
 --- a/core/src/lib.rs
 +++ b/core/src/lib.rs
 @@ -439,9 +439,6 @@
