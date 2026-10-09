@@ -22,6 +22,8 @@ spec_reviewer = ""          # a named human who did not write approval-core; req
 spec_reviewed_at = ""
 
 [tools]
+tla2tools = "1.8.0"
+apalache = "0.47.2"
 kani = "0.68.0"             # built from tag kani-0.68.0; nightly-2026-08-21
 cbmc = "6.11.0"
 verus = ""
@@ -146,6 +148,12 @@ level = "med"
 checked_by = ["MC-2"]
 status = "unverified"
 
+[assumptions.ASM-TLA-SCOPE]
+statement = "TLA+ model bounds (strategy section 17.3): behaviours with more requests, keys or accounts than TLC and Apalache explore add no new violations. Accounts and keys are covered by ASM-IDENT parametricity; the request bound is a small-scope assumption"
+level = "med"
+checked_by = ["TLA-IND", "REF-5"]
+status = "unverified"
+
 [assumptions.ASM-SPEC]
 statement = "spec.rs, the Verus specs and the Prolog requirements state the intended behaviour; signed off by a human who did not write approval-core"
 level = "n/a"
@@ -259,6 +267,23 @@ prolog_requirements = "prolog/model/approval_machine.pl"
   ST-1 = { status = "unverified", layer = "kani", evidence = "bounded-proof", harness = "h_store_laws_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS"], description = "Store laws for MemStore and Sparse (map/sequence semantics; removing an absent key is a no-op)" }
   ST-2 = { status = "unverified", layer = "kani", evidence = "bounded-proof", harness = "h_proto_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Store protocol: exact mutator call sequence per op; makes contract-store differences from MemStore unreachable" }
   ST-3 = { status = "unverified", layer = "kani", evidence = "bounded-proof", harness = "h_refine_*", depends_on = ["core/src/lib.rs", "contract/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS"], description = "Sparse (transliteration of the contract Store impl) refines MemStore" }
+
+# ---------------------------------------------------------------------------
+[modules.tla_model]
+source = "core/src/lib.rs"
+tla_model = "tla/ApprovalCore.tla"
+
+  [modules.tla_model.properties]
+  TLA-SAFE = { status = "in-progress", layer = "tla", evidence = "model-check", cross = ["kani"], harness = "MC_Safety", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-TLA-SCOPE", "ASM-TOOLS", "ASM-SPEC"], description = "TLC: Inv (INV-3..9, LEM-1/2, TR-1 provenance, Approvable) in every reachable state and StepProperty (HIST-1/2/3/7/8, TR-2, TR-3) on every step, any interleaving of all calls by all parties" }
+  TLA-IND = { status = "in-progress", layer = "tla", evidence = "bounded-proof", cross = ["kani"], harness = "MC_Apalache", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-TLA-SCOPE", "ASM-TOOLS", "ASM-SPEC"], description = "Apalache: Init => Inv, and Inv /\\ Next => Inv' /\\ StepProps from any state with <= 3 requests, integers unbounded, MaxPending scaled to 2: Inv and the step properties hold at every depth" }
+  TLA-LIVE-1 = { status = "in-progress", layer = "tla", evidence = "model-check", harness = "MC_Liveness", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-TLA-SCOPE", "ASM-TOOLS", "ASM-SPEC"], description = "Under weak fairness of approvers, a request whose eligible approver eventually always exists never stays pending; fails without fairness (non-vacuity)" }
+  TLA-LIVE-2 = { status = "in-progress", layer = "tla", evidence = "bounded-proof", cross = ["kani"], harness = "MC_Apalache, MC_Safety", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-TLA-SCOPE", "ASM-TOOLS", "ASM-SPEC"], description = "Approvable: every Approver key of another account can approve a pending request (no accepted request is stuck in the core)" }
+  TLA-WIT = { status = "in-progress", layer = "tla", evidence = "model-check", harness = "MC_Safety, MC_Apalache", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-TOOLS"], description = "Non-vacuity: approved, void, revival-attempt and pending-cap states are reachable in TLC; IndInit holds full states with approved and void requests" }
+  REF-1 = { status = "in-progress", layer = "kani", evidence = "bounded-proof", cross = ["plain"], harness = "h_ref_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS"], description = "Guard exactness (A1): the core's error equals the TLA+ error operator on alpha(pre); Ok exactly when the TLA+ action is enabled" }
+  REF-2 = { status = "in-progress", layer = "kani", evidence = "bounded-proof", cross = ["plain"], harness = "h_ref_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS"], description = "Effect exactness (A2): on Ok, alpha(post) is the TLA+ action's post-state" }
+  REF-3 = { status = "in-progress", layer = "kani", evidence = "bounded-proof", cross = ["plain"], harness = "h_ref_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS"], description = "Rejected calls stutter (A3): on Err, alpha(post) = alpha(pre)" }
+  REF-4 = { status = "in-progress", layer = "kani", evidence = "bounded-proof", cross = ["review"], harness = "h_ref_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS"], description = "Time irrelevance (A7): tla.rs reads no BlockTime, so REF-1/2 hold for every block time; payload classes (A5) via h_ref_toolong" }
+  REF-5 = { status = "in-progress", layer = "plain", evidence = "test", cross = ["tla"], harness = "trace::tests::ref5_traces, TraceCheck", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-TOOLS"], description = "Trace validation: 60 x 80-call core traces equal tla.rs on every step, and TLC accepts each as a behaviour of ApprovalCore.tla (>= 5 revival attempts)" }
 
 # ---------------------------------------------------------------------------
 [modules.contract_store]

@@ -219,6 +219,9 @@ pub const PART_TX: u8 = 1;
 pub const PART_HIST: u8 = 2;
 pub const PART_INV: u8 = 4;
 pub const PART_ALL: u8 = PART_TX | PART_HIST | PART_INV;
+/// Refinement of the TLA+ spec (REF-1..4, `tla.rs`). Its own harnesses
+/// (`h_ref_*`), so the existing step harnesses keep their cost.
+pub const PART_REF: u8 = 8;
 
 /// One inductive step from an `Inv` state `s`, in place. `PART_TX`: exact
 /// result, exact post-state, atomic failure. `PART_HIST`: history and `Φ`.
@@ -246,6 +249,9 @@ pub fn check_step(s: &mut S, h: &Option<Ghost>, op: &Op, part: u8) -> (Option<Gh
             assert!(same_as(s, pre), "TX-0 atomic failure"); // PROP: TX-0
         }
         assert!(post_ok(pre, s, op, &out), "TX exact post-state"); // PROP: TX-1 TX-2 TX-4 TX-5
+    }
+    if let (true, Some(pre)) = (part & PART_REF != 0, &pre) {
+        crate::tla::assert_refines(pre, s, op, out.err());
     }
     if let (Some(v), Some(pre)) = (&v, &pre) {
         assert_hist(pre, v, s, op, &out);
@@ -690,4 +696,46 @@ pub fn bmc_from_init(src: &mut impl Src) {
 pub fn canary(src: &mut impl Src) {
     let Some((s, _)) = inv_state(src) else { return };
     assert!(n_l(&s) == 0, "canary: no approval is ever recorded");
+}
+
+// ---------------------------------------------------------------------------
+// h_ref_toolong: the TooLong payload class (A5, REF-1..3)
+// ---------------------------------------------------------------------------
+
+/// An action one byte over `MAX_ACTION_LEN`, built at compile time so its
+/// length stays concrete under Kani.
+pub const LONG: &str = match core::str::from_utf8(&[b'x'; approval_core::MAX_ACTION_LEN + 1]) {
+    Ok(s) => s,
+    Err(_) => panic!(),
+};
+
+/// The step harnesses draw actions from the 2-byte alphabet and `""`; this
+/// covers the third class the TLA+ spec has, `TooLong`, for both entry
+/// points that take an action.
+pub fn ref_toolong(src: &mut impl Src) {
+    let Some((mut s, h)) = inv_state(src) else {
+        return;
+    };
+    let c = gen::caller(src, &s);
+    let t = gen::op_time(src, &clock(&h));
+    let op = if src.bool() {
+        Op::Req {
+            c,
+            action: LONG.to_string(),
+            t,
+        }
+    } else {
+        let id = src.below(s.nr() as u8 + 1) as u64;
+        Op::Appr {
+            c,
+            id,
+            action: LONG.to_string(),
+            t,
+        }
+    };
+    assume!(time_ok(&s, &h, &op));
+    let (_, out) = check_step(&mut s, &h, &op, PART_TX | PART_REF);
+    assert!(!out.is_ok(), "REF TooLong is never accepted");
+    cover!(out.err() == Some(E::ActionTooLong), "toolong: ActionTooLong");
+    cover!(out.err() == Some(E::ActionMismatch), "toolong: ActionMismatch");
 }

@@ -104,3 +104,45 @@ fn h_bmc_from_init() {
 fn h_canary() {
     checks::canary(&mut Sym(None, checks::PART_ALL, false));
 }
+
+// ---------------------------------------------------------------------------
+// h_ref_*: one step of the core refines the TLA+ spec (REF-1..4, tla.rs).
+// Same states and operations as h_step_*, only the refinement checks.
+// Unwind 6: the abstract state's arrays hold CR + 1 = 5 entries.
+// ---------------------------------------------------------------------------
+
+#[kani::proof]
+#[kani::unwind(6)]
+fn h_ref_add() {
+    checks::step_add(&mut Sym(None, checks::PART_REF, false));
+}
+
+#[kani::proof]
+#[kani::unwind(6)]
+fn h_ref_revoke() {
+    checks::step_revoke(&mut Sym(None, checks::PART_REF, false));
+}
+
+#[kani::proof]
+#[kani::unwind(6)]
+fn h_ref_request() {
+    checks::step_request(&mut Sym(None, checks::PART_REF, false));
+}
+
+#[kani::proof]
+#[kani::unwind(6)]
+fn h_ref_request_empty() {
+    checks::step_request(&mut Sym(None, checks::PART_REF, true));
+}
+
+#[kani::proof]
+#[kani::unwind(6)]
+fn h_ref_approve() {
+    checks::step_approve(&mut Sym(None, checks::PART_REF, false));
+}
+
+#[kani::proof]
+#[kani::unwind(6)]
+fn h_ref_toolong() {
+    checks::ref_toolong(&mut Sym(None, checks::PART_REF, false));
+}

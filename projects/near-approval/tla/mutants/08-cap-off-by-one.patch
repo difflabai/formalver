@@ -1,0 +1,11 @@
+--- a/ApprovalCore.tla
++++ b/ApprovalCore.tla
+@@ -123,7 +123,7 @@
+     IF a # "Ok" THEN a
+     ELSE IF x = Empty THEN "EmptyAction"
+     ELSE IF x = TooLong THEN "ActionTooLong"
+-    ELSE IF principals[k].pending >= MaxPending THEN "TooManyPending"
++    ELSE IF principals[k].pending > MaxPending THEN "TooManyPending"
+     ELSE "Ok"
+ 
+ \* live_agent_registration: the registration request i was made under is

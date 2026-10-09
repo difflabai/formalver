@@ -1,0 +1,11 @@
+--- a/ApprovalCore.tla
++++ b/ApprovalCore.tla
+@@ -130,7 +130,7 @@
+ \* still in force.
+ Live(i) ==
+     LET p == principals[Req(i).key] IN
+-    p.reg /\ p.role = "Agent" /\ p.acct = Req(i).acct /\ p.from <= i
++    p.reg /\ p.role = "Agent" /\ p.acct = Req(i).acct
+ 
+ ApproveErr(pred, signer, k, i, x) ==
+     LET a == AuthErr(pred, signer, k, "Approver") IN

@@ -741,8 +741,8 @@ formalver/
 ├── .gitmodules         # + projects/near-approval/source-mirror (shallow)
 ├── .github/workflows/near-approval.yml
 ├── tools/
-│   ├── versions.env    # KANI, VERUS, SCRYER, CARGO_NEAR, NEAR_SANDBOX, RUST_TOOLCHAIN
-│   └── scripts/        # run-prolog.sh (fixed), run-verus.sh (fixed), run-kani.sh,
+│   ├── versions.env    # KANI, TLA2TOOLS, APALACHE, VERUS, SCRYER, CARGO_NEAR, NEAR_SANDBOX, RUST_TOOLCHAIN
+│   └── scripts/        # run-prolog.sh (fixed), run-verus.sh (fixed), run-kani.sh, run-tla.sh,
 │                       # check-pin.sh, check-status.sh, check-hygiene.sh, wasm-surface.sh
 └── projects/near-approval/
     ├── strategy.md  status.toml  wasm-surface.expected
@@ -750,6 +750,7 @@ formalver/
     ├── prolog/{requirements,model,verification,extracted,tests}/
     ├── conformance/traces/            # generated, checked in
     ├── kani/{src,tests,mutants,kani-stub}/
+    ├── tla/{*.tla,*.cfg,mutants}/     # §17; build/ is generated
     ├── verus/                         # M5: twin + erasure check + REWRITES.toml (A) or machine (B);
     │                                  # TRUSTED.toml; canary/
     ├── near-tests/{src,tests,mutants}/
@@ -768,7 +769,7 @@ The ironclaw format is kept. **Status values** are unchanged:
 |---|---|
 | `id` | catalogue ID |
 | `evidence` | the target evidence: `proof | model-proof | bounded-proof | model-check | test | review | check` |
-| `layer` | primary technique: `kani | plain | verus | prolog | unit | difftest | sandbox | wasm-check | review | deploy-check` |
+| `layer` | primary technique: `kani | plain | verus | prolog | tla | unit | difftest | sandbox | wasm-check | review | deploy-check` |
 | `cross` | cross-check techniques |
 | `harness` | the `// PROP:` tag must appear in it before the property leaves `unverified` |
 | `depends_on` | paths relative to `upstream_path` |
@@ -780,6 +781,7 @@ The ironclaw format is kept. **Status values** are unchanged:
 - `plain` → `test`
 - `verus` → `proof` or `model-proof`
 - `prolog` → `check`, `model-check` or `test`
+- `tla` → `model-check` (TLC) or `bounded-proof` (Apalache inductive step)
 - `unit`, `difftest` → `test`
 - `sandbox` → `test` or `check`
 - `wasm-check`, `deploy-check` → `check`
@@ -812,6 +814,7 @@ M3 run in parallel. Each milestone ends by updating the statuses it lists.
 |---|---|---|---|
 | **M0** | Bootstrap and gates | • **OQ-7 resolved:** a deploy key or token lets the `pin` job check out the private submodule. <br>• Submodule at the provisional pin, `[source_hashes]` filled. <br>• Root `exclude` added; a clone without submodules still builds ironclaw. <br>• F-10 fixes: `run-prolog.sh` runs `-g "(catch(run_tests,E,(write(E),nl,halt(2))) -> halt(0) ; halt(1))" </dev/null` without `\|\| true` and exits non-zero if any file fails; `run-verus.sh` passes `--cfg 'feature="verus"'` and enforces the floor; `check-pin.sh` works and reports the ironclaw drift (OQ-6 decided). <br>• `tools/versions.env` pins every tool and `RUST_TOOLCHAIN`. CI skeleton green. <br>• **F-13 gate:** `cargo test -p approval-contract` passes, and `cargo near build non-reproducible-wasm` with `RUST_TOOLCHAIN` produces a wasm that deploys to the pinned near-sandbox and answers `get_owner` after `new`. <br>• OQ-1..5 raised upstream; OQ-3 answered. | 1–2 |
 | **M1** | Kani step, raw, read and BMC harnesses on the real core | • Plain mode passes in CI. <br>• Under Kani (unwinding assertions on), `h_init`, `h_step_*`, `h_raw_*`, `h_read`, `h_bmc_from_init` pass and `h_canary` fails, with every cover in §6.2 satisfied. <br>• Each harness takes < 20 min, or the §6.3 ladder is applied and recorded. <br>• Every §6.4 mutant assigned to an M1 harness is killed, and the 2 equivalent ones survive. <br>• Every K property has a PROP tag. <br>• Spec reviewer sign-off recorded. <br>• **Statuses:** TX, INV-1..10, LEM, HIST, TR-1..4, TR-6, RD-1/2/5/7 and ROB-1 become `verified-with-assumptions` (`bounded-proof`). | 4–6 |
+| **M1.5** | TLA+ model refined by Kani (§17) | • `run-tla.sh near-approval safety liveness apalache trace mutants` passes: TLA-SAFE, TLA-IND, TLA-LIVE-1/2, witnesses, REF-5, every spec mutant killed. <br>• `h_ref_*` pass under Kani with covers satisfied. <br>• **Statuses:** TLA-*, REF-1..5 updated. | 2–3 |
 | **M2** | Ghost-store harnesses | • `h_page_arith`, `h_proto_*`, `h_count_*`, `h_refine_*`, `h_store_laws_*` and `h_action_len` pass, with their covers satisfied. <br>• Every §6.4 mutant except the must-survive pair is killed by Kani and by plain mode. <br>• RD-4 plain check passes (log ≤ 250; `l ∈ {1, 2, 99, 100, 101, 200}`). <br>• **Statuses:** INV-0, TR-5, RD-3, RD-4, RD-6, ROB-2..4 and ST-1..3 updated. | 1–2 |
 | **M3** | near-sdk shell and store | • `store_diff.rs` (10k × 50, with reload) passes. <br>• `shell.rs` passes. <br>• All shell mutants are killed. <br>• Golden Borsh bytes are committed. <br>• `wasm-surface.sh` diff on the non-reproducible build is clean. <br>• `api_facts.pl` generated. <br>• **Statuses:** ST-4..6, SH-1..8, SH-11, SH-12, RES-1 and RES-2 updated. | 2–3 |
 | **M4** | Prolog | • `run-prolog.sh near-approval` exits 0 (strict). <br>• C-1..10 pass, or each failure has a recorded decision (C-4/F-8). <br>• MC-1 and MC-1s meet the §5.11 criteria, each in < 5 min, and `mc1_state_floor` is recorded. <br>• Traces checked in; MC-2 replay passes on the core and `spec.rs`. <br>• `code_facts.pl` regeneration shows no diff. <br>• **Statuses:** C-1..10, MC-1 and MC-2 updated. | 3–4 |
@@ -830,6 +833,7 @@ deployed code itself and buys the most assurance per day.
 | `plain` | PR, push | any failure; drift in generated `code_facts.pl` |
 | `kani` | PR touching near-approval; nightly (60 min timeout, matrix by harness group) | any failure; any unsatisfied cover; `h_canary` passing |
 | `mutants` | weekly | a core or shell mutant survives; an equivalent mutant is killed |
+| `tla` | PR, push | any §17.3 check failing; a witness or the unfair liveness run passing; a spec mutant surviving |
 | `prolog` | PR, push | any failure; drift in `conformance/traces`; MC-1/MC-1s state count below the floor |
 | `verus` | PR, push (from M5) | any error; count below the floor; canary verifies; a spec mutant verifies; hygiene |
 | `near-unit` | PR, push | any failure; lockfile version mismatch; export or import diff (non-reproducible build) |
@@ -875,3 +879,122 @@ the submodule (OQ-7, resolved in M0).
    be barred from holding agent or approver keys? MC-1 can flag it.
 9. **OQ-9:** Admin events (F-8): keep as accepted risk, or add `key_added` /
    `key_revoked`? Adding them changes C-4 and SH-6.
+
+---
+
+## 17. TLA+ over every event sequence, refined by Kani (M1.5)
+
+The Kani harnesses prove one step of the real core from any `Inv` state
+within their bounds, plus a depth-6 BMC from `Init`. They say nothing
+directly about **sequences**: liveness, or safety at a depth the BMC doesn't
+reach. M1.5 adds a TLA+ model of the core that is checked over all event
+sequences, and connects it to the code: every assumption the TLA+ model makes
+about the Rust is a Kani obligation on the real core.
+
+```text
+real core  ⊑  tla.rs  ≡  ApprovalCore.tla  ⊨  Inv at every depth  (Apalache)
+  Kani REF-1..4    REF-5 trace     ⊨  StepProps, witnesses  (TLC)
+                   validation      ⊨  Live1 under fairness  (TLC)
+```
+
+### 17.1 The model (`tla/`)
+
+| File | Contents |
+|---|---|
+| `ApprovalCore.tla` | The state machine. Variables `principals` (total over `Keys`, `reg = FALSE` for absent keys), `requests`, `log`: the image of a store under the abstraction map α. Ghost `epoch`/`ghost` for TR-1. One error operator per entry point (`AddErr`, `RevokeErr`, `RequestErr`, `ApproveErr`), the first failing guard in the core's order, and one action enabled exactly when it is `"Ok"`. A rejected call is a stutter (TX-0). `GuardOrder` lists each entry point's errors in order. |
+| `ApprovalProps.tla` | `TypeOK` (as predicates), INV-3..9, LEM-1/2, `Provenance` (TR-1), `GhostLive`, `Approvable` (TLA-LIVE-2): together `Inv`. Action properties HIST-1/2/3/7/8 (`StepProperty`). `Witness_*` invariants that must be violated (TR-5). |
+| `MC_Safety.{tla,cfg}` | TLC: accounts `{o, a1, a2}`, keys `{k1, k2}`, payloads `{x, y}` plus `Empty` and `TooLong`, `MaxPending = 2` (scaled), at most 3 requests. Symmetry on accounts and keys; a `VIEW` quotients the unbounded epoch ghost (it is read only as "unchanged since the request"). |
+| `MC_Liveness.{tla,cfg}`, `MC_Liveness_Unfair.cfg` | TLC: `Live1` under weak fairness of approvers; bounds inside the actions, no symmetry. Without fairness `Live1` must fail. |
+| `MC_Apalache.tla` | Apalache: `Init ⇒ Inv`, `Inv ∧ Next ⇒ Inv'` and `Inv ∧ Next ⇒ StepProps` from any state with at most 3 requests, all integers symbolic, `MaxPending = 2` (scaled so the cap binds; Kani covers the real 16). |
+| `TraceCheck.{tla,cfg}` | REF-5: replays traces of the real core (`build/TraceData.tla`, generated). |
+| `mutants/*.patch` | Spec mutants; each must be killed by trace, apalache or liveness. |
+
+**Abstractions**, each discharged in §17.2:
+- Accounts and keys are small symmetric sets (ASM-IDENT parametricity).
+- Actions are four classes: two distinct storable payloads, `Empty` and
+  `TooLong`. The core reads an action only through `is_empty`, `len` and
+  `==`.
+- Block times are dropped: the core stores them and never branches on them.
+- Counters are unbounded naturals: `LogFull` fires only at `u64::MAX`
+  (LEM-3, ROB-1, ROB-2).
+
+### 17.2 The refinement link
+
+| # | TLA+ assumption about the Rust | Discharged by |
+|---|---|---|
+| A1 | **Guard exactness:** the core's error is the TLA+ error operator's, so `Ok` exactly when the action is enabled | **REF-1**, `h_ref_*` (Kani) |
+| A2 | **Effect exactness:** on `Ok`, α(post) is the action's post-state | **REF-2**, `h_ref_*` |
+| A3 | **Rejected calls stutter:** on `Err`, α(post) = α(pre) | **REF-3**, `h_ref_*`; also TX-0 |
+| A4 | Small symmetric account and key sets suffice | ASM-IDENT (opaque `Acct`/`Key` in the harness build) |
+| A5 | Four payload classes suffice | REF-1/2 over the 2-byte alphabet and `""` (`h_ref_*`), and `h_ref_toolong` for `TooLong` |
+| A6 | Counters don't overflow in any reachable state | LEM-3, ROB-1; ROB-2 (M2) |
+| A7 | Time is irrelevant to control flow and α | **REF-4**: `tla.rs` never reads a `BlockTime`, so REF-1/2 hold for every time |
+| A8 | Each successful call is one atomic step | ASM-SEQ, ASM-ATOMIC (runtime; not provable in Kani) |
+| — | `tla.rs` transcribes `ApprovalCore.tla` | **REF-5**: random core traces (60 × 80 calls over `MemStore`) are checked against `tla.rs` on every step, then TLC must accept each as a behaviour of `ApprovalCore`. The generator re-registers revoked keys so revival attempts occur (≥ 5 required). |
+
+`kani/src/tla.rs` holds α, the error operators and `next`. The `h_ref_*`
+harnesses reuse the `h_step_*` state and operation generators with only the
+refinement checks (`PART_REF`), so the existing harnesses keep their cost.
+Plain mode runs the refinement checks inside every step test.
+
+### 17.3 What is checked
+
+| ID | Property | Check | Bound |
+|---|---|---|---|
+| TLA-SAFE | `Inv` and `StepProperty` (HIST-1/2/3/7/8, TR-2, TR-3 as `□(Void ⇒ □Void)`) in every reachable state and step | TLC, `MC_Safety` | ≤ 3 requests, 3 accounts, 2 keys, `MaxPending = 2`, any number of add/revoke |
+| TLA-IND | `Inv` is inductive, and every step from an `Inv` state satisfies `StepProps`: both hold at every depth | Apalache, `MC_Apalache` | arrays ≤ 3 before the step; integers unbounded; `MaxPending = 2` |
+| TLA-LIVE-1 | `<>[]Eligible(i) ⇒ □(Pending(i) ⇒ ◇¬Pending(i))` under `WF(ApproveReq(i))`: if an eligible approver eventually always exists and approvers are fair, no request stays pending | TLC, `MC_Liveness` (must fail without fairness) | ≤ 2 requests, 2 keys, ≤ 1 revocation per key |
+| TLA-LIVE-2 | `Approvable`: a pending request is approvable by every Approver key of another account | in `Inv` (TLC and Apalache) | as above |
+| TLA-WIT | Approved, void, revival-attempt and pending-cap states are reachable | TLC, inverted invariants | as TLA-SAFE |
+| REF-1..4 | §17.2 | Kani `h_ref_*`, plain mode | Kani step bounds (§6.3) |
+| REF-5 | `.tla` ≡ `tla.rs` ≡ core on traces | plain + TLC | 60 traces × 80 calls |
+
+`Live1` needs its premise. Weak fairness alone is not enough when the owner
+can revoke every approver key: then no approval is ever enabled, and that is
+the contract working as designed, not a liveness bug. Strong fairness would
+not help either, for the same reason.
+
+**What this does not give.** TLC and Apalache use small constants, and Kani
+proves REF only within its step bounds. The chain is "bounded model plus
+parametricity" (ASM-IDENT, ASM-MODEL), not an unbounded proof; M5 (Verus)
+removes the small-scope step for the code, not for the TLA+ constants.
+
+### 17.4 Running and CI
+
+`tools/scripts/run-tla.sh near-approval [safety|liveness|apalache|trace|mutants]`.
+`tools/scripts/get-tla-tools.sh` fetches the jar and Apalache pinned in
+`tools/versions.env`, sha256-checked. CI job `tla` runs all checks plus the
+mutants on PRs; the `kani` job's matrix adds the `h_ref_*` family.
+
+### 17.5 Interaction with the Prolog model (M4)
+
+Prolog stays the **independent** semantics, written from the requirements
+(ASM-SPEC); TLA+ mirrors the code. M4 is designed against these interfaces:
+
+| Link | Check | What it catches |
+|---|---|---|
+| P1 guard table | **C-2t:** TLA+ `GuardOrder` = `guard/4` order = `code_precedence/2` | a reordered or missing guard, before TLC runs |
+| P2 constants | C-5 extended to the `.cfg` files; scaled values tagged `scaled`, and C-10 warns on a `verified*` property backed only by scaled runs | a model checked with the wrong constants |
+| P3 graph equivalence | **MC-3:** Prolog `step/4` and TLC export the full labelled reachable graph for one universe (TLC through a `lastOp` history variable kept in the fingerprint and projected out by the exporter); state and edge sets must be equal | any divergence between requirements-derived and code-derived semantics, at the exact `(state, op)` |
+| P4 shared traces | MC-2 uses REF-5's trace format: every source (`gen_traces.pl`, `trace.rs`) is replayed by every model (core, `spec.rs`, `tla.rs`, `step/4`, `TraceCheck`) | long-trace divergence that P3's small universe misses |
+
+With MC-3 in place, MC-1's own invariant checks repeat TLC's on an equal
+graph, so MC-1 shrinks to coverage (every error, an approved and a void
+state). The new IDs (TLA-*, REF-*, C-2t, MC-3) enter `traceability.pl` with
+layers `tla`, `kani` and `prolog`, so C-7 and C-9 cover them.
+
+### 17.6 Gap: trust-framework PR #15
+
+The model and the `h_ref_*` harnesses follow the pin `5736251`, like every
+M1 harness. trust-framework PR #15 (`3426c92`, unmerged) changes the core in
+ways the model must follow when the pin moves (OQ-1):
+
+| #15 change | TLA+ change | `tla.rs` / Kani change |
+|---|---|---|
+| `reject` (approver, not the agent's account) frees the pending slot; `AlreadyRejected` guard after `AlreadyApproved`; status `Rejected` | `RejectRequest` action, `RejectErr`, `rej` field; `Live1` becomes `Pending ~> Approved ∨ Rejected ∨ Void` with fairness on "approve or reject"; HIST-2 extended to rejections | `Op::Reject`, `h_ref_reject` |
+| registration ids (`registration_count`), recorded in requests and proofs; `add_principal` returns `LogFull` at `u64::MAX` | `regCount`, `regId` in principals and requests; the `epoch` ghost becomes partly redundant (it can be stated over registration ids) | α gains the ids |
+| `revoke_key` records `(registration_id, revoked_at)`; `proof_revocations` | `revocations` set (times stay abstract, A7) | α gains the revocation set; REF-4 still holds |
+| add and revoke emit events | none (events are shell, not core) | none |
+
+`live_agent_registration` (the `active_from` check) is unchanged, so TR-3
+and its mutants carry over.

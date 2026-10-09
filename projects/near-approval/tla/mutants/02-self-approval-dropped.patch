@@ -1,0 +1,11 @@
+--- a/ApprovalCore.tla
++++ b/ApprovalCore.tla
+@@ -139,7 +139,7 @@
+     ELSE IF Req(i).appr THEN "AlreadyApproved"
+     ELSE IF ~Live(i) THEN "AgentRevoked"
+     ELSE IF Req(i).act # x THEN "ActionMismatch"
+-    ELSE IF signer = Req(i).acct THEN "SelfApproval"
++    ELSE IF FALSE THEN "SelfApproval"
+     ELSE "Ok"
+ 
+ -----------------------------------------------------------------------------

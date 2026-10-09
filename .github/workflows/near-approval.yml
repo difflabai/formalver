@@ -1,4 +1,4 @@
-# near-approval CI (strategy.md section 14): the jobs M1 has artifacts for.
+# near-approval CI (strategy.md section 14): the jobs M1 and M1.5 have artifacts for.
 # trust-framework is private; CROSS_REPO_BUILD_KEY (a token or an SSH deploy
 # key with read access to it) checks out the submodule (OQ-7).
 name: near-approval
@@ -109,6 +109,10 @@ jobs:
           - "h_raw_request h_raw_request_empty"
           - "h_read h_read_page h_read_find"
           - "h_bmc_from_init"
+          # TLA+ refinement (strategy.md section 17.2), one family per entry.
+          - "h_ref_add h_ref_revoke"
+          - "h_ref_request h_ref_request_empty"
+          - "h_ref_approve h_ref_toolong"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -155,6 +159,48 @@ jobs:
         with:
           name: kani-logs-${{ strategy.job-index }}
           path: ${{ runner.temp }}/kani-logs
+          retention-days: 14
+
+  tla:
+    needs: pin
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out trust-framework at the pin
+        env:
+          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+        run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
+      - name: Toolchain from versions.env
+        run: |
+          . tools/versions.env
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup default "$RUST_TOOLCHAIN"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            projects/near-approval/kani/target
+            tools/.cache
+          key: tla-${{ hashFiles('tools/versions.env', 'projects/near-approval/kani/Cargo.lock') }}
+      - name: TLC, Apalache, trace validation and spec mutants
+        env:
+          TLA_HEAP: 5g
+          TLA_LOG_DIR: ${{ runner.temp }}/tla-logs
+        run: tools/scripts/run-tla.sh near-approval safety liveness apalache trace mutants
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tla-logs
+          path: ${{ runner.temp }}/tla-logs
           retention-days: 14
 
   mutants:

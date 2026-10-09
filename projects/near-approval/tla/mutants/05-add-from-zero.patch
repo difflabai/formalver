@@ -1,0 +1,11 @@
+--- a/ApprovalCore.tla
++++ b/ApprovalCore.tla
+@@ -155,7 +155,7 @@
+ AddPrincipal(c, k, a, r) ==
+     /\ AddErr(c, k) = "Ok"
+     /\ principals' = [principals EXCEPT ![k] =
+-                        [reg |-> TRUE, acct |-> a, role |-> r, from |-> NR, pending |-> 0]]
++                        [reg |-> TRUE, acct |-> a, role |-> r, from |-> 0, pending |-> 0]]
+     /\ UNCHANGED <<requests, log, epoch, ghost>>
+ 
+ RevokeKey(c, k) ==

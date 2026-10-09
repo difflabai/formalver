@@ -10,6 +10,9 @@ pub mod checks;
 pub mod gen;
 pub mod spec;
 pub mod store;
+pub mod tla;
+#[cfg(not(kani))]
+pub mod trace;
 
 #[cfg(kani)]
 mod proofs;

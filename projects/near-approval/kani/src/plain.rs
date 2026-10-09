@@ -77,6 +77,11 @@ fn h_bmc_from_init() {
 }
 
 #[test]
+fn h_ref_toolong() {
+    run("h_ref_toolong", 0x4CF5_AD43, 20_000, checks::ref_toolong);
+}
+
+#[test]
 #[should_panic(expected = "canary")]
 fn h_canary() {
     run("h_canary", 0x2F0E_1A1B, 2_000, checks::canary);
