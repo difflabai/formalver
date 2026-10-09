@@ -28,14 +28,19 @@ machine, one harness at a time.
 | `h_step_reject_*` | verified | 7, 9, 22, 8, 4 min | | TX-7, HIST-9, INV-13 |
 | `h_raw_add`, `h_raw_revoke`, `h_raw_approve`, `h_raw_reject` | verified | 8 min | 79 s, 94 s, 657 s, 345 s | ROB-1, HIST-7; add's `LogFull` at `G = MAXU` |
 | `h_raw_request`, `h_raw_request_empty` | verified | 5 min | 164 s, 122 s | ROB-1, INV-9 cap boundary |
-| `h_read` | verified | 59 min | | RD-1, RD-5, RD-7, RD-8, LEM-4 |
-| `h_read_page` | verified | 20 min | | RD-2 |
-| `h_read_find` | verified | 34 min | | RD-5 by request id |
+| `h_read` | verified | 59 min | 17 min (needs swap: out of memory at 15 GB without) | RD-1, RD-5, RD-7, RD-8, LEM-4 |
+| `h_read_page` | verified | 20 min | 16 min | RD-2 |
+| `h_read_find` | verified | 34 min | 14 min | RD-5 by request id |
 | `h_bmc_from_init` (depth 5) | verified | not yet run (billing) | 26 min (11.2 GB); covers approved, rejected | GH (TR-1, TR-7), TR-2 on every trace of ≤ 5 ops |
 | `h_bmc_from_init_witness` | verified | not yet run (billing) | 7 min (3.9 GB); revival cover satisfied | TR-3 witness, GH along it |
 
-The step, raw and read rows ran green in CI on `2199a1e`, whose harness
-code equals `4557423` apart from the BMC. GitHub then stopped starting
+The step, raw and read rows ran green in CI on `2199a1e`. Since then the
+BMC changed and `ArrStore`'s principal loops were rewritten to run to the
+fixed capacity (same semantics). At the current head, run locally: init,
+canary, every raw harness, the `_reg` part of every step family, the
+approve parts above, the three reads and both BMC harnesses verify, and
+every cover family is satisfied (27 covers across the step and read
+families, `check-covers.sh`). GitHub then stopped starting
 jobs on this repository (spending limit), so `4557423`, the CI `covers`
 job and the mutants under Kani are still to run there.
 
