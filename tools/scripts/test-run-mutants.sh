@@ -21,7 +21,8 @@ base_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # (e.g. /opt/homebrew/bin, not on base_path); link it in on its own so no
 # real cargo becomes visible.
 mkdir -p "$t/tools"
-ln -s "$(command -v timeout)" "$t/tools/timeout"
+tmo=$(command -v timeout) || { echo "timeout(1) not found" >&2; exit 2; }
+ln -s "$tmo" "$t/tools/timeout"
 
 # check <case> <expected "plain kani"> <dir with stand-ins> [kani command]
 check() {

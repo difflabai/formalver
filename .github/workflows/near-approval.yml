@@ -93,6 +93,10 @@ jobs:
           # self-hosted runner.
           echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
       - uses: actions/cache@v4
+        # Hosted runners only: a self-hosted runner's CARGO_HOME persists and
+        # is shared by every repository's jobs, so caching it would only copy
+        # other repositories' crates into this one's cache quota.
+        if: runner.environment == 'github-hosted'
         with:
           path: |
             ~/.cargo/registry
@@ -131,7 +135,13 @@ jobs:
         run: |
           . tools/versions.env
           cargo install --locked kani-verifier --version "$KANI"
-          cargo kani setup
+          # `cargo kani setup` always re-downloads the bundle; on a persistent
+          # self-hosted HOME skip it once the bundle and its toolchain link
+          # (setup's last step) are in place.
+          kani_dir="${KANI_HOME:-$HOME/.kani}/kani-$KANI"
+          if [ ! -x "$kani_dir/bin/cbmc" ] || [ ! -d "$kani_dir/toolchain/bin" ]; then
+            cargo kani setup
+          fi
       - name: Kani ${{ matrix.group }}
         env:
           KANI_TIMEOUT: "1800"
@@ -209,11 +219,18 @@ jobs:
         run: |
           . tools/versions.env
           cargo install --locked kani-verifier --version "$KANI"
-          cargo kani setup
+          # `cargo kani setup` always re-downloads the bundle; on a persistent
+          # self-hosted HOME skip it once the bundle and its toolchain link
+          # (setup's last step) are in place.
+          kani_dir="${KANI_HOME:-$HOME/.kani}/kani-$KANI"
+          if [ ! -x "$kani_dir/bin/cbmc" ] || [ ! -d "$kani_dir/toolchain/bin" ]; then
+            cargo kani setup
+          fi
       - name: Check CBMC version
         run: |
           . tools/versions.env
-          cbmc_bin=$(find ~/.kani -path '*/bin/cbmc' -type f | head -1)
+          # The pinned version's own CBMC: a persistent HOME may hold others.
+          cbmc_bin="${KANI_HOME:-$HOME/.kani}/kani-$KANI/bin/cbmc"
           "$cbmc_bin" --version | grep -q "^$CBMC" || { echo "CBMC is not $CBMC"; "$cbmc_bin" --version; exit 1; }
       - name: Runner size
         run: |
@@ -306,7 +323,13 @@ jobs:
         run: |
           . tools/versions.env
           cargo install --locked kani-verifier --version "$KANI"
-          cargo kani setup
+          # `cargo kani setup` always re-downloads the bundle; on a persistent
+          # self-hosted HOME skip it once the bundle and its toolchain link
+          # (setup's last step) are in place.
+          kani_dir="${KANI_HOME:-$HOME/.kani}/kani-$KANI"
+          if [ ! -x "$kani_dir/bin/cbmc" ] || [ ! -d "$kani_dir/toolchain/bin" ]; then
+            cargo kani setup
+          fi
       - name: Swap (CBMC peaks at 6.5 to 9.5 GB on the step harnesses)
         # Hosted Linux only: it deletes SDKs and replaces the host's swap
         # with sudo, which a self-hosted runner must not do (and macOS sizes
