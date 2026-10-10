@@ -17,11 +17,16 @@ fake() {
   chmod +x "$1/$2"
 }
 base_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# run-mutants.sh needs timeout(1), which macOS only has from GNU coreutils
+# (e.g. /opt/homebrew/bin, not on base_path); link it in on its own so no
+# real cargo becomes visible.
+mkdir -p "$t/tools"
+ln -s "$(command -v timeout)" "$t/tools/timeout"
 
 # check <case> <expected "plain kani"> <dir with stand-ins> [kani command]
 check() {
   local out got
-  out=$(PATH="$3:$base_path" KANI="${4:-false}" \
+  out=$(PATH="$3:$t/tools:$base_path" KANI="${4:-false}" \
         "$root/tools/scripts/run-mutants.sh" near-approval --kani '01-*' 2>&1)
   got=$(printf '%s\n' "$out" | awk '$1 ~ /^01-/ {print $3, $4}')
   if [ "$got" = "$2" ]; then echo "ok    $1: $got"; else echo "FAIL  $1: got '$got', want '$2'"; fail=1; fi
