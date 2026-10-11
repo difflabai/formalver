@@ -10,13 +10,19 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 cache=${TLA_CACHE:-$root/tools/.cache}
 mkdir -p "$cache"
 
-# sha256sum on Linux; shasum on macOS, which has no sha256sum by default.
-if command -v sha256sum >/dev/null; then sha() { sha256sum "$@"; }; else sha() { shasum -a 256 "$@"; }; fi
+# Hex sha256 of a file. Compared as a string rather than with `-c`: macOS
+# ships a BSD sha256sum without --status/--quiet, and older macOS only shasum.
+hash() {
+  if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | awk '{print $1}'
+}
 
 fetch() { # url file sha256
-  if [ ! -f "$cache/$2" ] || ! echo "$3  $cache/$2" | sha -c --status; then
+  if [ ! -f "$cache/$2" ] || [ "$(hash "$cache/$2")" != "$3" ]; then
     curl -fsSL --retry 4 -o "$cache/$2.part" "$1"
-    echo "$3  $cache/$2.part" | sha -c --quiet
+    if [ "$(hash "$cache/$2.part")" != "$3" ]; then
+      echo "sha256 mismatch for $2" >&2
+      exit 1
+    fi
     mv "$cache/$2.part" "$cache/$2"
   fi
 }
