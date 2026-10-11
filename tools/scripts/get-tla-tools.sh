@@ -10,10 +10,13 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 cache=${TLA_CACHE:-$root/tools/.cache}
 mkdir -p "$cache"
 
+# sha256sum on Linux; shasum on macOS, which has no sha256sum by default.
+if command -v sha256sum >/dev/null; then sha() { sha256sum "$@"; }; else sha() { shasum -a 256 "$@"; }; fi
+
 fetch() { # url file sha256
-  if [ ! -f "$cache/$2" ] || ! echo "$3  $cache/$2" | sha256sum -c --status; then
+  if [ ! -f "$cache/$2" ] || ! echo "$3  $cache/$2" | sha -c --status; then
     curl -fsSL --retry 4 -o "$cache/$2.part" "$1"
-    echo "$3  $cache/$2.part" | sha256sum -c --quiet
+    echo "$3  $cache/$2.part" | sha -c --quiet
     mv "$cache/$2.part" "$cache/$2"
   fi
 }

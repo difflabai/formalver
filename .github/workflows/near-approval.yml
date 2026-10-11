@@ -282,7 +282,7 @@ jobs:
 
   tla:
     needs: pin
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
@@ -296,23 +296,30 @@ jobs:
         run: |
           . tools/versions.env
           rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
-          rustup default "$RUST_TOOLCHAIN"
+          # For this job only: `rustup default` would outlive it on a
+          # self-hosted runner.
+          echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
       - uses: actions/cache@v4
+        # Hosted runners only, as in plain: a self-hosted CARGO_HOME is
+        # shared with other repositories. There the TLA+ tools persist in
+        # the runner's tool cache instead (TLA_CACHE below).
+        if: runner.environment == 'github-hosted'
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             projects/near-approval/kani/target
             tools/.cache
-          key: tla-${{ hashFiles('tools/versions.env', 'projects/near-approval/kani/Cargo.lock') }}
+          key: tla-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/versions.env', 'projects/near-approval/kani/Cargo.lock') }}
       - name: TLC, Apalache, trace validation and spec mutants
         env:
-          TLA_HEAP: 5g
+          TLA_HEAP: ${{ runner.environment == 'github-hosted' && '5g' || '12g' }}
           TLA_LOG_DIR: ${{ runner.temp }}/tla-logs
+          TLA_CACHE: ${{ runner.environment != 'github-hosted' && format('{0}/formalver-tla', runner.tool_cache) || '' }}
         run: tools/scripts/run-tla.sh near-approval safety liveness apalache trace mutants
       - name: Upload logs
         if: always()
