@@ -12,13 +12,37 @@ permissions:
   contents: read
   issues: write
 
+# Up to 6 self-hosted runner instances share one Mac, so a schedule and a
+# dispatch can now run at once; both could miss the open issue and create
+# two. Queue them instead.
+concurrency:
+  group: upstream-watch
+  cancel-in-progress: false
+
 jobs:
   upstream-watch:
-    runs-on: ubuntu-latest
+    # GitHub-hosted runners are unavailable to the org (billing block); the
+    # CI_RUNNER repository variable selects the self-hosted macOS runner.
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Python >= 3.11 (tomllib)
+        if: runner.os == 'macOS'
+        run: |
+          # macOS's /usr/bin/python3 is 3.9; the Mac runner has Homebrew's
+          # newer ones under versioned names only.
+          python3 -c 'import tomllib' 2>/dev/null && exit 0
+          for py in python3.13 python3.12 python3.11; do
+            if p=$(command -v "$py"); then
+              mkdir -p "$RUNNER_TEMP/python-bin"
+              ln -sf "$p" "$RUNNER_TEMP/python-bin/python3"
+              echo "$RUNNER_TEMP/python-bin" >> "$GITHUB_PATH"
+              exit 0
+            fi
+          done
+          echo "::error::no python3 >= 3.11 on PATH"; exit 1
       - name: Compare watched upstream paths
         id: watch
         run: |

@@ -20,7 +20,9 @@ kani=${KANI:-cargo kani}
 # The core is #![forbid(unsafe_code)]; the memory safety of std internals is
 # trusted (ASM-TOOLS). Panics, overflow and unwinding checks stay on.
 flags=${KANI_FLAGS:---no-memory-safety-checks}
-work=$(mktemp -d)
+# Under RUNNER_TEMP on CI: up to 6 runner instances share one Mac's TMPDIR,
+# and the runner wipes its own _temp, reclaiming trees a cancelled job left.
+work=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/mutants.XXXXXX") || exit 2
 trap 'rm -rf "$work"' EXIT
 export CARGO_TARGET_DIR="$work/target"
 
@@ -37,8 +39,13 @@ plain_verdict() {
 
 # kani_verdict <rc> <log>: survived | killed | ERROR
 # rc 124: timeout; 137/143: killed by a signal (usually the OOM killer).
+# A failed unwinding assertion (the unwind bound is too low) or a reachable
+# construct Kani cannot model means part of the search was skipped, not that
+# a property failed, so either one is ERROR even next to a real failure.
 kani_verdict() {
   if [ "$1" -eq 124 ] || [ "$1" -eq 137 ] || [ "$1" -eq 143 ] || grep -q 'run out of memory' "$2"; then
+    echo ERROR
+  elif grep -q '^Failed Checks: .*unwinding assertion' "$2" || grep -q 'not currently supported by Kani' "$2"; then
     echo ERROR
   elif [ "$1" -eq 0 ] && grep -q 'VERIFICATION:- SUCCESSFUL' "$2"; then
     echo survived
@@ -72,7 +79,8 @@ for p in "$proj"/kani/mutants/$glob.patch; do
   # A verdict needs evidence: "killed" only when a test or Kani property
   # actually failed, "survived" only when every check ran and passed.
   # Anything else (missing tools, build or backend failures, time-outs,
-  # running out of memory) is ERROR.
+  # running out of memory, an unwind bound too low, an unsupported
+  # construct) is ERROR.
   (cd "$work/tree/kani" && cargo test --release -q -- $plain_filter) >"$work/plain.log" 2>&1
   rc=$?
   [ -n "${KEEP_LOGS:-}" ] && cp "$work/plain.log" "$KEEP_LOGS/$name.plain.log"

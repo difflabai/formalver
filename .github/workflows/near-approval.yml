@@ -39,9 +39,15 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
 
+# GitHub-hosted runners are unavailable to the org (billing block), so every
+# job takes its label from the CI_RUNNER repository variable (the self-hosted
+# macOS arm64 runner) and falls back to its original hosted label. That host
+# keeps HOME between jobs and has no sudo: the steps below avoid
+# `rustup default`, ~/.gitconfig and ~/.ssh, and the hosted-only swap setup is
+# skipped there.
 jobs:
   pin:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -50,12 +56,27 @@ jobs:
         env:
           CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
+      - name: Python >= 3.11 (tomllib)
+        if: runner.os == 'macOS'
+        run: |
+          # macOS's /usr/bin/python3 is 3.9; the Mac runner has Homebrew's
+          # newer ones under versioned names only.
+          python3 -c 'import tomllib' 2>/dev/null && exit 0
+          for py in python3.13 python3.12 python3.11; do
+            if p=$(command -v "$py"); then
+              mkdir -p "$RUNNER_TEMP/python-bin"
+              ln -sf "$p" "$RUNNER_TEMP/python-bin/python3"
+              echo "$RUNNER_TEMP/python-bin" >> "$GITHUB_PATH"
+              exit 0
+            fi
+          done
+          echo "::error::no python3 >= 3.11 on PATH"; exit 1
       - name: Gitlink and source hashes match status.toml
         run: tools/scripts/check-pin.sh near-approval
 
   plain:
     needs: pin
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -68,14 +89,20 @@ jobs:
         run: |
           . tools/versions.env
           rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
-          rustup default "$RUST_TOOLCHAIN"
+          # For this job only: `rustup default` would outlive it on a
+          # self-hosted runner.
+          echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
       - uses: actions/cache@v4
+        # Hosted runners only: a self-hosted runner's CARGO_HOME persists and
+        # is shared by every repository's jobs, so caching it would only copy
+        # other repositories' crates into this one's cache quota.
+        if: runner.environment == 'github-hosted'
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             projects/near-approval/kani/target
-          key: plain-${{ hashFiles('tools/versions.env', 'projects/near-approval/kani/Cargo.lock') }}
+          key: plain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/versions.env', 'projects/near-approval/kani/Cargo.lock') }}
       - name: Plain mode (random source; testing, not proof)
         working-directory: projects/near-approval/kani
         run: cargo test --release --locked
@@ -87,7 +114,7 @@ jobs:
     # runs nightly, on pushes to main and on manual dispatch.
     needs: pin
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -108,7 +135,13 @@ jobs:
         run: |
           . tools/versions.env
           cargo install --locked kani-verifier --version "$KANI"
-          cargo kani setup
+          # `cargo kani setup` always re-downloads the bundle; on a persistent
+          # self-hosted HOME skip it once the bundle and its toolchain link
+          # (setup's last step) are in place.
+          kani_dir="${KANI_HOME:-$HOME/.kani}/kani-$KANI"
+          if [ ! -x "$kani_dir/bin/cbmc" ] || [ ! -d "$kani_dir/toolchain/bin" ]; then
+            cargo kani setup
+          fi
       - name: Kani ${{ matrix.group }}
         env:
           KANI_TIMEOUT: "1800"
@@ -122,8 +155,9 @@ jobs:
     # CBMC peaks at 6.5 to 9.5 GB on the step harnesses; this repository's
     # default runner has 2 CPUs and 7.9 GB. Set the KANI_RUNNER repository
     # variable to a larger runner label (and KANI_SWAP_GB to 0) to avoid
-    # relying on swap.
-    runs-on: ${{ vars.KANI_RUNNER || 'ubuntu-latest' }}
+    # relying on swap. Without it, CI_RUNNER (the self-hosted Mac: 64 GB, no
+    # swap file needed) is next.
+    runs-on: ${{ vars.KANI_RUNNER || vars.CI_RUNNER || 'ubuntu-latest' }}
     # A step part may need most of KANI_TIMEOUT (120 min) on swap.
     timeout-minutes: 300
     env:
@@ -193,16 +227,32 @@ jobs:
         run: |
           . tools/versions.env
           cargo install --locked kani-verifier --version "$KANI"
-          cargo kani setup
+          # `cargo kani setup` always re-downloads the bundle; on a persistent
+          # self-hosted HOME skip it once the bundle and its toolchain link
+          # (setup's last step) are in place.
+          kani_dir="${KANI_HOME:-$HOME/.kani}/kani-$KANI"
+          if [ ! -x "$kani_dir/bin/cbmc" ] || [ ! -d "$kani_dir/toolchain/bin" ]; then
+            cargo kani setup
+          fi
       - name: Check CBMC version
         run: |
           . tools/versions.env
-          cbmc_bin=$(find ~/.kani -path '*/bin/cbmc' -type f | head -1)
+          # The pinned version's own CBMC: a persistent HOME may hold others.
+          cbmc_bin="${KANI_HOME:-$HOME/.kani}/kani-$KANI/bin/cbmc"
           "$cbmc_bin" --version | grep -q "^$CBMC" || { echo "CBMC is not $CBMC"; "$cbmc_bin" --version; exit 1; }
       - name: Runner size
-        run: echo "::notice::runner has $(nproc) CPUs and $(free -m | awk '/^Mem:/{print $2}') MB memory"
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            mem=$(( $(sysctl -n hw.memsize) / 1048576 ))
+          else
+            mem=$(free -m | awk '/^Mem:/{print $2}')
+          fi
+          echo "::notice::runner has $(nproc) CPUs and $mem MB memory"
       - name: Swap (CBMC peaks at 6.5 to 9.5 GB on the step harnesses)
-        if: env.KANI_SWAP_GB != '0'
+        # Hosted Linux only: it deletes SDKs and replaces the host's swap
+        # with sudo, which a self-hosted runner must not do (and macOS sizes
+        # its own swap).
+        if: env.KANI_SWAP_GB != '0' && runner.environment == 'github-hosted' && runner.os == 'Linux'
         run: |
           # Free preinstalled SDKs this job does not use, then size the swap
           # file to leave 6 GB of disk for the build and logs.
@@ -277,7 +327,7 @@ jobs:
     # kani jobs (each uploads its covers.tsv with its logs).
     needs: kani
     if: ${{ !cancelled() && needs.kani.result != 'skipped' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -292,7 +342,7 @@ jobs:
   mutants:
     needs: pin
     if: github.event.schedule == '41 4 * * 0' || inputs.mutants
-    runs-on: ${{ vars.KANI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.KANI_RUNNER || vars.CI_RUNNER || 'ubuntu-latest' }}
     # Up to 2 harnesses (6 for the must-survive mutants) of KANI_TIMEOUT
     # (60 min) each, plus builds.
     timeout-minutes: 360
@@ -316,14 +366,25 @@ jobs:
         run: |
           . tools/versions.env
           rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
-          rustup default "$RUST_TOOLCHAIN"
+          # For this job only: `rustup default` would outlive it on a
+          # self-hosted runner.
+          echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
       - name: Install Kani (and the CBMC it bundles)
         run: |
           . tools/versions.env
           cargo install --locked kani-verifier --version "$KANI"
-          cargo kani setup
+          # `cargo kani setup` always re-downloads the bundle; on a persistent
+          # self-hosted HOME skip it once the bundle and its toolchain link
+          # (setup's last step) are in place.
+          kani_dir="${KANI_HOME:-$HOME/.kani}/kani-$KANI"
+          if [ ! -x "$kani_dir/bin/cbmc" ] || [ ! -d "$kani_dir/toolchain/bin" ]; then
+            cargo kani setup
+          fi
       - name: Swap (CBMC peaks at 6.5 to 9.5 GB on the step harnesses)
-        if: env.KANI_SWAP_GB != '0'
+        # Hosted Linux only: it deletes SDKs and replaces the host's swap
+        # with sudo, which a self-hosted runner must not do (and macOS sizes
+        # its own swap).
+        if: env.KANI_SWAP_GB != '0' && runner.environment == 'github-hosted' && runner.os == 'Linux'
         run: |
           # Free preinstalled SDKs this job does not use, then size the swap
           # file to leave 6 GB of disk for the build and logs.
