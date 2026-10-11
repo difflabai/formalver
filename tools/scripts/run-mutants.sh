@@ -20,7 +20,9 @@ kani=${KANI:-cargo kani}
 # The core is #![forbid(unsafe_code)]; the memory safety of std internals is
 # trusted (ASM-TOOLS). Panics, overflow and unwinding checks stay on.
 flags=${KANI_FLAGS:---no-memory-safety-checks}
-work=$(mktemp -d)
+# Under RUNNER_TEMP on CI: up to 6 runner instances share one Mac's TMPDIR,
+# and the runner wipes its own _temp, reclaiming trees a cancelled job left.
+work=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/mutants.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 export CARGO_TARGET_DIR="$work/target"
 
