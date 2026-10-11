@@ -49,6 +49,10 @@ fake "$t/kill" cargo 101 'test result: FAILED. 11 passed; 1 failed'
 fake "$t/kill" kani 1 "$(printf 'Failed Checks: "TX exact result"\nVERIFICATION:- FAILED')"
 check "real kills" "killed killed" "$t/kill" "$t/kill/kani"
 
+fake "$t/kill2" cargo 101 'test result: FAILED. 11 passed; 1 failed'
+fake "$t/kill2" kani 1 "$(printf 'Check 73: rt_error.unsupported_construct.1\n\t - Status: SUCCESS\n\t - Description: "call to foreign "Rust" function is not currently supported by Kani"\nFailed Checks: "TX exact result"\nVERIFICATION:- FAILED')"
+check "kill next to a passing unsupported-construct check" "killed killed" "$t/kill2" "$t/kill2/kani"
+
 fake "$t/unwind" cargo 101 'test result: FAILED. 11 passed; 1 failed'
 fake "$t/unwind" kani 1 "$(printf 'Failed Checks: unwinding assertion loop 0\n File: "src/lib.rs", line 12, in approval_core::find_slot\nVERIFICATION:- FAILED')"
 check "unwind bound too low" "killed ERROR" "$t/unwind" "$t/unwind/kani"
