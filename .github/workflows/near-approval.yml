@@ -350,12 +350,13 @@ jobs:
     needs: pin
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 90
-    env:
-      SCRYER_ROOT: ${{ format('{0}/formalver-scryer', runner.tool_cache) }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Scryer install root
+        # The runner context is not available in job-level env.
+        run: echo "SCRYER_ROOT=$RUNNER_TOOL_CACHE/formalver-scryer" >> "$GITHUB_ENV"
       - name: Check out trust-framework at the pin
         env:
           CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
