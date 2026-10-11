@@ -22,7 +22,7 @@ kani=${KANI:-cargo kani}
 flags=${KANI_FLAGS:---no-memory-safety-checks}
 # Under RUNNER_TEMP on CI: up to 6 runner instances share one Mac's TMPDIR,
 # and the runner wipes its own _temp, reclaiming trees a cancelled job left.
-work=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/mutants.XXXXXX")
+work=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/mutants.XXXXXX") || exit 2
 trap 'rm -rf "$work"' EXIT
 export CARGO_TARGET_DIR="$work/target"
 
