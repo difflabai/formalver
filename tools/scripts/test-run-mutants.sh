@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Self-test for run-mutants.sh's verdicts: stand-in cargo and Kani commands
-# that are missing, fail to build, fail a check, or pass. A setup failure
+# that are missing, fail to build, fail a check, stop short of a full
+# search (unwind bound, unsupported construct), or pass. A setup failure
 # must never read as a kill or a survival.
 #
 # usage: tools/scripts/test-run-mutants.sh   (needs the near-approval submodule)
@@ -47,6 +48,14 @@ check "kani out of memory" "killed ERROR" "$t/oom" "$t/oom/kani"
 fake "$t/kill" cargo 101 'test result: FAILED. 11 passed; 1 failed'
 fake "$t/kill" kani 1 "$(printf 'Failed Checks: "TX exact result"\nVERIFICATION:- FAILED')"
 check "real kills" "killed killed" "$t/kill" "$t/kill/kani"
+
+fake "$t/unwind" cargo 101 'test result: FAILED. 11 passed; 1 failed'
+fake "$t/unwind" kani 1 "$(printf 'Failed Checks: unwinding assertion loop 0\n File: "src/lib.rs", line 12, in approval_core::find_slot\nVERIFICATION:- FAILED')"
+check "unwind bound too low" "killed ERROR" "$t/unwind" "$t/unwind/kani"
+
+fake "$t/unsup" cargo 101 'test result: FAILED. 11 passed; 1 failed'
+fake "$t/unsup" kani 1 "$(printf 'Failed Checks: call to foreign C function is not currently supported by Kani\nVERIFICATION:- FAILED')"
+check "unsupported construct" "killed ERROR" "$t/unsup" "$t/unsup/kani"
 
 fake "$t/pass" cargo 0 'test result: ok. 12 passed; 0 failed'
 fake "$t/pass" kani 0 'VERIFICATION:- SUCCESSFUL'
