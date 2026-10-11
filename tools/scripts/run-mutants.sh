@@ -42,10 +42,12 @@ plain_verdict() {
 # A failed unwinding assertion (the unwind bound is too low) or a reachable
 # construct Kani cannot model means part of the search was skipped, not that
 # a property failed, so either one is ERROR even next to a real failure.
+# Only failed checks count: every log lists std's unsupported-construct
+# checks, normally with Status: SUCCESS (unreachable).
 kani_verdict() {
   if [ "$1" -eq 124 ] || [ "$1" -eq 137 ] || [ "$1" -eq 143 ] || grep -q 'run out of memory' "$2"; then
     echo ERROR
-  elif grep -q '^Failed Checks: .*unwinding assertion' "$2" || grep -q 'not currently supported by Kani' "$2"; then
+  elif grep -q '^Failed Checks: .*unwinding assertion' "$2" || grep -q '^Failed Checks: .*not currently supported by Kani' "$2"; then
     echo ERROR
   elif [ "$1" -eq 0 ] && grep -q 'VERIFICATION:- SUCCESSFUL' "$2"; then
     echo survived
