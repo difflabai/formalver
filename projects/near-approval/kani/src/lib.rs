@@ -7,6 +7,7 @@ pub mod ids;
 #[macro_use]
 pub mod src;
 pub mod checks;
+pub mod cutoff;
 pub mod gen;
 pub mod spec;
 pub mod store;
@@ -19,3 +20,9 @@ mod proofs;
 
 #[cfg(all(test, not(kani)))]
 mod plain;
+
+#[cfg(all(test, not(kani)))]
+mod facts;
+
+#[cfg(all(test, not(kani)))]
+mod mc2;

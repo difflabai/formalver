@@ -142,11 +142,23 @@ contiguous_orders(Op) :-
     length(Ns0, Len), numlist(1, Len, Ns).
 
 %% precedence_diff(+Terms, +Functor, -Diff): ops whose extracted order differs.
+%% The code's order is observed (kani/src/facts.rs): code_before(Op, E1, E2)
+%% says E1 won when both guards held. Guards never seen failing together
+%% may come in either order, so when code_before/3 facts are present the
+%% spec order need only agree with every observed pair, and use the same
+%% guards.
 precedence_diff(Terms, F, Diff) :-
     findall(Op-spec(Spec)-got(Got),
             ( core_op(Op), guard_sequence(Op, Spec),
-              ( T =.. [F, Op, Got], memberchk(T, Terms) -> Spec \== Got ; Got = missing ) ),
+              ( T =.. [F, Op, Got], memberchk(T, Terms) -> \+ agrees(F, Terms, Op, Spec, Got) ; Got = missing ) ),
             Diff).
+
+agrees(_, _, _, Spec, Spec) :- !.
+agrees(code_precedence, Terms, Op, Spec, Got) :-
+    memberchk(code_before(_, _, _), Terms),
+    msort(Spec, S1), msort(Got, S1),
+    \+ ( member(code_before(Op, E1, E2), Terms),
+          nth0(I1, Spec, E1), nth0(I2, Spec, E2), I1 > I2 ).
 
 %%% ========================================================
 %%% C-3 Error messages distinct and substring-free (R-2)

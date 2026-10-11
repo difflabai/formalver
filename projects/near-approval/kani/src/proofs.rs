@@ -225,3 +225,34 @@ fn h_ref_reject() {
 fn h_ref_toolong() {
     checks::ref_toolong(&mut Sym(None, checks::PART_REF, false));
 }
+
+// CUT-1: footprint of each operation, from a raw state (CUTOFF.md).
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_cut_add() {
+    crate::cutoff::cut_add(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_cut_revoke() {
+    crate::cutoff::cut_revoke(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_cut_request() {
+    crate::cutoff::cut_request(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_cut_approve() {
+    crate::cutoff::cut_approve(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_cut_reject() {
+    crate::cutoff::cut_reject(&mut Sym(None, checks::PART_ALL, false));
+}

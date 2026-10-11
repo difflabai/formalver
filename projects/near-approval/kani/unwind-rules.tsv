@@ -1,0 +1,34 @@
+# U-1 unwind rules for loops outside this crate (tools/scripts/kani-loops.py).
+# Columns (tab-separated): regex on "<file>:<line> <function>", bound, reason.
+# First match wins. A bound is CBMC's unwind count (iterations + 1), as an
+# integer or an expression over this crate's constants. A wrong bound is
+# never unsound: Kani's unwinding assertions fail the run if a loop can go
+# further.
+#
+# Kani's own models
+kani/kani_lib\.c	1	__KANI_assert is do { } while (0)
+kani_core/src/lib\.rs:\d+ kani::kani_intrinsic	1	placeholder body, replaced by Kani
+kani_core/src/models\.rs:\d+ kani::rustc_intrinsics::panic_stub	1	placeholder body, replaced by Kani
+#
+# Panic and Debug formatting: only reached to build a panic message, which
+# Kani's panic hook never formats.
+core/src/fmt/	1	panic or Debug formatting, not executed under Kani
+#
+# String work on actions. Every string the harnesses traverse comes from
+# ACTION_BYTES (2 bytes); LONG (2049 bytes) is only copied and compared by
+# length, so a traversal of it would fail the run, not pass it.
+core/src/str/	ACTION_BYTES_INNER + 1	str traversal over <= 2 bytes
+core/src/slice/memchr\.rs	ACTION_BYTES_INNER + 1	memchr over an action
+core/src/slice/iter/macros\.rs:\d+ <std::slice::Iter<'_, u8>	ACTION_BYTES_INNER + 1	byte iteration over an action
+CharIndices	ACTION_BYTES_INNER + 1	char iteration over an action
+core/src/ptr/mod\.rs:\d+ std::ptr::align_offset::mod_inv	1	memchr's alignment step; a 2-byte slice takes the naive path
+#
+# Fixed-size arrays and slices of the stores (ArrStore, Snap, PreViews).
+std::array::try_from_fn_erased.*clone<4>	CAP_P + 1	clone of a [_; 4] store array
+std::ptr::drop_glue::<\[	CAP_R + 1	drop of a store array or page (<= 4 elements)
+<std::slice::Iter<'_, \(ids::Key, approval_core::Principal	CAP_P + 1	iteration over principals()
+<std::ops::Range<usize> as std::iter::Iterator>::try_fold.*checks\.rs	CAP_R + 1	(0..pre.nl).all(..) over the log
+#
+# approval_core::approvals: the page loop runs from `from` to
+# min(from + min(limit, MAX_PAGE_SIZE), #L), so at most #L <= CAP_R times.
+approval_core::approvals	CAP_R + 1	page clamped to #L <= CAP_R

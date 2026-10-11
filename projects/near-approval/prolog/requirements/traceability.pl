@@ -61,9 +61,12 @@ trace_row('D9',  ['TLA-LIVE-1', 'TLA-LIVE-2']).
 % D15: the refinement link and the cross-model checks (strategy 17.2, 17.5).
 trace_row('D15', ['TLA-WIT', 'REF-1', 'REF-2', 'REF-3', 'REF-4', 'REF-5', 'C-2t', 'MC-3']).
 
+% D15: the cutoff argument that makes the bounded Kani proofs size-independent
+% (kani/CUTOFF.md) and the loop-bound derivation (tools/scripts/kani-loops.py).
+trace_row('D15', ['CUT-1', 'CUT-2', 'U-1']).
+
 %%% IDs in this file that status.toml does not have yet (decision 'C-9-new-ids').
-status_pending_id('C-2t').
-status_pending_id('MC-3').
+status_pending_id(_) :- fail.
 
 %%% ========================================================
 %%% property/3 (from status.toml)
@@ -154,6 +157,9 @@ property('REF-1', kani, "Guard exactness (A1): the core's error equals the TLA+ 
 property('REF-2', kani, "Effect exactness (A2): on Ok, alpha(post) is the TLA+ action's post-state").
 property('REF-3', kani, "Rejected calls stutter (A3): on Err, alpha(post) = alpha(pre)").
 property('REF-4', kani, "Time irrelevance (A7): tla.rs reads no BlockTime, so REF-1/2 hold for every block time; payload classes (A5) via h_ref_toolong").
+property('CUT-1', kani, "Footprint (kani/CUTOFF.md): each call reads and writes at most the keys, request positions, log slots and revocation records of its row; tracking is transparent").
+property('CUT-2', review, "Cutoff: given CUT-1, harness state bounds (CAP_P, CAP_R, CAP_V) are sufficient for REF-1..3 at every size, except E1 (pending at MAXP) and E2 (counters at u64::MAX), which raw and Sparse harnesses cover; request/approve LogFull pending M2 Sparse").
+property('U-1', review, "Every loop in every harness's goto program has a bound derived from a constant, and no reachable loop needs more than its harness unwind").
 property('REF-5', plain, "Trace validation: 60 x 80-call core traces equal tla.rs on every step, and TLC accepts each as a behaviour of ApprovalCore.tla (>= 5 revival attempts, >= 20 rejections and revocations)").
 % [modules.contract_store]
 property('ST-4', difftest, "Real ApprovalContract store refines MemStore over 10k x 50 random ops, persisted and reloaded every step").
