@@ -1048,7 +1048,7 @@ Prolog stays the **independent** semantics, written from the requirements
 invariant under `VIEW store`), `verification/graph_export.pl` exports the
 same universe from `step/4`, and `mc3.py` compares stores, rejected calls
 and edges, printing each disagreeing `(store, call)`. It runs nightly (TLC
-alone is ~400 MB of output). MC-2 uses one text format for stores and calls
+alone is ~400 MB of output). First full run (2026-10-11, universe in `MC_Graph.cfg`): 21,670 stores, 41,706 successful edges and 6,298,932 rejected calls on each side, all equal; the Prolog export takes ~40 min under Scryer. MC-2 uses one text format for stores and calls
 across `mc2.rs`, `mc2.pl` and `mc3.py`.
 
 With MC-3 in place, MC-1's own invariant checks repeat TLC's on an equal
