@@ -12,6 +12,13 @@ permissions:
   contents: read
   issues: write
 
+# Up to 6 self-hosted runner instances share one Mac, so a schedule and a
+# dispatch can now run at once; both could miss the open issue and create
+# two. Queue them instead.
+concurrency:
+  group: upstream-watch
+  cancel-in-progress: false
+
 jobs:
   upstream-watch:
     # GitHub-hosted runners are unavailable to the org (billing block); the
