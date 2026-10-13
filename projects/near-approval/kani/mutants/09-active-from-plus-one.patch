@@ -1,0 +1,12 @@
+# killed-by: h_step_add_tx h_step_add_post
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -336,7 +336,7 @@
+         account_id,
+         role,
+         registration_id,
+-        active_from: store.request_count(),
++        active_from: store.request_count() + 1,
+         pending: 0,
+     };
+     store.increment_registration_count();

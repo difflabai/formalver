@@ -1,0 +1,11 @@
+# killed-by: h_step_approve_tx h_step_approve_post
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -513,6 +513,7 @@
+     store.insert_principal(request.agent_key.clone(), agent);
+     store.replace_request(request);
+     store.push_approval(request_id);
++    store.push_approval(request_id);
+     Ok(proof)
+ }
+ 

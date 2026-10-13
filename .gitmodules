@@ -1,3 +1,7 @@
 [submodule "projects/ironclaw/source-mirror"]
 	path = projects/ironclaw/source-mirror
 	url = https://github.com/nearai/ironclaw.git
+[submodule "projects/near-approval/source-mirror"]
+	path = projects/near-approval/source-mirror
+	url = https://github.com/difflabai/trust-framework.git
+	shallow = true

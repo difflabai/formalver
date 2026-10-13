@@ -1,6 +1,15 @@
 # formalver
 Formal Verification of repositories, starting with IronClaw
 
+## Projects
+
+| Project | Target | Plan | Status |
+|---|---|---|---|
+| ironclaw | [nearai/ironclaw](https://github.com/nearai/ironclaw) safety modules | [strategy](projects/ironclaw/strategy.md) | [status](projects/ironclaw/status.toml) |
+| near-approval | [trust-framework](https://github.com/difflabai/trust-framework) `contracts/approval` (NEAR action-approval contract) | [strategy](projects/near-approval/strategy.md) | [status](projects/near-approval/status.toml) (M1: Kani on the core) |
+
+Submissions to [NEAR Proof Arena](https://github.com/ilblackdragon/near-proof-arena), aimed at the NEAR assumptions these projects rely on, go in [`near-proofs/`](near-proofs/README.md).
+
 ## Running the Scaffolded Proofs
 
 ### Verus (Rust code verification)
@@ -33,6 +42,29 @@ verus projects/ironclaw/verus/src/lib.rs --crate-type=lib
 cargo build   # compiles plain Rust types, no proofs
 cargo test    # runs 8 unit tests for the sanitizer model
 ```
+
+### Kani (near-approval)
+
+The harnesses in `projects/near-approval/kani` run the real `approval-core`
+from the pinned submodule. The same harness bodies run in two modes.
+
+```bash
+git submodule update --init projects/near-approval/source-mirror   # private: needs trust-framework access
+
+# Plain mode: random tests, no Kani needed (not a proof)
+(cd projects/near-approval/kani && cargo test --release)
+
+# Kani: install the pinned version (tools/versions.env), then run every harness
+cargo install --locked kani-verifier --version 0.68.0 && cargo kani setup
+./tools/scripts/run-kani.sh near-approval            # or name harnesses: ... h_step_approve
+
+# Core mutants: each must be killed (two equivalent ones must survive)
+./tools/scripts/run-mutants.sh near-approval         # plain mode
+./tools/scripts/run-mutants.sh near-approval --kani  # plus each mutant's Kani harness
+```
+
+Harnesses are memory-bound: run them one at a time on a 16 GB machine.
+Results and run times are in [`kani/RESULTS.md`](projects/near-approval/kani/RESULTS.md).
 
 ### Prolog (requirements verification)
 

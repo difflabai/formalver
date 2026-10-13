@@ -1,0 +1,11 @@
+# killed-by: h_step_approve_tx h_step_approve_post
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -489,6 +489,7 @@
+     S: Store<A, K>,
+ {
+     let approver = authenticate(store, caller, Role::Approver)?;
++    store.push_approval(request_id);
+     let (mut request, mut agent) = decidable_request(store, request_id)?;
+     if request.action != action {
+         return Err(ApprovalError::ActionMismatch);

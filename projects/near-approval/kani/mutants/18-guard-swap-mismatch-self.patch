@@ -1,0 +1,19 @@
+# killed-by: h_step_approve_tx h_step_approve_post
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -490,12 +490,12 @@
+ {
+     let approver = authenticate(store, caller, Role::Approver)?;
+     let (mut request, mut agent) = decidable_request(store, request_id)?;
+-    if request.action != action {
+-        return Err(ApprovalError::ActionMismatch);
+-    }
+     if caller.signer == request.agent_account_id {
+         return Err(ApprovalError::SelfApproval);
+     }
++    if request.action != action {
++        return Err(ApprovalError::ActionMismatch);
++    }
+     let approval_index = store.approval_count();
+     if approval_index == u64::MAX {
+         return Err(ApprovalError::LogFull);

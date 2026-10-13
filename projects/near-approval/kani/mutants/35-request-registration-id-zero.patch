@@ -1,0 +1,12 @@
+# killed-by: h_step_request_tx h_step_request_post
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -456,7 +456,7 @@
+         id,
+         agent_account_id: caller.signer.clone(),
+         agent_key: caller.signer_key.clone(),
+-        agent_registration_id: principal.registration_id,
++        agent_registration_id: 0,
+         action,
+         requested_at: now,
+         approval: None,

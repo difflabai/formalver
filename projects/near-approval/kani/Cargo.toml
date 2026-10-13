@@ -1,0 +1,21 @@
+[package]
+name = "near-approval-kani"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Kani harnesses (and their plain-mode twins) over the real approval-core"
+
+# Standalone: the root workspace excludes this directory (strategy.md section 11).
+[workspace]
+
+[dependencies]
+# The real core, from the pinned submodule. No borsh: the core builds with zero
+# dependencies, so what Kani checks is exactly the deployed decision logic.
+approval-core = { path = "../source-mirror/contracts/approval/core", default-features = false }
+
+# Plain mode runs with --release; keep overflow panics, as Kani checks them.
+[profile.release]
+overflow-checks = true
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
