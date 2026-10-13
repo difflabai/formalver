@@ -81,7 +81,7 @@ check_build() {
   if [ $rc -eq 0 ] && grep -q "declaration uses 'sorry'" "$log"; then rc=1; fi
   report build $rc "every theorem proved, no sorry" "$log"
   local hits="$logs/hygiene.log"
-  scan "$lean/ApprovalLean" "$lean/Main.lean" >"$hits"
+  scan "$lean/ApprovalLean" "$lean/Main.lean" "$lean/Audit.lean" "$lean/canary" >"$hits"
   [ ! -s "$hits" ]; report hygiene $? "no forbidden constructs in the sources" "$hits"
 }
 
