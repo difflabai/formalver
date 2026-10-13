@@ -1,0 +1,11 @@
+--- a/ApprovalCore.tla
++++ b/ApprovalCore.tla
+@@ -186,7 +186,7 @@
+     /\ AddErr(c, k) = "Ok"
+     /\ principals' = [principals EXCEPT ![k] =
+                         [reg |-> TRUE, acct |-> a, role |-> r, rid |-> regs,
+-                         from |-> NR, pending |-> 0]]
++                         from |-> 0, pending |-> 0]]
+     /\ regs' = regs + 1
+     /\ UNCHANGED <<requests, log, revoked, ghost>>
+ 

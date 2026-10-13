@@ -1,0 +1,11 @@
+--- a/ApprovalCore.tla
++++ b/ApprovalCore.tla
+@@ -225,7 +225,7 @@
+     /\ requests' = [requests EXCEPT ![i + 1] =
+                     [@ EXCEPT !.appr = TRUE, !.aidx = NL, !.aacct = signer, !.akey = k,
+                               !.arid = principals[k].rid]]
+-    /\ log' = Append(log, i)
++    /\ log' = log
+     /\ Decide(signer, k, i)
+     /\ UNCHANGED <<regs, revoked>>
+ 

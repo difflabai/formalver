@@ -177,3 +177,82 @@ fn h_bmc_from_init_witness() {
 fn h_canary() {
     checks::canary(&mut Sym(None, checks::PART_ALL, false));
 }
+
+// ---------------------------------------------------------------------------
+// h_ref_*: one step of the core refines the TLA+ spec (REF-1..4, tla.rs).
+// Same states and operations as h_step_*, only the refinement checks.
+// Unwind 6: the abstract state's arrays hold CR + 1 = 5 entries.
+// ---------------------------------------------------------------------------
+
+#[kani::proof]
+#[kani::unwind(6)]
+fn h_ref_add() {
+    checks::step_add(&mut Sym(None, checks::PART_REF, false));
+}
+
+#[kani::proof]
+#[kani::unwind(6)]
+fn h_ref_revoke() {
+    checks::step_revoke(&mut Sym(None, checks::PART_REF, false));
+}
+
+#[kani::proof]
+#[kani::unwind(6)]
+fn h_ref_request() {
+    checks::step_request(&mut Sym(None, checks::PART_REF, false));
+}
+
+#[kani::proof]
+#[kani::unwind(6)]
+fn h_ref_request_empty() {
+    checks::step_request(&mut Sym(None, checks::PART_REF, true));
+}
+
+#[kani::proof]
+#[kani::unwind(6)]
+fn h_ref_approve() {
+    checks::step_approve(&mut Sym(None, checks::PART_REF, false));
+}
+
+#[kani::proof]
+#[kani::unwind(6)]
+fn h_ref_reject() {
+    checks::step_reject(&mut Sym(None, checks::PART_REF, false));
+}
+
+#[kani::proof]
+#[kani::unwind(6)]
+fn h_ref_toolong() {
+    checks::ref_toolong(&mut Sym(None, checks::PART_REF, false));
+}
+
+// CUT-1: footprint of each operation, from a raw state (CUTOFF.md).
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_cut_add() {
+    crate::cutoff::cut_add(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_cut_revoke() {
+    crate::cutoff::cut_revoke(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_cut_request() {
+    crate::cutoff::cut_request(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_cut_approve() {
+    crate::cutoff::cut_approve(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_cut_reject() {
+    crate::cutoff::cut_reject(&mut Sym(None, checks::PART_ALL, false));
+}

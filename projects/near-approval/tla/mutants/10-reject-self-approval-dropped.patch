@@ -1,0 +1,11 @@
+--- a/ApprovalCore.tla
++++ b/ApprovalCore.tla
+@@ -168,7 +168,7 @@
+     IN
+     IF a # "Ok" THEN a
+     ELSE IF d # "Ok" THEN d
+-    ELSE IF signer = Req(i).acct THEN "SelfApproval"
++    ELSE IF FALSE THEN "SelfApproval"
+     ELSE "Ok"
+ 
+ -----------------------------------------------------------------------------

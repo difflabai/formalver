@@ -34,6 +34,7 @@ Linux container, one harness at a time.
 | `h_read_find` | verified | 5 min | 14 min | RD-5 by request id |
 | `h_bmc_from_init` (depth 5) | verified | 6 min | 26 min (11.2 GB); covers approved, rejected | GH (TR-1, TR-7), TR-2 on every trace of ≤ 5 ops |
 | `h_bmc_from_init_witness` | verified | 2 min | 7 min (3.9 GB); revival cover satisfied | TR-3 witness, GH along it |
+| `h_cut_add`, `h_cut_revoke`, `h_cut_request`, `h_cut_approve`, `h_cut_reject` | verified | not yet run in CI | 87 s, 105 s, 221 s, 493 s, 273 s | CUT-1 footprint rows (`CUTOFF.md`); tracking store transparent |
 
 The step, raw and read rows also ran green earlier on GitHub's 2-CPU, 7.9 GB Linux runners
 with 16 GB of swap (`2199a1e`), at 3 to 59 min per
@@ -42,6 +43,24 @@ job.
 The full matrix runs on every pull request push, on main, nightly and on
 manual dispatch (about 110 runner-minutes on the Macs).
 <!-- /KANI-TABLE -->
+
+## Loop bounds (U-1)
+
+`tools/scripts/kani-loops.py projects/near-approval/kani --codegen
+--core-file …/core/src/lib.rs` (CI job `loops`) lists every
+loop of every harness's goto program and derives its bound from a constant:
+5,002 (harness, loop) pairs, none underived, none in `core/src/lib.rs` (the core has no
+loops; its iteration is in the store, which `ArrStore` bounds by `CAP_*`).
+Library loops follow `unwind-rules.tsv`, each with its reason.
+
+The report flags 60 loops as "needs 6 > unwind 5": `tla::holds::<5>` and
+`tla::same::<5>` in the 30 `h_step_*` parts. They are dead there:
+`assert_refines` runs only under `PART_REF` (`checks.rs`), a constant each
+harness fixes, and the `h_ref_*` harnesses that do run it use unwind 6. The
+check is static, so it over-approximates reachability; every flagged loop
+was checked by hand. No reachable loop needs more than its harness unwind,
+so with unwinding assertions on the bounds are sufficient for the state
+sizes the harnesses build; `CUTOFF.md` covers sizes beyond them.
 
 ## Plain mode
 

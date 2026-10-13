@@ -186,7 +186,7 @@ impl Src for Rng {
         Some(crate::gen::random_walk(self, steps))
     }
     fn part(&self) -> u8 {
-        crate::checks::PART_ALL
+        crate::checks::PART_ALL | crate::checks::PART_REF
     }
     fn empty_action(&mut self) -> bool {
         self.hint(25)

@@ -109,6 +109,39 @@ jobs:
       - name: Mutant runner self-test
         run: tools/scripts/test-run-mutants.sh
 
+  loops:
+    # U-1: every loop of every Kani harness has a bound derived from a
+    # constant, at most its harness unwind (tools/scripts/kani-loops.py).
+    needs: pin
+    if: github.event_name != 'schedule' || github.event.schedule == '17 3 * * *'
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out trust-framework at the pin
+        env:
+          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+        run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
+      - name: Install Kani (and the CBMC it bundles)
+        run: |
+          . tools/versions.env
+          cargo install --locked kani-verifier --version "$KANI"
+          # `cargo kani setup` always re-downloads the bundle; on a persistent
+          # self-hosted HOME skip it once the bundle and its toolchain link
+          # (setup's last step) are in place.
+          kani_dir="${KANI_HOME:-$HOME/.kani}/kani-$KANI"
+          if [ ! -x "$kani_dir/bin/cbmc" ] || [ ! -d "$kani_dir/toolchain/bin" ]; then
+            cargo kani setup
+          fi
+      - name: Loop bounds (U-1, kani/unwind-rules.tsv)
+        run: |
+          python3 tools/scripts/kani-loops.py projects/near-approval/kani --codegen \
+            --core-file projects/near-approval/source-mirror/contracts/approval/core/src/lib.rs \
+            > "$RUNNER_TEMP/loops.tsv"
+          awk -F'\t' '{print $1"\t"$2"\t"$5"\t"$6}' "$RUNNER_TEMP/loops.tsv" | sort -u | head -400
+
   kani:
     needs: pin
     # Every push and pull request, plus the nightly schedule.
@@ -168,6 +201,17 @@ jobs:
           - "h_read_find"
           - "h_bmc_from_init"
           - "h_bmc_from_init_witness"
+          # TLA+ refinement (strategy.md section 17.2).
+          - "h_ref_add"
+          - "h_ref_revoke"
+          - "h_ref_request"
+          - "h_ref_request_empty"
+          - "h_ref_approve"
+          - "h_ref_reject"
+          - "h_ref_toolong"
+          # CUT-1: footprint of each operation (kani/CUTOFF.md).
+          - "h_cut_add h_cut_revoke h_cut_request"
+          - "h_cut_approve h_cut_reject"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -232,6 +276,122 @@ jobs:
           name: kani-logs-${{ strategy.job-index }}
           path: ${{ runner.temp }}/kani-logs
           retention-days: 14
+
+  tla:
+    needs: pin
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out trust-framework at the pin
+        env:
+          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+        run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
+      - name: Toolchain from versions.env
+        run: |
+          . tools/versions.env
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          # For this job only: `rustup default` would outlive it on a
+          # self-hosted runner.
+          echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/cache@v4
+        # Hosted runners only, as in plain: a self-hosted CARGO_HOME is
+        # shared with other repositories. There the TLA+ tools persist in
+        # the runner's tool cache instead (TLA_CACHE below).
+        if: runner.environment == 'github-hosted'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            projects/near-approval/kani/target
+            tools/.cache
+          key: tla-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/versions.env', 'projects/near-approval/kani/Cargo.lock') }}
+      - name: TLC, Apalache, trace validation and spec mutants
+        env:
+          TLA_HEAP: ${{ runner.environment == 'github-hosted' && '5g' || '12g' }}
+          TLA_LOG_DIR: ${{ runner.temp }}/tla-logs
+          TLA_CACHE: ${{ runner.environment != 'github-hosted' && format('{0}/formalver-tla', runner.tool_cache) || '' }}
+        run: tools/scripts/run-tla.sh near-approval safety liveness apalache trace mutants
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tla-logs
+          path: ${{ runner.temp }}/tla-logs
+          retention-days: 14
+
+  prolog:
+    # M4 (strategy.md section 8): requirement checks C-1..C-10 and C-2t,
+    # MC-1/MC-1s, the generated fact files, and MC-2 trace replay in both
+    # directions. MC-3 (the full graph comparison, about 30 min) runs
+    # nightly and on manual dispatch.
+    needs: pin
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Scryer install root
+        # The runner context is not available in job-level env.
+        run: echo "SCRYER_ROOT=$RUNNER_TOOL_CACHE/formalver-scryer" >> "$GITHUB_ENV"
+      - name: Check out trust-framework at the pin
+        env:
+          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+        run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
+      - name: Toolchain from versions.env
+        run: |
+          . tools/versions.env
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          # For this job only: `rustup default` would outlive it on a
+          # self-hosted runner.
+          echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
+      - uses: actions/cache@v4
+        if: runner.environment == 'github-hosted'
+        with:
+          path: ${{ env.SCRYER_ROOT }}
+          key: scryer-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/versions.env') }}
+      - name: Scryer Prolog from versions.env
+        # Installed under the tool cache, not the shared CARGO_HOME, so a
+        # self-hosted runner keeps one copy per version for this repository.
+        run: |
+          . tools/versions.env
+          root="$SCRYER_ROOT/$SCRYER"
+          if ! "$root/bin/scryer-prolog" --version 2>/dev/null | grep -q "$SCRYER"; then
+            cargo install --locked scryer-prolog --version "$SCRYER" --root "$root"
+          fi
+          echo "$root/bin" >> "$GITHUB_PATH"
+      - name: Generated facts are up to date
+        run: |
+          python3 tools/scripts/tla-facts.py projects/near-approval --check
+          (cd projects/near-approval/kani && cargo test --release --locked facts)
+      - name: Requirement checks and MC-1 (run-prolog.sh)
+        run: tools/scripts/run-prolog.sh near-approval
+      - name: MC-2 traces, core to step/4 and step/4 to core
+        working-directory: projects/near-approval/kani
+        run: |
+          cargo test --release --locked mc2_core_traces
+          (cd ../prolog/verification &&
+            scryer-prolog mc2.pl -g "(replay('$PWD/../../kani/target/mc2/core.txt') -> halt(0) ; halt(1))" </dev/null &&
+            scryer-prolog mc2.pl -g "(generate('$PWD/../../kani/target/mc2/prolog.txt', 60) -> halt(0) ; halt(1))" </dev/null)
+          cargo test --release --locked mc2_prolog_traces -- --nocapture
+      - uses: actions/setup-java@v4
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: MC-3 graph equivalence, TLC and step/4
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          TLA_CACHE: ${{ runner.environment != 'github-hosted' && format('{0}/formalver-tla', runner.tool_cache) || '' }}
+          MC3_DIR: ${{ runner.temp }}/mc3
+        run: tools/scripts/run-mc3.sh near-approval
 
   covers:
     # Every cover SATISFIED in at least one harness of its family, across the

@@ -86,7 +86,41 @@ fn h_bmc_from_init() {
 }
 
 #[test]
+fn h_ref_toolong() {
+    run("h_ref_toolong", 0x4CF5_AD43, 20_000, checks::ref_toolong);
+}
+
+#[test]
 #[should_panic(expected = "canary")]
 fn h_canary() {
     run("h_canary", 0x2F0E_1A1B, 2_000, checks::canary);
+}
+
+#[test]
+fn h_cut() {
+    run("h_cut_add", 0x5851_F42D, 20_000, crate::cutoff::cut_add);
+    run(
+        "h_cut_revoke",
+        0x4C95_7F2D,
+        20_000,
+        crate::cutoff::cut_revoke,
+    );
+    run(
+        "h_cut_request",
+        0x2545_F491,
+        20_000,
+        crate::cutoff::cut_request,
+    );
+    run(
+        "h_cut_approve",
+        0x9E37_79B1,
+        40_000,
+        crate::cutoff::cut_approve,
+    );
+    run(
+        "h_cut_reject",
+        0xBF58_476D,
+        40_000,
+        crate::cutoff::cut_reject,
+    );
 }
