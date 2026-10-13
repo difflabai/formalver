@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """MC-3: compare the reachable graph of TLC (tla/MC_Graph.tla) with the
-Prolog requirements model's (prolog/verification/graph_export.pl).
+Prolog requirements model's (prolog/verification/graph_export.pl). MC-4:
+the same comparison with the Lean machine's (`approval-lean graph`), which
+writes the same format.
 
-usage: mc3.py <tlc-edges.dump> <tlc-table.out> <prolog.txt>
+usage: mc3.py <tlc-edges.dump> <tlc-table.out> <prolog.txt> [label]
 
 <tlc-edges.dump> is `tlc2.TLC -dump` of MC_Graph.cfg: each state is one
 successful call (prev, lastOp, store). <tlc-table.out> is TLC's stdout for
@@ -10,7 +12,8 @@ MC_GraphTable.cfg, whose Table invariant prints every store with the calls
 it rejects. Both are turned into graph_export.pl's text format and the
 three sets (stores, rejected calls with their errors, successful edges)
 must be equal. Exit 0 if equal; else print the first differences, for each
-(store, call) with both sides' results.
+(store, call) with both sides' results. [label] names the third file's
+model in the output (default Prolog).
 """
 import re
 import sys
@@ -240,23 +243,24 @@ def prolog(path):
 
 def main():
     dump, table, pl = sys.argv[1:4]
+    label = sys.argv[4] if len(sys.argv) > 4 else "Prolog"
     t_edges = tlc_edges(dump)
     t_stores, t_rej = tlc_table(table)
     p_stores, p_rej, p_edges = prolog(pl)
     print(f"TLC:    {len(t_stores)} stores, {len(t_rej)} rejected calls, {len(t_edges)} edges")
-    print(f"Prolog: {len(p_stores)} stores, {len(p_rej)} rejected calls, {len(p_edges)} edges")
+    print(f"{label + ':':<8}{len(p_stores)} stores, {len(p_rej)} rejected calls, {len(p_edges)} edges")
     ok = True
     for name, a, b in (("stores", t_stores, p_stores), ("rejected calls", t_rej, p_rej), ("edges", t_edges, p_edges)):
         only_t, only_p = a - b, b - a
         if only_t or only_p:
             ok = False
-            print(f"\n{name}: {len(only_t)} only in TLC, {len(only_p)} only in Prolog")
+            print(f"\n{name}: {len(only_t)} only in TLC, {len(only_p)} only in {label}")
             for x in sorted(only_t)[:5]:
                 print("  TLC only:   ", x)
             for x in sorted(only_p)[:5]:
-                print("  Prolog only:", x)
+                print(f"  {label} only:", x)
     if ok:
-        print("MC-3: graphs equal")
+        print(f"TLC and {label}: graphs equal")
         return 0
     # Per (store, call): both sides' results, for the first disagreements.
     def results(rej, edges):
@@ -270,7 +274,7 @@ def main():
     diff = sorted(k for k in set(rt) | set(rp) if rt.get(k) != rp.get(k))
     print(f"\n{len(diff)} (store, call) pairs disagree; first ones:")
     for k in diff[:10]:
-        print(f"  store {k[0]}\n  call  {k[1]}\n    TLC:    {sorted(rt.get(k, {'ok (no edge: bound)'}))}\n    Prolog: {sorted(rp.get(k, {'ok (no edge: bound)'}))}")
+        print(f"  store {k[0]}\n  call  {k[1]}\n    TLC:    {sorted(rt.get(k, {'ok (no edge: bound)'}))}\n    {label}: {sorted(rp.get(k, {'ok (no edge: bound)'}))}")
     return 1
 
 

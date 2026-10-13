@@ -1,0 +1,11 @@
+--- a/ApprovalLean/Machine.lean
++++ b/ApprovalLean/Machine.lean
+@@ -172,7 +172,7 @@
+   if a ≠ .ok then a
+   else if x = .empty then .emptyAction
+   else if x = .tooLong then .actionTooLong
+-  else if (prin cfg s k).pending ≥ cfg.maxPending then .tooManyPending
++  else if (prin cfg s k).pending > cfg.maxPending then .tooManyPending
+   else .ok
+ 
+ /-- `Live(i)` for request `i` with record `r`. -/

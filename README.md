@@ -66,6 +66,21 @@ cargo install --locked kani-verifier --version 0.68.0 && cargo kani setup
 Harnesses are memory-bound: run them one at a time on a 16 GB machine.
 Results and run times are in [`kani/RESULTS.md`](projects/near-approval/kani/RESULTS.md).
 
+### Lean (near-approval)
+
+`projects/near-approval/lean` transcribes the TLA+ model to Lean 4 and proves
+its invariant, step properties and run properties for states of every size
+([strategy §18](projects/near-approval/strategy.md)). Core library only, no
+Mathlib.
+
+```bash
+export PATH="$(./tools/scripts/get-lean.sh):$PATH"   # pinned Lean release, sha256-checked
+./tools/scripts/run-lean.sh near-approval            # proofs, audit, canaries, guards, REF-5L, MC-4, mutants
+./tools/scripts/run-lean.sh near-approval build audit   # or name checks
+```
+
+`replay` (REF-5L) needs the submodule and Rust; `graph` (MC-4) needs Java for TLC.
+
 ### Prolog (requirements verification)
 
 ```bash

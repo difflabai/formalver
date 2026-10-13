@@ -1,0 +1,64 @@
+# Lean results (strategy.md section 18)
+
+Lean 4.34.1, core library only. Model at trust-framework `3426c92` through
+`tla/ApprovalCore.tla`. Run on 2026-10-13 in a Linux x86_64 cloud container
+with `tools/scripts/run-lean.sh near-approval`.
+
+## Proofs
+
+| ID | Theorems | Result |
+|---|---|---|
+| LEAN-IND | `inv_init`, `inv_add`, `inv_revoke`, `inv_request`, `inv_approve`, `inv_reject`, `inv_next`, `inv_step`, `reach_inv`, `approvable_all` | proved, every size |
+| LEAN-STEP | `stepProps_next`, `stepProps_step` | proved, every size |
+| LEAN-TR | `reach_run`, `tr1_provenance`, `tr2_decision_final`, `tr3_void_terminal`, `hist1_run`, `hist3_run`, `hist10_run` | proved, runs of any length |
+| LEAN-GUARD | `err_eq_firstFail`, `guards_order`, `err_mem_guardOrder`, `err_ne_logFull` | proved |
+| LEAN-WIT | `witness_approved`, `witness_rejected`, `witness_void`, `witness_revival`, `witness_cap`, `witness_cap_refused` | proved by evaluation |
+
+No invariant needed strengthening: `Inv` exactly as `ApprovalProps.tla`
+states it is inductive at every size, which TLA-IND had shown only from
+states with at most 3 requests. The step properties follow from the guards
+alone; `stepProps_next` does not use `Inv`.
+
+Axiom audit: all 24 theorems in `Audit.lean` depend only on `propext`,
+`Classical.choice` and `Quot.sound`. Both canaries fail to compile.
+
+Size: 3,478 lines (machine and properties 549, lemmas 315, proofs 2,097,
+guard order and witnesses 260, tools 257). Clean build: 14 s.
+
+## Links to the other layers
+
+| Check | Result |
+|---|---|
+| LEAN-GUARD vs `tla_facts.pl` (C-2t) | equal for all five entry points |
+| REF-5L | 2,000 core traces × 120 calls = 240,000 steps, every result and post-store equal (5 s with trace generation) |
+| MC-4 | TLC and Lean: 21,670 stores, 6,298,932 rejected calls, 41,706 edges, all equal. TLC about 40 s for both runs, Lean export 0.9 s, `mc3.py` 150 s |
+
+With MC-3 (2026-10-11), the Prolog, TLC and Lean graphs of the MC_Graph
+universe are one graph.
+
+## Spec mutants
+
+The 15 `tla/mutants` ported to `Machine.lean`. Each is killed by a proof
+(the files that failed to build):
+
+| Mutant | Broken proofs |
+|---|---|
+| 01 live-from-dropped | Inv/Add, Inv/Approve, Inv/Reject, StepProps |
+| 02 self-approval-dropped | Guard, Inv/Approve |
+| 03 pending-not-decremented | Inv/Approve, Inv/Reject, StepProps |
+| 04 approve-no-log-append | Inv/Approve, StepProps |
+| 05 add-from-zero | Inv/Add, StepProps |
+| 06 revoke-keeps-key | Inv/Revoke, StepProps |
+| 07 guard-swap-rejected-revoked | Guard, Inv/Approve, Inv/Reject |
+| 08 cap-off-by-one | Guard, Inv/Request |
+| 09 approval-index-from-requests | Inv/Approve, StepProps |
+| 10 reject-self-approval-dropped | Guard, Inv/Reject |
+| 11 already-rejected-dropped | Guard, Inv/Approve, Inv/Reject, StepProps |
+| 12 rejection-records-agent-rid | Inv/Reject, StepProps |
+| 13 revoke-not-recorded | Inv/Revoke, StepProps |
+| 14 registration-id-reused | Inv/Add |
+| 15 request-rid-zero | Inv/Request, StepProps |
+
+Mutants 05, 06, 13 and 14 also restate the `rfl` field lemma in
+`Lemmas.lean` that spells out the mutated effect, so the kill is an
+invariant or step-property proof failing, not that lemma. Full run: 3 min.

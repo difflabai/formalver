@@ -326,6 +326,62 @@ jobs:
           path: ${{ runner.temp }}/tla-logs
           retention-days: 14
 
+  lean:
+    # Lean layer (strategy.md section 18): LEAN-IND, LEAN-STEP, LEAN-TR,
+    # LEAN-GUARD and LEAN-WIT proved for states of every size, the axiom
+    # audit and canaries, REF-5L (real-core traces on the Lean machine),
+    # MC-4 (Lean graph = TLC graph) and the spec mutants. About 8 min.
+    needs: pin
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out trust-framework at the pin
+        env:
+          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+        run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
+      - name: Toolchain from versions.env
+        run: |
+          . tools/versions.env
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          # For this job only: `rustup default` would outlive it on a
+          # self-hosted runner.
+          echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/cache@v4
+        # Hosted runners only, as in plain; self-hosted runners keep Lean and
+        # the TLA+ tools in the runner's tool cache (LEAN_CACHE, TLA_CACHE).
+        if: runner.environment == 'github-hosted'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            projects/near-approval/kani/target
+            tools/.cache
+          key: lean-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/versions.env', 'projects/near-approval/kani/Cargo.lock') }}
+      - name: Lean toolchain from versions.env
+        env:
+          LEAN_CACHE: ${{ runner.environment != 'github-hosted' && format('{0}/formalver-lean', runner.tool_cache) || '' }}
+        run: tools/scripts/get-lean.sh >> "$GITHUB_PATH"
+      - name: Proofs, audit, canaries, guard order, REF-5L, MC-4, mutants
+        env:
+          LEAN_LOG_DIR: ${{ runner.temp }}/lean-logs
+          TLA_HEAP: ${{ runner.environment == 'github-hosted' && '5g' || '12g' }}
+          TLA_CACHE: ${{ runner.environment != 'github-hosted' && format('{0}/formalver-tla', runner.tool_cache) || '' }}
+        run: tools/scripts/run-lean.sh near-approval
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lean-logs
+          path: ${{ runner.temp }}/lean-logs
+          retention-days: 14
+
   prolog:
     # M4 (strategy.md section 8): requirement checks C-1..C-10 and C-2t,
     # MC-1/MC-1s, the generated fact files, and MC-2 trace replay in both

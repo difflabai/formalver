@@ -1,0 +1,22 @@
+--- a/ApprovalLean/Lemmas.lean
++++ b/ApprovalLean/Lemmas.lean
+@@ -280,7 +280,7 @@
+ @[simp] theorem revoke_log (c k) : (effect cfg s (.revoke c k)).log = s.log := rfl
+ @[simp] theorem revoke_regs (c k) : (effect cfg s (.revoke c k)).regs = s.regs := rfl
+ @[simp] theorem revoke_revoked (c k) : (effect cfg s (.revoke c k)).revoked =
+-    setInsert (prin cfg s k).rid s.revoked := rfl
++    s.revoked := rfl
+ @[simp] theorem revoke_ghost (c k) : (effect cfg s (.revoke c k)).ghost = s.ghost := rfl
+ 
+ end Effects
+--- a/ApprovalLean/Machine.lean
++++ b/ApprovalLean/Machine.lean
+@@ -282,7 +282,7 @@
+     -- `RevokeKey`
+     { s with
+       principals := perase k s.principals,
+-      revoked := setInsert (prin cfg s k).rid s.revoked }
++      revoked := s.revoked }
+   | .request _ signer k x =>
+     -- `RequestAction`
+     { s with
