@@ -16,14 +16,19 @@ hash() {
   if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | awk '{print $1}'
 }
 
+# Each download goes to its own temp file and is renamed into place, so jobs
+# sharing a cache (TLA_CACHE on a self-hosted runner) never see a partial file.
 fetch() { # url file sha256
   if [ ! -f "$cache/$2" ] || [ "$(hash "$cache/$2")" != "$3" ]; then
-    curl -fsSL --retry 4 -o "$cache/$2.part" "$1"
-    if [ "$(hash "$cache/$2.part")" != "$3" ]; then
-      echo "sha256 mismatch for $2" >&2
+    local part
+    part=$(mktemp "$cache/$2.XXXXXX")
+    curl -fsSL --retry 4 --retry-all-errors -o "$part" "$1" || { rm -f "$part"; exit 1; }
+    if [ "$(hash "$part")" != "$3" ]; then
+      echo "sha256 mismatch for $2 (got $(hash "$part"), pinned $3)" >&2
+      rm -f "$part"
       exit 1
     fi
-    mv "$cache/$2.part" "$cache/$2"
+    mv -f "$part" "$cache/$2"
   fi
 }
 
