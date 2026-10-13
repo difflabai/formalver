@@ -7,6 +7,12 @@ with CBMC 6.11.0. Machine: 4 cores, 15 GB. Commands:
 `tools/scripts/run-tla.sh near-approval safety liveness apalache trace
 mutants` and `tools/scripts/run-kani.sh near-approval h_ref_*`.
 
+TLC is now pinned to the stable 1.7.4 release (`tools/versions.env`): the
+1.8.0 release asset is a rolling build, so its sha256 pin broke. Re-run on
+2026-10-13 with TLC 1.7.4 (rev 5a47802): every TLA+ row below and every
+mutant verdict is unchanged, with the same state counts (8,629,059 at depth
+21, 199,145, 4,860).
+
 ## TLA+
 
 | Check | Result | Size / time |

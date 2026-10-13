@@ -29,7 +29,7 @@ spec_reviewed_at = ""
 
 [tools]
 lean = "4.34.1"             # release zip, no elan; near-proof-arena's pin
-tla2tools = "1.8.0"
+tla2tools = "1.7.4"         # last stable release; the 1.8.0 asset is a rolling build
 apalache = "0.47.2"
 kani = "0.68.0"             # built from tag kani-0.68.0; nightly-2026-08-21
 cbmc = "6.11.0"

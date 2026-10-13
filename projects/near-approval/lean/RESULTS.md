@@ -34,7 +34,8 @@ guard order and witnesses 260, tools 257). Clean build: 14 s.
 | MC-4 | TLC and Lean: 21,670 stores, 6,298,932 rejected calls, 41,706 edges, all equal. TLC about 40 s for both runs, Lean export 0.9 s, `mc3.py` 150 s |
 
 With MC-3 (2026-10-11), the Prolog, TLC and Lean graphs of the MC_Graph
-universe are one graph.
+universe are one graph. MC-4 gives the same counts with TLC 1.7.4, the
+version now pinned.
 
 ## Spec mutants
 
