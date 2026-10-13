@@ -869,8 +869,7 @@ deployed code itself and buys the most assurance per day.
 |---|---|---|
 | `pin` | PR, push | gitlink ≠ pin; hash drift; release profile without `overflow-checks = true` or borsh feature gating (ASM-COMPILE). Every other job depends on it. |
 | `plain` | PR, push | any failure; drift in generated `code_facts.pl` |
-| `kani-quick` | PR touching near-approval (`h_init`, `h_canary`, `h_raw_*`) | any failure; any unsatisfied cover; `h_canary` passing |
-| `kani` | nightly; push to main; manual (one job per harness or step part, about 40 jobs and 9 runner-hours; 120 min per harness) | any failure; any unsatisfied cover (the `covers` job, across jobs); `h_canary` passing |
+| `kani` | PR, push, nightly, manual (one job per harness or step part, 38 jobs; about 110 runner-minutes on the self-hosted Macs; 120 min per harness) | any failure; any unsatisfied cover (the `covers` job, across jobs); `h_canary` passing |
 | `mutants` | weekly | a core or shell mutant survives; an equivalent mutant is killed |
 | `prolog` | PR, push | any failure; drift in `conformance/traces`; MC-1/MC-1s state count below the floor |
 | `verus` | PR, push (from M5) | any error; count below the floor; canary verifies; a spec mutant verifies; hygiene |
