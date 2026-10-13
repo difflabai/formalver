@@ -601,7 +601,7 @@ The "≤ 3 each" row is made precise in [`kani/CUTOFF.md`](kani/CUTOFF.md):
 (the argument there) shows the harness bounds are then sufficient for REF-1..3
 at every size, except E1 (pending at `MAXP`) and E2 (counters at `u64::MAX`),
 which the raw and `Sparse` harnesses cover. **U-1**
-(`tools/scripts/kani-loops.py`, CI group `loops`) derives a bound for every
+(`tools/scripts/kani-loops.py`, CI job `loops`) derives a bound for every
 loop in every harness's goto program from a constant and fails if any
 reachable loop needs more than its harness `--default-unwind`; with
 unwinding assertions on, a bound that is too low fails loudly.
@@ -895,8 +895,7 @@ deployed code itself and buys the most assurance per day.
 |---|---|---|
 | `pin` | PR, push | gitlink ≠ pin; hash drift; release profile without `overflow-checks = true` or borsh feature gating (ASM-COMPILE). Every other job depends on it. |
 | `plain` | PR, push | any failure; drift in generated `code_facts.pl` |
-| `kani-quick` | PR touching near-approval (`h_init`, `h_canary`, `h_raw_*`) | any failure; any unsatisfied cover; `h_canary` passing |
-| `kani` | nightly; push to main; manual (one job per harness or step part, about 40 jobs and 9 runner-hours; 120 min per harness) | any failure; any unsatisfied cover (the `covers` job, across jobs); `h_canary` passing |
+| `kani` | PR, push, nightly, manual (one job per harness or step part, 38 jobs; about 110 runner-minutes on the self-hosted Macs; 120 min per harness) | any failure; any unsatisfied cover (the `covers` job, across jobs); `h_canary` passing |
 | `mutants` | weekly | a core or shell mutant survives; an equivalent mutant is killed |
 | `tla` | PR, push | any §17.3 check failing; a witness or the unfair liveness run passing; a spec mutant surviving |
 | `prolog` | PR, push | any failure; drift in `conformance/traces`; MC-1/MC-1s state count below the floor |

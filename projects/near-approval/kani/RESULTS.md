@@ -12,48 +12,42 @@ Kani, stable 1.97.0 for plain mode. Machine: 4 cores, 15 GB memory cgroup.
 
 <!-- KANI-TABLE -->
 Every harness verifies with unwinding assertions on, and `h_canary` fails
-as required. Step harnesses run as five parts each (deviation 12). CI times
-are wall clock on this repository's 2-CPU, 7.9 GB runners with 16 GB of
-swap, including about 3 min of Kani install; local times are this
-machine, one harness at a time.
+as required. Step harnesses run as five parts each (deviation 12). CI
+times are the full run on `016cc06` (workflow_dispatch, all 38 Kani jobs
+green, `covers` green), wall clock per job on the self-hosted macOS
+runners (`CI_RUNNER`), Kani already installed; local times are a 15 GB
+Linux container, one harness at a time.
 
 | Harness | Result | CI | Local (peak memory) | Properties |
 |---|---|---:|---|---|
-| `h_init`, `h_canary` | verified; canary FAILED (required) | 3 min | 41 s, 127 s | INV and GH at `Init`; setup is not vacuous |
-| `h_step_add_{tx,post,hist,inv,reg}` | verified | 3, 7, 10, 4, 4 min | whole harness before the split: 26 min (13.6 GB) | TX-0, TX-1, HIST, INV for `add_principal` |
-| `h_step_revoke_*` | verified | 6, 6, 16, 10, 4 min | | TX-2, HIST-8, HIST-10, INV-11/12/15 |
-| `h_step_request_*` | verified | 6, 7, 20, 7, 5 min | | TX-3, TX-4 |
-| `h_step_request_empty_*` | verified | 5, 8, 9, 5, 4 min | | `""` action instance |
-| `h_step_approve_*` | verified | 36, 22, 24, 11, 6 min | tx 17 min (11.9 GB), post 17 min (12.7 GB), inv 13 min (10.0 GB), reg 10 min (7.0 GB) | TX-5, TR-2/3/4 steps; 11/11 covers |
-| `h_step_reject_*` | verified | 7, 9, 22, 8, 4 min | | TX-7, HIST-9, INV-13 |
-| `h_raw_add`, `h_raw_revoke`, `h_raw_approve`, `h_raw_reject` | verified | 8 min | 79 s, 94 s, 657 s, 345 s | ROB-1, HIST-7; add's `LogFull` at `G = MAXU` |
-| `h_raw_request`, `h_raw_request_empty` | verified | 5 min | 164 s, 122 s | ROB-1, INV-9 cap boundary |
-| `h_read` | verified | 59 min | 17 min (needs swap: out of memory at 15 GB without) | RD-1, RD-5, RD-7, RD-8, LEM-4 |
-| `h_read_page` | verified | 20 min | 16 min | RD-2 |
-| `h_read_find` | verified | 34 min | 14 min | RD-5 by request id |
-| `h_bmc_from_init` (depth 5) | verified | not yet run (billing) | 26 min (11.2 GB); covers approved, rejected | GH (TR-1, TR-7), TR-2 on every trace of ≤ 5 ops |
-| `h_bmc_from_init_witness` | verified | not yet run (billing) | 7 min (3.9 GB); revival cover satisfied | TR-3 witness, GH along it |
-| `h_cut_add`, `h_cut_revoke`, `h_cut_request`, `h_cut_approve`, `h_cut_reject` | verified | nightly, not yet run | 87 s, 105 s, 221 s, 493 s, 273 s | CUT-1 footprint rows (`CUTOFF.md`); tracking store transparent |
+| `h_init`, `h_canary` | verified; canary FAILED (required) | <1 min | 41 s, 127 s | INV and GH at `Init`; setup is not vacuous |
+| `h_step_add_{tx,post,hist,inv,reg}` | verified | 1, 2, 5, 2, 1 min | whole harness before the split: 26 min (13.6 GB) | TX-0, TX-1, HIST, INV for `add_principal` |
+| `h_step_revoke_*` | verified | 2, 3, 4, 2, 2 min | | TX-2, HIST-8, HIST-10, INV-11/12/15 |
+| `h_step_request_*` | verified | 2, 3, 5, 2, 1 min | | TX-3, TX-4 |
+| `h_step_request_empty_*` | verified | 2, 2, 3, 2, 1 min | | `""` action instance |
+| `h_step_approve_*` | verified | 4, 4, 8, 3, 2 min | tx 17 min (11.9 GB), post 17 min (12.7 GB), inv 13 min (10.0 GB), reg 10 min (7.0 GB) | TX-5, TR-2/3/4 steps; 11/11 covers |
+| `h_step_reject_*` | verified | 2, 3, 4, 2, 2 min | | TX-7, HIST-9, INV-13 |
+| `h_raw_add`, `h_raw_revoke`, `h_raw_approve`, `h_raw_reject` | verified | 4 min | 79 s, 94 s, 657 s, 345 s | ROB-1, HIST-7; add's `LogFull` at `G = MAXU` |
+| `h_raw_request`, `h_raw_request_empty` | verified | 1 min | 164 s, 122 s | ROB-1, INV-9 cap boundary |
+| `h_read` | verified | 6 min | 17 min (needs swap: out of memory at 15 GB without) | RD-1, RD-5, RD-7, RD-8, LEM-4 |
+| `h_read_page` | verified | 4 min | 16 min | RD-2 |
+| `h_read_find` | verified | 5 min | 14 min | RD-5 by request id |
+| `h_bmc_from_init` (depth 5) | verified | 6 min | 26 min (11.2 GB); covers approved, rejected | GH (TR-1, TR-7), TR-2 on every trace of ≤ 5 ops |
+| `h_bmc_from_init_witness` | verified | 2 min | 7 min (3.9 GB); revival cover satisfied | TR-3 witness, GH along it |
+| `h_cut_add`, `h_cut_revoke`, `h_cut_request`, `h_cut_approve`, `h_cut_reject` | verified | not yet run in CI | 87 s, 105 s, 221 s, 493 s, 273 s | CUT-1 footprint rows (`CUTOFF.md`); tracking store transparent |
 
-The step, raw and read rows ran green in CI on `2199a1e`. Since then the
-BMC changed and `ArrStore`'s principal loops were rewritten to run to the
-fixed capacity (same semantics). At the current head, run locally: init,
-canary, every raw harness, the `_reg` part of every step family, the
-approve parts above, the three reads and both BMC harnesses verify, and
-every cover family is satisfied (27 covers across the step and read
-families, `check-covers.sh`). GitHub then stopped starting
-jobs on this repository (spending limit), so `4557423`, the CI `covers`
-job and the mutants under Kani are still to run there.
+The step, raw and read rows also ran green earlier on GitHub's 2-CPU, 7.9 GB Linux runners
+with 16 GB of swap (`2199a1e`), at 3 to 59 min per
+job.
 
-A full `kani` run is about 40 jobs and 9 runner-hours, so pull requests
-run only `kani-quick` (`h_init`, `h_canary`, `h_raw_*`) and the full
-matrix runs nightly, on main and on manual dispatch.
+The full matrix runs on every pull request push, on main, nightly and on
+manual dispatch (about 110 runner-minutes on the Macs).
 <!-- /KANI-TABLE -->
 
 ## Loop bounds (U-1)
 
 `tools/scripts/kani-loops.py projects/near-approval/kani --codegen
---core-file …/core/src/lib.rs` (CI `kani-quick` group `loops`) lists every
+--core-file …/core/src/lib.rs` (CI job `loops`) lists every
 loop of every harness's goto program and derives its bound from a constant:
 5,002 (harness, loop) pairs, none underived, none in `core/src/lib.rs` (the core has no
 loops; its iteration is in the store, which `ArrStore` bounds by `CAP_*`).
@@ -88,9 +82,11 @@ harnesses skipped.
 
 <!-- KANI-MUTANTS -->
 Under Kani (`run-mutants.sh near-approval --kani`, each mutant against the
-`_tx` and `_post` parts of its `killed-by` harness): not yet run at
-`3426c92`; the dispatched CI run was blocked by billing. At `5736251` all
-24 were killed and both equivalent mutants survived.
+`_tx` and `_post` parts of its `killed-by` harness, or `h_read` /
+`h_raw_*`): all 36 jobs green on `016cc06`, so all 34 non-equivalent
+mutants are killed in plain mode and under Kani, and both equivalent ones
+(F-14) survive both. Median 4 min per mutant job, longest 26 min (the
+must-survive mutants, which run every approve part and `h_read`).
 <!-- /KANI-MUTANTS -->
 
 ## Deviations from strategy.md section 6, and why

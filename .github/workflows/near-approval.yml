@@ -109,22 +109,13 @@ jobs:
       - name: Mutant runner self-test
         run: tools/scripts/test-run-mutants.sh
 
-  kani-quick:
-    # Pull requests: the fast harnesses only. The full matrix (kani, below)
-    # runs nightly, on pushes to main and on manual dispatch.
+  loops:
+    # U-1: every loop of every Kani harness has a bound derived from a
+    # constant, at most its harness unwind (tools/scripts/kani-loops.py).
     needs: pin
-    if: github.event_name == 'pull_request'
+    if: github.event_name != 'schedule' || github.event.schedule == '17 3 * * *'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        group:
-          - "h_init h_canary"
-          - "h_raw_add h_raw_revoke h_raw_approve h_raw_reject"
-          - "h_raw_request h_raw_request_empty"
-          # U-1: every loop of every harness has a derived unwind bound.
-          - "loops"
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -144,13 +135,7 @@ jobs:
           if [ ! -x "$kani_dir/bin/cbmc" ] || [ ! -d "$kani_dir/toolchain/bin" ]; then
             cargo kani setup
           fi
-      - name: Kani ${{ matrix.group }}
-        if: matrix.group != 'loops'
-        env:
-          KANI_TIMEOUT: "1800"
-        run: tools/scripts/run-kani.sh near-approval ${{ matrix.group }}
       - name: Loop bounds (U-1, kani/unwind-rules.tsv)
-        if: matrix.group == 'loops'
         run: |
           python3 tools/scripts/kani-loops.py projects/near-approval/kani --codegen \
             --core-file projects/near-approval/source-mirror/contracts/approval/core/src/lib.rs \
@@ -159,9 +144,8 @@ jobs:
 
   kani:
     needs: pin
-    if: >-
-      github.event_name != 'pull_request' &&
-      (github.event_name != 'schedule' || github.event.schedule == '17 3 * * *')
+    # Every push and pull request, plus the nightly schedule.
+    if: github.event_name != 'schedule' || github.event.schedule == '17 3 * * *'
     # CBMC peaks at 6.5 to 9.5 GB on the step harnesses; this repository's
     # default runner has 2 CPUs and 7.9 GB. Set the KANI_RUNNER repository
     # variable to a larger runner label (and KANI_SWAP_GB to 0) to avoid
