@@ -20,12 +20,17 @@ jar="$cache/tla2tools-$TLA2TOOLS.jar"
 out=${MC3_DIR:-$(mktemp -d)}
 mkdir -p "$out"
 
+# Each run gets its own java.io.tmpdir, as in run-tla.sh: TLC 1.7.4 unpacks
+# its standard modules under fixed names there.
 tlc() { # cfg log [tlc args...]
-  local cfg=$1 log=$2
+  local cfg=$1 log=$2 tmp rc=0
   shift 2
-  (cd "$proj/tla" && java -XX:+UseParallelGC -Xmx"${TLA_HEAP:-4g}" -cp "$jar" tlc2.TLC \
-    -workers 1 -cleanup -metadir "$(mktemp -d)" "$@" -config "$cfg" MC_Graph.tla) >"$log" 2>&1
-  grep -q 'Model checking completed. No error has been found.' "$log" ||
+  tmp=$(mktemp -d)
+  (cd "$proj/tla" && java -XX:+UseParallelGC -Xmx"${TLA_HEAP:-4g}" -Djava.io.tmpdir="$tmp" \
+    -cp "$jar" tlc2.TLC -workers 1 -cleanup -metadir "$tmp/states" "$@" \
+    -config "$cfg" MC_Graph.tla) >"$log" 2>&1 || rc=$?
+  rm -rf "$tmp"
+  [ $rc -eq 0 ] && grep -q 'Model checking completed. No error has been found.' "$log" ||
     { echo "TLC $cfg failed, log $log" >&2; tail -20 "$log" >&2; exit 1; }
 }
 

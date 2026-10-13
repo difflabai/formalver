@@ -18,7 +18,10 @@ hash() {
 
 # Each download goes to its own temp file and is renamed into place, so jobs
 # sharing a cache (TLA_CACHE on a self-hosted runner) never see a partial file.
+# A cancelled job can leave its temp file behind; those older than an hour
+# (no download takes that long) are removed here.
 fetch() { # url file sha256
+  find "$cache" -maxdepth 1 -name "$2.??????" -mmin +60 -exec rm -f {} +
   if [ ! -f "$cache/$2" ] || [ "$(hash "$cache/$2")" != "$3" ]; then
     local part
     part=$(mktemp "$cache/$2.XXXXXX")

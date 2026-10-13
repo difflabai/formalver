@@ -130,12 +130,15 @@ check_graph() {
   . "$root/tools/versions.env"
   jar="$("$root/tools/scripts/get-tla-tools.sh")/tla2tools-$TLA2TOOLS.jar" ||
     { report graph 1 "no TLA+ tools" "$log"; return; }
-  tlc() { # cfg log [args...]
-    local cfg=$1 l=$2
+  tlc() { # cfg log [args...]; own java.io.tmpdir per run, as in run-tla.sh
+    local cfg=$1 l=$2 tmp rc=0
     shift 2
-    (cd "$proj/tla" && java -XX:+UseParallelGC -Xmx"${TLA_HEAP:-4g}" -cp "$jar" tlc2.TLC \
-      -workers 1 -cleanup -metadir "$(mktemp -d)" "$@" -config "$cfg" MC_Graph.tla) >"$l" 2>&1 &&
-      grep -q 'Model checking completed. No error has been found.' "$l"
+    tmp=$(mktemp -d)
+    (cd "$proj/tla" && java -XX:+UseParallelGC -Xmx"${TLA_HEAP:-4g}" -Djava.io.tmpdir="$tmp" \
+      -cp "$jar" tlc2.TLC -workers 1 -cleanup -metadir "$tmp/states" "$@" \
+      -config "$cfg" MC_Graph.tla) >"$l" 2>&1 || rc=$?
+    rm -rf "$tmp"
+    [ $rc -eq 0 ] && grep -q 'Model checking completed. No error has been found.' "$l"
   }
   {
     tlc MC_GraphTable.cfg "$out/table.out" &&

@@ -32,11 +32,17 @@ mkdir -p "$logs"
 [ $# -gt 0 ] || set -- safety liveness apalache trace
 
 # tlc <spec dir> <module> <cfg> <log> [java -D options...]
+# Each run gets its own java.io.tmpdir: TLC 1.7.4 unpacks its standard
+# modules (Naturals.tla, ...) under fixed names there, so runs sharing one
+# (CI jobs on one self-hosted host) would overwrite each other's files.
 tlc() {
-  local d=$1 m=$2 c=$3 log=$4
+  local d=$1 m=$2 c=$3 log=$4 tmp
   shift 4
-  (cd "$d" && java -XX:+UseParallelGC -Xmx"${TLA_HEAP:-6g}" "$@" -cp "$jar" tlc2.TLC \
-    -workers "${TLA_WORKERS:-auto}" -cleanup -metadir "$(mktemp -d)" -config "$c" "$m") >"$log" 2>&1
+  tmp=$(mktemp -d)
+  (cd "$d" && java -XX:+UseParallelGC -Xmx"${TLA_HEAP:-6g}" -Djava.io.tmpdir="$tmp" "$@" \
+    -cp "$jar" tlc2.TLC -workers "${TLA_WORKERS:-auto}" -cleanup -metadir "$tmp/states" \
+    -config "$c" "$m") >"$log" 2>&1
+  rm -rf "$tmp"
   rm -f "$d"/*_TTrace_*
 }
 tlc_ok() { grep -q 'Model checking completed. No error has been found.' "$1"; }
