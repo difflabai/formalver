@@ -2,7 +2,7 @@
 name = "near-approval"
 upstream = "https://github.com/difflabai/trust-framework"
 upstream_path = "contracts/approval"
-pinned_commit = "3426c9246cee98dbfaa3ff7980bd85ff839d60d6"   # provisional: trust-framework PR #15 head (branch claude/near-approval-contract-qin858); re-pin at merge (OQ-1)
+pinned_commit = "3426c9246cee98dbfaa3ff7980bd85ff839d60d6"   # trust-framework PR #15 head; #15 squash-merged to main as cbb16dd (2026-10-09). Re-pin to main pending (OQ-1)
 last_reviewed = "2026-10-09"
 verus_min_verified = 0      # raised at M5; run-verus.sh fails below it
 mc1_state_floor = 51568     # recorded at M4 (2026-10-11); MC-1 fails below it
@@ -34,7 +34,7 @@ apalache = "0.47.2"
 kani = "0.68.0"             # built from tag kani-0.68.0; nightly-2026-08-21
 cbmc = "6.11.0"
 verus = ""
-scryer_prolog = ""
+scryer_prolog = "0.10.0"     # crates.io, cargo install --locked
 cargo_near = ""
 near_sandbox = ""
 near_sdk = "5.29.1"         # from source-mirror Cargo.lock
