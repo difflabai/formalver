@@ -16,8 +16,8 @@ How the layers fit together, and when to use Kani or Verus:
 Submissions to [NEAR Proof Arena](https://github.com/ilblackdragon/near-proof-arena), aimed at the NEAR assumptions these projects rely on, go in [`near-proofs/`](near-proofs/README.md).
 
 Tool versions are pinned in [`tools/versions.env`](tools/versions.env); CI
-(`.github/workflows/near-approval.yml`) runs the near-approval checks below on
-every PR.
+(`.github/workflows/near-approval.yml`) runs the near-approval checks below;
+on a PR, only the jobs whose inputs changed run (`tools/scripts/ci-areas.sh`).
 
 ## near-approval: running the checks
 
