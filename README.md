@@ -6,7 +6,7 @@ Formal Verification of repositories, starting with IronClaw
 | Project | Target | Plan | Status |
 |---|---|---|---|
 | ironclaw | [nearai/ironclaw](https://github.com/nearai/ironclaw) safety modules | [strategy](projects/ironclaw/strategy.md) | [status](projects/ironclaw/status.toml) |
-| near-approval | [trust-framework](https://github.com/difflabai/trust-framework) `contracts/approval` (NEAR action-approval contract) | [strategy](projects/near-approval/strategy.md) | [status](projects/near-approval/status.toml) (M1: Kani on the core) |
+| near-approval | [trust-framework](https://github.com/difflabai/trust-framework) `contracts/approval` (NEAR action-approval contract) | [strategy](projects/near-approval/strategy.md) | [status](projects/near-approval/status.toml) (core: Kani, TLA+, Lean, Prolog done; shell, sandbox, deployment next) |
 
 Submissions to [NEAR Proof Arena](https://github.com/ilblackdragon/near-proof-arena), aimed at the NEAR assumptions these projects rely on, go in [`near-proofs/`](near-proofs/README.md).
 
@@ -66,6 +66,16 @@ cargo install --locked kani-verifier --version 0.68.0 && cargo kani setup
 Harnesses are memory-bound: run them one at a time on a 16 GB machine.
 Results and run times are in [`kani/RESULTS.md`](projects/near-approval/kani/RESULTS.md).
 
+### TLA+ (near-approval)
+
+`projects/near-approval/tla` models the core in TLA+; Kani's `h_ref_*`
+harnesses prove the real core refines it ([strategy §17](projects/near-approval/strategy.md)).
+
+```bash
+./tools/scripts/run-tla.sh near-approval             # fetches pinned TLC/Apalache (Java 17+); or name checks: safety liveness apalache trace mutants
+./tools/scripts/run-mc3.sh near-approval             # MC-3: Prolog graph = TLC graph (slow, nightly in CI)
+```
+
 ### Lean (near-approval)
 
 `projects/near-approval/lean` transcribes the TLA+ model to Lean 4 and proves
@@ -85,7 +95,7 @@ export PATH="$(./tools/scripts/get-lean.sh):$PATH"   # pinned Lean release, sha2
 
 ```bash
 # Install scryer-prolog
-cargo install scryer-prolog
+cargo install --locked scryer-prolog --version 0.10.0
 
 # Run all tests
 ./tools/scripts/run-prolog.sh ironclaw
@@ -93,3 +103,8 @@ cargo install scryer-prolog
 # Run a specific test file
 ./tools/scripts/run-prolog.sh ironclaw test_sanitizer.pl
 ```
+
+For near-approval (Scryer 0.10.0, pinned in `tools/versions.env`):
+`./tools/scripts/run-prolog.sh near-approval` runs the requirement checks and MC-1;
+MC-2 trace replay is a separate step in the `prolog` CI job ([strategy §8](projects/near-approval/strategy.md)).
+

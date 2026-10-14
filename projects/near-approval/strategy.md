@@ -10,7 +10,7 @@ readable per request or as a paged log.
 
 | | |
 |---|---|
-| Pinned commit | `3426c9246cee98dbfaa3ff7980bd85ff839d60d6`, the head of trust-framework PR #15 (adds `reject`, registration ids and revocation times, key events). This pin is **provisional**: it is on branch `claude/near-approval-contract-qin858`. Re-pin when the branch merges (OQ-1). Previous pin: `5736251`. |
+| Pinned commit | `3426c9246cee98dbfaa3ff7980bd85ff839d60d6`, the head of trust-framework PR #15 (adds `reject`, registration ids and revocation times, key events). PR #15 was squash-merged to `main` as `cbb16dd` on 2026-10-09, so the pin is not on `main`; `contracts/approval/` at `main` (`05afd5c`) differs from it only in `README.md` (3 lines). Re-pin to `main` is still open (OQ-1). Previous pin: `5736251`. |
 | Crates | `approval-core` (`core/src/lib.rs`, 749 lines incl. docs). A dependency-free state machine, generic over account `A` and key `K`, holding *all* authorization and transition logic. `approval-contract` (`contract/src/lib.rs`, 976 lines incl. tests). A near-sdk 5.29 shell: env → `Caller`, `Store` over `LookupMap`, NEP-297 events, JSON views. |
 | In the TCB via `Cargo.lock` | near-sdk 5.29.1, near-sdk-macros 5.29.1, near-sdk-core 4.2.3, near-sdk-env 0.1.6, near-account-id 2.6.0, near-sys 0.2.14, borsh 1.8.1, serde_json 1.0.151 |
 | Mirror | git submodule `projects/near-approval/source-mirror` (same pattern as ironclaw) |
@@ -20,16 +20,38 @@ dependencies, so Kani and Verus can target **the deployed logic itself**
 rather than a model of it. The shell is thin enough to cover with tests,
 review and wasm inspection.
 
-**Status: plan only.** Kani, Verus, scryer-prolog, near-sdk and
-near-workspaces could not be downloaded in the authoring environment, so none
-of them has run. Claims about those tools and about NEAR runtime behaviour
-come from memory and carry **[conf: high|med|low]**. What did run, offline,
-against the pinned core:
-- its 21 tests, including a randomized state-machine spec with an exact-error
-  oracle, frame conditions and a ghost-state model of revocation;
-- 29 hand-seeded mutants: 27 killed, 2 equivalent (F-14);
-- a plain-mode prototype of the Kani harness design, against the previous
-  core API (not committed; §6.1).
+**Status (2026-10-14).** The core is covered by four mechanically linked
+layers; the shell, the runtime assumptions and deployment have no checked
+property yet.
+
+| Layer | Milestone | State |
+|---|---|---|
+| Bootstrap, pin job, CI | M0 | Done. CI runs on self-hosted macOS runners (`vars.CI_RUNNER`); the full Kani matrix takes about 2 runner-hours. |
+| Kani on the real core | M1 | `h_init`, `h_step_*` (5 parts each), `h_raw_*`, `h_read`, `h_bmc_*`, `h_ref_*`, `h_cut_*` green; `h_canary` fails; every cover satisfied; 34 core mutants killed and the 2 equivalent ones survive, in plain mode and under Kani (§6). |
+| Kani bounds | §6.3 | CUT-1 (`h_cut_*`), CUT-2 (`kani/CUTOFF.md`, on paper), U-1 (`kani-loops.py`, job `loops`). Open: request/approve `LogFull` needs the M2 `Sparse` harnesses. |
+| TLA+ refined by Kani | M1.5 | TLC safety and liveness, Apalache inductive step, witnesses, REF-1..5, 15 spec mutants killed (§17). TLC pinned to 1.7.4. |
+| Lean | M1.6 | `Inv`, the step properties and TR-1/2/3 proved for states and runs of every size; MC-4 and REF-5L tie it to TLC and the core (§18). |
+| Prolog requirements oracle | M4 | C-1..C-5, C-2t, C-7..C-10 pass; MC-1 51,568 states; MC-2 agrees both ways; MC-3 (Prolog graph = TLC graph) nightly. C-6 waits on M3 (§8). |
+| Ghost-store harnesses | M2 | Not started. |
+| Shell and store | M3 | Not started. F-15 rows to rewrite first. |
+| Verus | M5 | Not started. Path B superseded by §18; path A spike is a pending decision. |
+| Sandbox | M6 | Not started. Every `ASM-*` is `unverified`. |
+| Deployment | M7 | Not started. |
+
+**Statuses.** No K or V property has left `in-progress`: §12 requires a
+named spec reviewer (`[review] spec_reviewer`), and none is recorded. The
+proofs above pass in CI; `status.toml` will say so once that sign-off lands.
+
+**Next, in blocking order.** Re-pin to trust-framework `main` (OQ-1); spec
+reviewer sign-off plus the `status-lint` job; M2; M3 (fixes the F-15 drift,
+unblocks C-6); M6; M7. Decisions still open: who reviews the spec, Lean L2
+(mechanise `CUTOFF.md`), the Verus path A spike, the testnet deployment for
+M7, OQ-4, OQ-5, OQ-8, and what (if anything) to submit to near-proof-arena.
+
+*Planning history.* The plan was written before any tool could be installed;
+the `[conf: …]` tags in this document date from then. Against the original
+pin it ran the core's 21 tests and 29 hand-seeded mutants (27 killed, 2
+equivalent, F-14) offline.
 
 ---
 
@@ -86,16 +108,16 @@ only if "formally verified" will be claimed externally.
 - **`approval-core`:**
   - Functions: `add_principal`, `revoke_key`, `authenticate` (private,
     covered through its callers), `live_agent_registration` (private),
-    `request_action`, `approve`, `request_status`, `approval`, `approvals`,
-    `ActionRequest::proof`.
-  - `ApprovalError`: all 16 variants and their messages.
+    `request_action`, `approve`, `reject`, `request_status`, `status_of`,
+    `proof_revocations`, `approval`, `approvals`, `ActionRequest::proof`.
+  - `ApprovalError`: all 17 variants and their messages.
   - Constants: `MAX_ACTION_LEN`, `MAX_PENDING_PER_KEY`, `DEFAULT_PAGE_SIZE`,
     `MAX_PAGE_SIZE`.
   - The `Store` trait contract, and `MemStore` as the harness store.
 - **`approval-contract`:**
   - The `Store` impl.
   - `caller()`, `now()` and `ok()`.
-  - All 13 `#[near]` methods.
+  - All 16 `#[near]` methods (13 before PR #15; SH-11 still says 13, F-15).
   - Events, views and conversions.
   - Init and deposit handling.
   - Storage layout.
@@ -114,8 +136,8 @@ only if "formally verified" will be claimed externally.
 - Economics and liveness. The contract stays funded only by operations. The
   pending cap bounds agent-driven growth, but approved and void requests
   accumulate.
-- Features the contract deliberately lacks: rejection, expiry, M-of-N, key
-  events, ownership transfer, upgrade.
+- Features the contract deliberately lacks: expiry, M-of-N, ownership
+  transfer, upgrade. (Rejection and key events were added in PR #15.)
 - What an `action` means, and how UIs render it (ASM-DISPLAY).
 - Owner honesty (ASM-OWNER).
 - Off-chain consumers such as `trust-framework/ledger`.
@@ -238,8 +260,8 @@ Fixed in `3426c92` (PR #15):
 | F-6 | `revoke_key` calls `remove_principal` before knowing the key exists. The core's "no writes on `Err`" holds only because removing an absent key is a no-op (L-REMOVE-ABSENT). On-chain the call panics before any flush, so nothing is written. | ST-2 records it. Optionally reorder upstream (OQ-5). |
 | F-7 | `approve`'s `LogFull` branch is unreachable under `Inv`: a pending request implies `#L < #R ≤ MAXU`. | Kept as defence in depth. LEM-3. |
 | F-9 | `predecessor == signer` also admits code deployed on the signer's own account. | DEP-1 requires registered keys to be function-call keys with receiver `C`. RT-SELFACCT. |
-| F-10 | **formalver tooling defects:** <br>(a) `run-prolog.sh` ends with `\|\| true` and runs `-g "run_tests, halt."`; a failing `run_tests` falls through to the toplevel, which exits 0 at EOF. Failures never fail the script. <br>(b) `run-verus.sh` and the README's direct `verus` command omit `--cfg 'feature="verus"'`, so ironclaw's `cfg(feature="verus")` spec and proof modules are never compiled [conf: high]. The README's `./tools/get-z3.sh` lives under `source/` in the Verus repo. <br>(c) ironclaw proofs take their conclusion as a `requires`. <br>(d) ironclaw's gitlink `d313f44` ≠ recorded pin `34550ad`. <br>(e) No CI. | M0 fixes (a), (b) and (e), and decides (d) (OQ-6). Rule for this project: no proof assumes its conclusion. |
-| F-15 | PR #15 changes the shell: a `reject` method, `action_rejected`, `key_added` and `key_revoked` events, `agent_key_revoked_at` / `approver_key_revoked_at` on proof views, `get_revocation`, and a `v` storage prefix for revocations. SH-4..SH-8, SH-10, SH-11 (export count), C-4, ST-5 and RES-1 still describe the `5736251` shell. | Rewrite them at M3, before any is checked. The core-level properties (§5.1–5.5) are already updated. |
+| F-10 | **formalver tooling defects:** <br>(a) `run-prolog.sh` ends with `\|\| true` and runs `-g "run_tests, halt."`; a failing `run_tests` falls through to the toplevel, which exits 0 at EOF. Failures never fail the script. <br>(b) `run-verus.sh` and the README's direct `verus` command omit `--cfg 'feature="verus"'`, so ironclaw's `cfg(feature="verus")` spec and proof modules are never compiled [conf: high]. The README's `./tools/get-z3.sh` lives under `source/` in the Verus repo. <br>(c) ironclaw proofs take their conclusion as a `requires`. <br>(d) ironclaw's gitlink `d313f44` ≠ recorded pin `34550ad`. <br>(e) No CI. | M0 fixed (a) and (e). (b) is still open in `run-verus.sh`; it matters from M5 or for ironclaw. (d): `check-pin.sh` is per project and CI runs it for near-approval only (OQ-6). Rule for this project: no proof assumes its conclusion. |
+| F-15 | PR #15 changes the shell: a `reject` method, `action_rejected`, `key_added` and `key_revoked` events, `agent_key_revoked_at` / `approver_key_revoked_at` on proof views, `get_revocation`, and a `v` storage prefix for revocations. SH-4..SH-8, SH-10, SH-11 (export count: 16 at `main`, the row says 13), C-4, ST-5, RES-1 and requirement D11 ("no rejection") still describe the `5736251` shell. | Rewrite them at M3, before any is checked. The core-level properties (§5.1–5.5), the TLA+ model (§17.6) and the Lean model are already updated. |
 | F-16 | `insert_revocation` is "written at most once per id" by contract, and the stores disagree otherwise: `MemStore` keeps the first write, the contract's `LookupMap` the last. The core writes `P(k).reg` on revoke, which INV-11 keeps out of `V`, so the case is unreachable from `Init`. | INV-11/INV-12 prove the law holds on reachable states. ST-2 records the call. |
 | F-14 | Two equivalent mutants. In `live_agent_registration`, dropping the role check or the account check survives all tests: under INV-8 both are implied by `active_from ≤ id`. They are kept as defence in depth. | LEM-4 proves the redundancy, so the equivalence is established and not merely assumed. |
 
@@ -533,10 +555,10 @@ opaque newtypes `Acct(u8)` and `Key(u8)` that implement only `Clone`,
 | `checks.rs` / `proofs.rs` / `plain.rs` | Harness bodies; `#[kani::proof]` wrappers; random-mode tests. |
 | `src.rs` | **Dual mode.** Harness bodies are written against a `Src` trait. `Sym` uses `kani::any`/`assume`: **the proof**. `Rng` uses xorshift with hints toward `Inv` states: **not a proof**. Plain mode debugs specs in seconds and gates CI without Kani. `kani/kani-stub/` lets `RUSTFLAGS="--cfg kani --cfg kani_stub" cargo check` type-check `proofs.rs`. |
 
-During planning, a plain-mode prototype of this design (about 1,150 lines) was
-validated against the pre-`5736251` core API: 11/11 tests passed and it killed
-12/12 seeded mutants. It is **not committed**. M1 implements the design
-against the pinned API.
+M1 implements this design against the pinned API (results and run times in
+[`kani/RESULTS.md`](kani/RESULTS.md)). The ghost stores (`ghost.rs`: `Sparse`, `Window`,
+`Counting`) are M2 and not written yet. A plain-mode prototype from planning,
+against the pre-`5736251` API, was not committed.
 
 ### 6.2 Harnesses and covers
 
@@ -627,6 +649,10 @@ seeded against the upstream suite during planning (27/27 killed).
 ---
 
 ## 7. Verus (M5): real code first, model as fallback
+
+**Status (2026-10-14): not started; the spike is a pending decision.**
+`verus_min_verified = 0`. Path A is the only route to `evidence = proof` on
+the real code.
 
 **Spike (2 days).** Wrap a copy of `approval-core` in `verus!` (a "verified
 twin"). Try to verify `request_action`, `approve`, `approvals`,
@@ -896,6 +922,12 @@ M3 run in parallel. Each milestone ends by updating the statuses it lists.
 **Total: M0–M7 about 25–39 days.** Kani precedes Verus because it checks the
 deployed code itself and buys the most assurance per day.
 
+**Progress (2026-10-14).** M0, M1.5, M1.6 and M4 are done, except C-6 (waits
+on M3). M1 is done except its "spec reviewer sign-off" line, so its statuses
+stay `in-progress`. M2, M3, M5, M6 and M7 have not started. Remaining effort
+on the critical path (re-pin, review, M2, M3, M6) is about 6–10 days plus
+the review; M7 adds 2 and needs a testnet decision.
+
 ## 14. CI (`.github/workflows/near-approval.yml`)
 
 | Job | Trigger | Fails on |
@@ -903,6 +935,7 @@ deployed code itself and buys the most assurance per day.
 | `pin` | PR, push | gitlink ≠ pin; hash drift; release profile without `overflow-checks = true` or borsh feature gating (ASM-COMPILE). Every other job depends on it. |
 | `plain` | PR, push | any failure; drift in generated `code_facts.pl` |
 | `kani` | PR, push, nightly, manual (one job per harness or step part, 38 jobs; about 110 runner-minutes on the self-hosted Macs; 120 min per harness) | any failure; any unsatisfied cover (the `covers` job, across jobs); `h_canary` passing |
+| `loops` | PR, push | U-1: a reachable loop in a harness needs more than its `--default-unwind` |
 | `mutants` | weekly | a core or shell mutant survives; an equivalent mutant is killed |
 | `tla` | PR, push | any §17.3 check failing; a witness or the unfair liveness run passing; a spec mutant surviving |
 | `prolog` | PR, push | any failure; drift in `conformance/traces`; MC-1/MC-1s state count below the floor |
@@ -915,7 +948,14 @@ deployed code itself and buys the most assurance per day.
 | `deploy-check` | manual; weekly | any DEP or VER violation |
 
 trust-framework is private, so CI needs a deploy key or fine-grained token for
-the submodule (OQ-7, resolved in M0).
+the submodule (OQ-7, resolved in M0: secret `CROSS_REPO_BUILD_KEY` via
+`tools/scripts/ci-submodule.sh`).
+
+**Live (2026-10-14):** `pin`, `plain`, `loops`, `kani`, `covers`, `tla`,
+`lean`, `prolog`, `mutants` and `upstream-watch`, on self-hosted macOS
+runners (`vars.CI_RUNNER`). The Kani matrix runs in full on every PR push.
+Not yet built: `verus` (M5), `near-unit` (M3), `sandbox` (M6), `status-lint`,
+`deploy-check` (M7).
 
 ## 15. Risks
 
@@ -933,18 +973,21 @@ the submodule (OQ-7, resolved in M0).
 
 ## 16. Open questions
 
-1. **OQ-1:** Merge `claude/near-approval-contract-qin858` and re-pin to the
-   merge commit.
+1. **OQ-1:** *Half done.* PR #15 merged to trust-framework `main` as
+   `cbb16dd` (2026-10-09). Still to do: re-pin the submodule and
+   `status.toml` to `main` and recompute `[source_hashes]`; under
+   `contracts/approval/` only `README.md` changed.
 2. **OQ-2 (F-12):** *Answered in `3426c92` (R-8).*
 3. **OQ-3 (F-13):** *Answered in `3426c92`: upstream CI (R-9).*
 4. **OQ-4 (F-4):** Keep `MAX_ACTION_LEN = 2048` behind the RES-2 test, or
    lower it?
 5. **OQ-5 (F-6):** Reorder `revoke_key` to check before removing, or keep it
    documented?
-6. **OQ-6 (F-10d):** Fix ironclaw's pin drift in the M0 PR, or scope
-   `check-pin.sh` per project?
-7. **OQ-7:** CI access to private trust-framework; runners with Docker (for
-   reproducible builds) and an archival RPC (for VER-2/3).
+6. **OQ-6 (F-10d):** *Scoped per project:* CI runs `check-pin.sh` for
+   near-approval only. Ironclaw's drift is unfixed.
+7. **OQ-7:** CI access to private trust-framework (*resolved in M0*);
+   runners with Docker (for reproducible builds) and an archival RPC (for
+   VER-2/3) are still open, needed at M6 and M7.
 8. **OQ-8:** Is separation by account id enough, or should the owner account
    be barred from holding agent or approver keys? MC-1 can flag it.
 9. **OQ-9:** Admin events (F-8): *answered in `3426c92` (R-7); C-4 and the

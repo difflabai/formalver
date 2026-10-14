@@ -71,3 +71,20 @@ The same patterns appear in both layers:
 - **Verus:** Pattern constant in the model with `Severity::Critical`
 
 This intentional duplication allows each layer to verify different aspects. Prolog checks that the *set of requirements* makes sense. Verus checks that the *code processing those patterns* is correct.
+
+## near-approval: a deeper stack
+
+The two-layer picture above is ironclaw's. near-approval
+([strategy](../projects/near-approval/strategy.md)) uses more layers, each
+tied to the next by a mechanical check rather than by review:
+
+| Layer | Tool | Role | Linked by |
+|---|---|---|---|
+| Requirements oracle | Prolog (Scryer) | `step/4` written from the requirements, not the code; C-checks on the requirement tables | MC-2 (traces vs the real core), MC-3 (graph = TLC's) |
+| Code-shaped model | TLA+ (TLC, Apalache) | every event sequence, liveness under fairness | REF-1..5: Kani proves the real core refines it |
+| Model at every size | Lean 4 | `Inv`, step and run properties without a size bound | MC-4 (graph = TLC's), REF-5L (core traces) |
+| Real code, bounded | Kani | one step of the deployed `approval-core` from any `Inv` state within the bounds; CUTOFF.md argues those bounds suffice | — |
+| Shell, runtime, deployment | near-sdk tests, near-workspaces sandbox, deploy checks | planned (M3, M6, M7) | — |
+
+Verus (M5 path A) would replace the bounded step for the real code; it has
+not started.
