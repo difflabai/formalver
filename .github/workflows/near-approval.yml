@@ -45,13 +45,39 @@ env:
 # keeps HOME between jobs and has no sudo: the steps below avoid
 # `rustup default`, ~/.gitconfig and ~/.ssh, and the hosted-only swap setup is
 # skipped there.
+#
+# On pull requests each job below pin runs only when the PR changes a path
+# it depends on (tools/scripts/ci-areas.sh); a skipped job reports as
+# skipped, which branch protection counts as passing. Pushes to main, the
+# schedules and manual dispatch run every job.
 jobs:
   pin:
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    outputs:
+      plain: ${{ steps.areas.outputs.plain }}
+      loops: ${{ steps.areas.outputs.loops }}
+      kani: ${{ steps.areas.outputs.kani }}
+      tla: ${{ steps.areas.outputs.tla }}
+      lean: ${{ steps.areas.outputs.lean }}
+      prolog: ${{ steps.areas.outputs.prolog }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # The PR merge commit and its first parent (the base tip), for the
+          # changed paths.
+          fetch-depth: 2
+      - name: Jobs this change needs
+        id: areas
+        run: |
+          tools/scripts/test-ci-areas.sh
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && git rev-parse -q --verify HEAD^2 >/dev/null; then
+            git diff --name-only HEAD^1 HEAD | CI_AREAS_EXPLAIN=1 tools/scripts/ci-areas.sh >"$RUNNER_TEMP/areas"
+          else
+            tools/scripts/ci-areas.sh --all </dev/null >"$RUNNER_TEMP/areas"
+          fi
+          cat "$RUNNER_TEMP/areas" >>"$GITHUB_OUTPUT"
+          { echo '### Jobs this change needs'; sed 's/^/- /' "$RUNNER_TEMP/areas"; } >>"$GITHUB_STEP_SUMMARY"
       - name: Check out trust-framework at the pin
         env:
           CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
@@ -76,6 +102,7 @@ jobs:
 
   plain:
     needs: pin
+    if: needs.pin.outputs.plain == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
@@ -113,7 +140,9 @@ jobs:
     # U-1: every loop of every Kani harness has a bound derived from a
     # constant, at most its harness unwind (tools/scripts/kani-loops.py).
     needs: pin
-    if: github.event_name != 'schedule' || github.event.schedule == '17 3 * * *'
+    if: >-
+      needs.pin.outputs.loops == 'true' &&
+      (github.event_name != 'schedule' || github.event.schedule == '17 3 * * *')
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
@@ -144,8 +173,11 @@ jobs:
 
   kani:
     needs: pin
-    # Every push and pull request, plus the nightly schedule.
-    if: github.event_name != 'schedule' || github.event.schedule == '17 3 * * *'
+    # Every push to main, pull requests that change what it checks, and the
+    # nightly schedule.
+    if: >-
+      needs.pin.outputs.kani == 'true' &&
+      (github.event_name != 'schedule' || github.event.schedule == '17 3 * * *')
     # CBMC peaks at 6.5 to 9.5 GB on the step harnesses; this repository's
     # default runner has 2 CPUs and 7.9 GB. Set the KANI_RUNNER repository
     # variable to a larger runner label (and KANI_SWAP_GB to 0) to avoid
@@ -279,6 +311,7 @@ jobs:
 
   tla:
     needs: pin
+    if: needs.pin.outputs.tla == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 240
     steps:
@@ -332,6 +365,7 @@ jobs:
     # audit and canaries, REF-5L (real-core traces on the Lean machine),
     # MC-4 (Lean graph = TLC graph) and the spec mutants. About 8 min.
     needs: pin
+    if: needs.pin.outputs.lean == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 60
     steps:
@@ -388,6 +422,7 @@ jobs:
     # directions. MC-3 (the full graph comparison, about 30 min) runs
     # nightly and on manual dispatch.
     needs: pin
+    if: needs.pin.outputs.prolog == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 90
     steps:
