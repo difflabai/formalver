@@ -31,16 +31,32 @@ hash() {
 }
 
 name="lean-$LEAN-$plat"
-if [ ! -x "$cache/$name/bin/lake" ]; then
-  curl -fsSL --retry 4 --retry-all-errors -o "$cache/$name.zip.part" \
+dest="$cache/$name-${sha:0:12}"
+# Jobs can share LEAN_CACHE (a self-hosted runner's tool cache), so the zip
+# is fetched and unpacked in a per-process temp directory and the toolchain
+# is installed by renaming the complete tree to $dest: no job ever sees a
+# partial one. Temp directories older than an hour are left-overs of
+# cancelled jobs.
+find "$cache" -maxdepth 1 -name "$name.??????" -mmin +60 -exec rm -rf {} +
+if [ ! -x "$dest/bin/lake" ]; then
+  tmp=$(mktemp -d "$cache/$name.XXXXXX")
+  trap 'rm -rf "$tmp"' EXIT
+  curl -fsSL --retry 4 --retry-all-errors -o "$tmp/$name.zip" \
     "https://github.com/leanprover/lean4/releases/download/v$LEAN/$name.zip"
-  if [ "$(hash "$cache/$name.zip.part")" != "$sha" ]; then
-    echo "sha256 mismatch for $name.zip" >&2
-    rm -f "$cache/$name.zip.part"
+  if [ "$(hash "$tmp/$name.zip")" != "$sha" ]; then
+    echo "sha256 mismatch for $name.zip (got $(hash "$tmp/$name.zip"), pinned $sha)" >&2
     exit 1
   fi
-  rm -rf "$cache/$name"
-  unzip -q "$cache/$name.zip.part" -d "$cache"
-  rm -f "$cache/$name.zip.part"
+  unzip -q "$tmp/$name.zip" -d "$tmp"
+  # If another job installed $dest first, keep its tree: either the rename
+  # fails, or mv moves this tree inside $dest under its unique temp name,
+  # from where it is removed.
+  uniq=$(basename "$tmp")
+  mv "$tmp/$name" "$tmp/$uniq"
+  if [ ! -e "$dest" ]; then
+    mv "$tmp/$uniq" "$dest" 2>/dev/null || true
+    rm -rf "${dest:?}/$uniq"
+  fi
+  [ -x "$dest/bin/lake" ] || { echo "could not install $dest" >&2; exit 1; }
 fi
-echo "$cache/$name/bin"
+echo "$dest/bin"
