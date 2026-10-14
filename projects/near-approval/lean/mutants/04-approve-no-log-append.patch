@@ -1,0 +1,11 @@
+--- a/ApprovalLean/Machine.lean
++++ b/ApprovalLean/Machine.lean
+@@ -301,7 +301,7 @@
+         requests := s.requests.set i
+           { r with appr := true, aidx := s.nl, aacct := signer, akey := k,
+                    arid := (prin cfg s k).rid },
+-        log := s.log ++ [i],
++        log := s.log,
+         principals := decidePrincipals s r,
+         ghost := decideGhost cfg s signer k i r }
+   | .reject _ signer k i =>

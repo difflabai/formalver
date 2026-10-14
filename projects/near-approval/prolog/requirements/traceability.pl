@@ -65,6 +65,14 @@ trace_row('D15', ['TLA-WIT', 'REF-1', 'REF-2', 'REF-3', 'REF-4', 'REF-5', 'C-2t'
 % (kani/CUTOFF.md) and the loop-bound derivation (tools/scripts/kani-loops.py).
 trace_row('D15', ['CUT-1', 'CUT-2', 'U-1']).
 
+% Strategy 18 (Lean): D6/D7/D8/D9 and TR-1/2/3 at every size, and the Lean
+% machine's links to the code and the other models (D15).
+trace_row('D6',  ['LEAN-IND', 'LEAN-STEP', 'LEAN-TR']).
+trace_row('D7',  ['LEAN-IND', 'LEAN-STEP', 'LEAN-TR']).
+trace_row('D8',  ['LEAN-IND', 'LEAN-STEP']).
+trace_row('D9',  ['LEAN-IND']).
+trace_row('D15', ['LEAN-GUARD', 'LEAN-WIT', 'REF-5L', 'MC-4']).
+
 %%% IDs in this file that status.toml does not have yet (decision 'C-9-new-ids').
 status_pending_id(_) :- fail.
 
@@ -160,6 +168,13 @@ property('REF-4', kani, "Time irrelevance (A7): tla.rs reads no BlockTime, so RE
 property('CUT-1', kani, "Footprint (kani/CUTOFF.md): each call reads and writes at most the keys, request positions, log slots and revocation records of its row; tracking is transparent").
 property('CUT-2', review, "Cutoff: given CUT-1, harness state bounds (CAP_P, CAP_R, CAP_V) are sufficient for REF-1..3 at every size, except E1 (pending at MAXP) and E2 (counters at u64::MAX), which raw and Sparse harnesses cover; request/approve LogFull pending M2 Sparse").
 property('U-1', review, "Every loop in every harness's goto program has a bound derived from a constant, and no reachable loop needs more than its harness unwind").
+property('LEAN-IND', lean, "Lean: Init => Inv and Inv /\\ Next => Inv' for states of every size, every MaxPending, any key, account and payload types; Inv holds in every reachable state").
+property('LEAN-STEP', lean, "Lean: every call from an Inv state satisfies StepProps (HIST-1/2/3/7/8/9/10), at every size").
+property('LEAN-TR', lean, "Lean: over every run from a reachable state, decisions are final (TR-2), Void is terminal (TR-3), request content, log prefix, registration counter and revocations only grow; TR-1 provenance").
+property('LEAN-GUARD', lean, "Lean: each error operator returns the first failing guard of a list whose codes are TLA+'s GuardOrder; LogFull never returned").
+property('LEAN-WIT', lean, "Non-vacuity: approved, rejected, void, revived-still-void and pending-cap states reachable in the Lean machine").
+property('REF-5L', plain, "The real core's MC-2 traces replayed on the Lean machine: every result and post-store equal").
+property('MC-4', lean, "Graph equivalence: the Lean machine and TLC export the full labelled reachable graph of the MC_Graph universe; stores, rejected calls and edges are equal").
 property('REF-5', plain, "Trace validation: 60 x 80-call core traces equal tla.rs on every step, and TLC accepts each as a behaviour of ApprovalCore.tla (>= 5 revival attempts, >= 20 rejections and revocations)").
 % [modules.contract_store]
 property('ST-4', difftest, "Real ApprovalContract store refines MemStore over 10k x 50 random ops, persisted and reloaded every step").

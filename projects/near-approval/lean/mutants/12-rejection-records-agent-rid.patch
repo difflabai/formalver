@@ -1,0 +1,11 @@
+--- a/ApprovalLean/Machine.lean
++++ b/ApprovalLean/Machine.lean
+@@ -311,7 +311,7 @@
+     | some r =>
+       { s with
+         requests := s.requests.set i
+-          { r with rj := true, racct := signer, rkey := k, rrid := (prin cfg s k).rid },
++          { r with rj := true, racct := signer, rkey := k, rrid := r.rid },
+         principals := decidePrincipals s r,
+         ghost := decideGhost cfg s signer k i r }
+ 

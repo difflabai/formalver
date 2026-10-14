@@ -73,7 +73,7 @@ reproducible build of the pin and the assumptions in §3 hold:
 |---|---|---|---|
 | **1. Code-level core** | M0–M3 | 8–13 days | Bounded proofs (Kani) of every transition contract, invariant step, history and read property **on the real `approval-core`**, with counters and paging over all `u64`. Plus a differential store test and exact shell tests. The most assurance per day: it checks the logic that is actually deployed. |
 | **2. Operational** | M4, M6, M7 | 8–11 days | Requirement consistency and an independent reference semantics (Prolog). Runtime assumptions tested on the reproducible wasm (sandbox). Deployment lock and verifier rules. |
-| **3. Unbounded** | M5 | 9–15 days | Verus on the real core, removing the small-scope step. If the spike fails, Verus on a spec machine instead, which yields model-proofs only. |
+| **3. Unbounded** | M1.6, M5 | 12–19 days | Lean (M1.6, §18): the model's safety at every size. Verus on the real core (M5), removing the small-scope step for the code. If the spike fails, §18 is the unbounded result, as model-proofs. |
 
 Recommendation: do Tier 1 now. Tier 2 before any mainnet deployment. Tier 3
 only if "formally verified" will be claimed externally.
@@ -285,7 +285,8 @@ Fixed in `3426c92` (PR #15):
 | **K** | Kani on the real `approval-core` (`MemStore<u8,u8>` or a ghost store) | `bounded-proof` |
 | **Kp** | Same harness bodies as random tests (plain `cargo test`) | `test` |
 | **VC** | Verus on the real core (M5 path A) | `proof` |
-| **VM** | Verus spec machine (M5 path B) | `model-proof` (+ ASM-MODEL) |
+| **VM** | Verus spec machine (M5 path B; superseded by **L**) | `model-proof` (+ ASM-MODEL) |
+| **L** | Lean theorems about the TLA+ model at every size (§18) | `model-proof` |
 | **P / PM** | Prolog consistency check / bounded model check or trace replay | `check` / `model-check` or `test` |
 | **D** | near-sdk unit or differential test (`near-tests/`) | `test` |
 | **S** | near-workspaces sandbox on the reproducible wasm | `test` |
@@ -663,7 +664,10 @@ friction is:
   - wasm growth ≤ 5%;
   - maintainer agreement.
 
-**Path B (fallback; 7–10 days).** If the spike fails, write a spec machine in
+**Path B (superseded by §18).** The Lean layer (§18) is a model proof of the
+same machine, linked to TLA+, the core and Prolog mechanically (MC-4, REF-5L)
+rather than by shared comments, so path B is not planned any more; if the
+spike fails, M5 ends and §18 stands. The original plan, for reference: write a spec machine in
 `verus/src/approval/{machine,machine_spec,machine_proof}.rs`, following the
 formalver three-file pattern:
 - `err_of`, `effect`, `next` and `run` over `AbsState` (principals as a `Map`,
@@ -805,7 +809,7 @@ formalver/
 ├── .gitmodules         # + projects/near-approval/source-mirror (shallow)
 ├── .github/workflows/near-approval.yml
 ├── tools/
-│   ├── versions.env    # KANI, TLA2TOOLS, APALACHE, VERUS, SCRYER, CARGO_NEAR, NEAR_SANDBOX, RUST_TOOLCHAIN
+│   ├── versions.env    # KANI, TLA2TOOLS, APALACHE, LEAN, VERUS, SCRYER, CARGO_NEAR, NEAR_SANDBOX, RUST_TOOLCHAIN
 │   └── scripts/        # run-prolog.sh (fixed), run-verus.sh (fixed), run-kani.sh, run-tla.sh,
 │                       # check-pin.sh, check-status.sh, check-hygiene.sh, wasm-surface.sh
 └── projects/near-approval/
@@ -815,6 +819,7 @@ formalver/
     ├── conformance/traces/            # generated, checked in
     ├── kani/{src,tests,mutants,kani-stub}/
     ├── tla/{*.tla,*.cfg,mutants}/     # §17; build/ is generated
+    ├── lean/{ApprovalLean,canary,mutants}/  # §18; .lake/ is generated
     ├── verus/                         # M5: twin + erasure check + REWRITES.toml (A) or machine (B);
     │                                  # TRUSTED.toml; canary/
     ├── near-tests/{src,tests,mutants}/
@@ -833,7 +838,7 @@ The ironclaw format is kept. **Status values** are unchanged:
 |---|---|
 | `id` | catalogue ID |
 | `evidence` | the target evidence: `proof | model-proof | bounded-proof | model-check | test | review | check` |
-| `layer` | primary technique: `kani | plain | verus | prolog | tla | unit | difftest | sandbox | wasm-check | review | deploy-check` |
+| `layer` | primary technique: `kani | plain | verus | prolog | tla | lean | unit | difftest | sandbox | wasm-check | review | deploy-check` |
 | `cross` | cross-check techniques |
 | `harness` | the `// PROP:` tag must appear in it before the property leaves `unverified` |
 | `depends_on` | paths relative to `upstream_path` |
@@ -846,6 +851,7 @@ The ironclaw format is kept. **Status values** are unchanged:
 - `verus` → `proof` or `model-proof`
 - `prolog` → `check`, `model-check` or `test`
 - `tla` → `model-check` (TLC) or `bounded-proof` (Apalache inductive step)
+- `lean` → `model-proof` (theorems about the model) or `model-check` (MC-4)
 - `unit`, `difftest` → `test`
 - `sandbox` → `test` or `check`
 - `wasm-check`, `deploy-check` → `check`
@@ -879,10 +885,11 @@ M3 run in parallel. Each milestone ends by updating the statuses it lists.
 | **M0** | Bootstrap and gates | • **OQ-7 resolved:** a deploy key or token lets the `pin` job check out the private submodule. <br>• Submodule at the provisional pin, `[source_hashes]` filled. <br>• Root `exclude` added; a clone without submodules still builds ironclaw. <br>• F-10 fixes: `run-prolog.sh` runs `-g "(catch(run_tests,E,(write(E),nl,halt(2))) -> halt(0) ; halt(1))" </dev/null` without `\|\| true` and exits non-zero if any file fails; `run-verus.sh` passes `--cfg 'feature="verus"'` and enforces the floor; `check-pin.sh` works and reports the ironclaw drift (OQ-6 decided). <br>• `tools/versions.env` pins every tool and `RUST_TOOLCHAIN`. CI skeleton green. <br>• **F-13 gate:** `cargo test -p approval-contract` passes, and `cargo near build non-reproducible-wasm` with `RUST_TOOLCHAIN` produces a wasm that deploys to the pinned near-sandbox and answers `get_owner` after `new`. <br>• OQ-1..5 raised upstream; OQ-3 answered. | 1–2 |
 | **M1** | Kani step, raw, read and BMC harnesses on the real core | • Plain mode passes in CI. <br>• Under Kani (unwinding assertions on), `h_init`, `h_step_*`, `h_raw_*`, `h_read`, `h_bmc_from_init` pass and `h_canary` fails, with every cover in §6.2 satisfied. <br>• Each harness takes < 20 min, or the §6.3 ladder is applied and recorded. <br>• Every §6.4 mutant assigned to an M1 harness is killed, and the 2 equivalent ones survive. <br>• Every K property has a PROP tag. <br>• Spec reviewer sign-off recorded. <br>• **Statuses:** TX, INV-1..10, LEM, HIST, TR-1..4, TR-6, RD-1/2/5/7 and ROB-1 become `verified-with-assumptions` (`bounded-proof`). | 4–6 |
 | **M1.5** | TLA+ model refined by Kani (§17) | • `run-tla.sh near-approval safety liveness apalache trace mutants` passes: TLA-SAFE, TLA-IND, TLA-LIVE-1/2, witnesses, REF-5, every spec mutant killed. <br>• `h_ref_*` pass under Kani with covers satisfied. <br>• **Statuses:** TLA-*, REF-1..5 updated. | 2–3 |
+| **M1.6** | Lean (§18) | • `run-lean.sh near-approval` passes: LEAN-IND, LEAN-STEP, LEAN-TR, LEAN-GUARD, LEAN-WIT with no `sorry`, axiom audit clean, canaries fail, REF-5L and MC-4 equal. <br>• Every Lean spec mutant killed. <br>• **Statuses:** LEAN-*, REF-5L, MC-4 updated; ASM-TLA-SCOPE narrowed to liveness. | 3–4 |
 | **M2** | Ghost-store harnesses | • `h_page_arith`, `h_proto_*`, `h_count_*`, `h_refine_*`, `h_store_laws_*` and `h_action_len` pass, with their covers satisfied. <br>• Every §6.4 mutant except the must-survive pair is killed by Kani and by plain mode. <br>• RD-4 plain check passes (log ≤ 250; `l ∈ {1, 2, 99, 100, 101, 200}`). <br>• **Statuses:** INV-0, TR-5, RD-3, RD-4, RD-6, ROB-2..4 and ST-1..3 updated. | 1–2 |
 | **M3** | near-sdk shell and store | • `store_diff.rs` (10k × 50, with reload) passes. <br>• `shell.rs` passes. <br>• All shell mutants are killed. <br>• Golden Borsh bytes are committed. <br>• `wasm-surface.sh` diff on the non-reproducible build is clean. <br>• `api_facts.pl` generated. <br>• **Statuses:** ST-4..6, SH-1..8, SH-11, SH-12, RES-1 and RES-2 updated. | 2–3 |
 | **M4** | Prolog | • `run-prolog.sh near-approval` exits 0 (strict). <br>• C-1..10 pass, or each failure has a recorded decision (C-4/F-8). <br>• MC-1 and MC-1s meet the §5.11 criteria, each in < 5 min, and `mc1_state_floor` is recorded. <br>• Traces checked in; MC-2 replay passes on the core and `spec.rs`. <br>• `code_facts.pl` regeneration shows no diff. <br>• **Statuses:** C-1..10, MC-1 and MC-2 updated. | 3–4 |
-| **M5** | Verus (2-day spike, then path A or B) | • Spike decision recorded. <br>• `verus/canary/false_lemma.rs` fails. <br>• **Path A:** the twin verifies with refinement `ensures` for every public core fn and `MemStore`; the erasure check passes; every `REWRITES.toml` entry has a passing Kani equivalence harness. Core properties become `verified-with-assumptions` / `proof`, with trusted ASM-IDENT, ASM-STRLEN and listed std specs. <br>• **Path B:** all lemmas in §7 are proved under the hygiene gate; spec mutants each break a lemma. Status becomes `verified-with-assumptions` / `model-proof` + ASM-MODEL. | 9–15 |
+| **M5** | Verus (2-day spike, then path A; path B superseded by §18) | • Spike decision recorded. <br>• `verus/canary/false_lemma.rs` fails. <br>• **Path A:** the twin verifies with refinement `ensures` for every public core fn and `MemStore`; the erasure check passes; every `REWRITES.toml` entry has a passing Kani equivalence harness. Core properties become `verified-with-assumptions` / `proof`, with trusted ASM-IDENT, ASM-STRLEN and listed std specs. <br>• **Path B:** all lemmas in §7 are proved under the hygiene gate; spec mutants each break a lemma. Status becomes `verified-with-assumptions` / `model-proof` + ASM-MODEL. | 9–15 |
 | **M6** | Sandbox | Needed F-12, resolved upstream (R-8). <br>• RT-* (including RT-TRACE and RT-BATCH), SH-9 and SH-10 pass on a pinned neard with the reproducible wasm. <br>• `wasm-surface.sh` diff on the reproducible build is clean. <br>• RES measured, with thresholds and both hashes recorded. <br>• RT-METATX outcome documented. <br>• `[assumptions]` statuses filled from observations. <br>• `cargo expand` review of SH-9/RD-6 signed off. <br>• **Statuses:** RT-*, SH-9, SH-10 and RES-3 updated. | 3–5 |
 | **M7** | Deployment and automation | • A testnet deployment with the DEP-1 lock batch and at least one agent key and one approver key registered; `check_deployment.sh` passes; `[deployment.testnet]` filled. <br>• `verifier_rules.pl` encodes VER-1..8; RT-SPOOF and a VER-8 check against the testnet proof demonstrate them. <br>• Every CI job live; pin-bump procedure documented; `docs/architecture.md` gains the Kani, shell and deployment layers. <br>• **Statuses:** DEP-1 and VER-1..8 updated. | 2 |
 
@@ -899,6 +906,7 @@ deployed code itself and buys the most assurance per day.
 | `mutants` | weekly | a core or shell mutant survives; an equivalent mutant is killed |
 | `tla` | PR, push | any §17.3 check failing; a witness or the unfair liveness run passing; a spec mutant surviving |
 | `prolog` | PR, push | any failure; drift in `conformance/traces`; MC-1/MC-1s state count below the floor |
+| `lean` | PR, push | a `sorry` or forbidden construct; an axiom beyond `propext`, `Classical.choice`, `Quot.sound`; a canary compiling; guard order ≠ `tla_facts.pl`; a REF-5L or MC-4 difference; a Lean spec mutant surviving |
 | `verus` | PR, push (from M5) | any error; count below the floor; canary verifies; a spec mutant verifies; hygiene |
 | `near-unit` | PR, push | any failure; lockfile version mismatch; export or import diff (non-reproducible build) |
 | `sandbox` | nightly; submodule bump; manual (from M6) | any failure; export or import diff (reproducible build); threshold exceeded |
@@ -919,7 +927,7 @@ the submodule (OQ-7, resolved in M0).
 | Runtime assumptions wrong (META, LIMITS, logs on failure) | Levelled assumptions; M6 tests; conditional statements |
 | Upstream churn (the contract is new) | Provisional pin; per-file staleness; weekly watch |
 | Point-in-time deployment checks miss a later key or code change | DEP-1 lock at deploy; VER-3 since `b₀`; VER-8 per proof; NEP-591 global-contract check |
-| Verus can't handle the real core | M5 path B; Tier 1 and Tier 2 keep full value without M5 |
+| Verus can't handle the real core | §18 proves the model at every size; Tier 1 and Tier 2 keep full value without M5 |
 | Tool pins conflict (Verus rustc vs cargo-near rustc) | Path A adoption gate; the twin is the steady state |
 | Everything except plain mode needs network access | CI-only jobs; plain mode works offline |
 
@@ -1019,7 +1027,8 @@ not help either, for the same reason.
 **What this does not give.** TLC and Apalache use small constants, and Kani
 proves REF only within its step bounds. The chain is "bounded model plus
 parametricity" (ASM-IDENT, ASM-MODEL), not an unbounded proof; M5 (Verus)
-removes the small-scope step for the code, not for the TLA+ constants.
+removes the small-scope step for the code, not for the TLA+ constants. §18
+(Lean) removes it for the TLA+ model's safety properties.
 
 ### 17.4 Running and CI
 
@@ -1072,3 +1081,110 @@ is unbroken exactly when its key still holds the id the request recorded,
 because ids are never reused. `RidLive` states that the core's `active_from`
 check decides the same thing, now over real state rather than a ghost.
 `live_agent_registration` is unchanged, so TR-3 and its mutant carry over.
+
+---
+
+## 18. Lean: the TLA+ model's safety at every size (M1.6)
+
+Every other layer is bounded somewhere. Kani steps from states of ≤ 3
+principals, requests, log entries and revocations (CUTOFF.md argues that is
+enough, on paper). TLC explores ≤ 3 requests, 2 keys, 3 accounts and one
+payload; Apalache's inductive step starts from ≤ 3 requests. The Lean layer
+proves the TLA+ model's safety properties for **states of every size**, with
+no bound on keys, accounts, requests, registrations or `MaxPending`. It
+replaces the optional TLAPS step CUT-3 of the bounds plan: TLAPS has no
+CI-friendly install and Lean is what near-proof-arena uses, so later arena
+work shares the toolchain.
+
+```text
+real core ⊑ tla.rs ≡ ApprovalCore.tla ≡ Lean machine ⊨ Inv, StepProps, TR-1/2/3   (every size)
+  Kani REF-1..4    REF-5        MC-4, REF-5L, LEAN-GUARD     LEAN-IND, LEAN-STEP, LEAN-TR
+```
+
+### 18.1 The model (`lean/`)
+
+| File | Contents |
+|---|---|
+| `ApprovalLean/Machine.lean` | `ApprovalCore.tla` transcribed: one Lean definition per TLA+ operator (named in its doc comment), `err` (the error operators, guards in the core's order), `effect` (the actions), `step` (a rejected call stutters), `Next`, `run`, `Reach`, statuses, `pend`. |
+| `ApprovalLean/Props.lean` | `ApprovalProps.tla` transcribed: `TypeOK`, INV-3..16, INV-5r, LEM-1/2, `Provenance`, `RidLive`, `Approvable` as the structure `Inv`; HIST-1/2/3/7/8/10 as `StepProps`. |
+| `ApprovalLean/Lemmas.lean` | the principal map, `countIdx` and per-action field lemmas |
+| `ApprovalLean/Inv/*.lean`, `Inductive.lean` | LEAN-IND: `inv_init`, one preservation theorem per action, `inv_next`, `inv_step`, `reach_inv` |
+| `ApprovalLean/StepProps.lean` | LEAN-STEP: `stepProps_next`, `stepProps_step` |
+| `ApprovalLean/Trace.lean` | LEAN-TR: `reach_run`, `tr1_provenance`, `tr2_decision_final`, `tr3_void_terminal`, `hist1_run`, `hist3_run`, `hist10_run` |
+| `ApprovalLean/Guard.lean` | LEAN-GUARD: `guardOrder` (TLA+'s `GuardOrder`), `err_eq_firstFail`, `guards_order`, `err_mem_guardOrder`, `err_ne_logFull` |
+| `ApprovalLean/Witness.lean` | LEAN-WIT: reachable approved, rejected, void, revived-still-void and pending-cap states (TR-5), by evaluation |
+| `ApprovalLean/Text.lean`, `Main.lean` | the `approval-lean` executable: `replay` (REF-5L), `graph` (MC-4), `guards` |
+| `Audit.lean`, `canary/`, `mutants/` | the hygiene gate (18.4) |
+
+**Representation**, each difference fixed by the abstraction the replay and
+graph tools apply before comparing:
+- `principals` is a finite map (an association list with distinct keys,
+  holding only registered principals); TLA+'s total function over `Keys` is
+  `prin s k`, which answers `NoPrincipal` for an absent key. With no `Keys`
+  constant, every theorem holds for **every key type**, finite or not;
+  accounts and payloads are type parameters too.
+- `revoked` is a duplicate-free list read as a set; `INV-15` counts it and
+  the map by length (`TypeOK` carries the two distinctness facts).
+- Request and log indices are 0-based (TLA+ sequences are 1-based).
+- Counters are `Nat` and `MaxPending` is a parameter, as in TLA+ (A6): the
+  theorems hold for every `MaxPending`, including the core's 16, so there is
+  no "scaled to 2" caveat.
+
+### 18.2 The link to the other layers
+
+| # | Link | Check |
+|---|---|---|
+| L1 | The Lean machine transcribes the TLA+ model (**ASM-LEAN-TLA**) | **MC-4**: `approval-lean graph` exports the labelled reachable graph of the MC_Graph universe in `graph_export.pl`'s format and `mc3.py` compares it with TLC's: stores, every rejected call with its error, every edge. With MC-3 (Prolog = TLC) this makes the three semantics one graph. **REF-5L**: the real core's MC-2 traces replayed on `step`. **LEAN-GUARD**: the guard list is `GuardOrder`, equal to `tla_facts.pl` (C-2t). |
+| L2 | The Lean theorems are about `Inv` and `StepProps` as TLA+ states them | `Props.lean` names each TLA+ conjunct; paired review; the spec mutants (18.4) |
+| L3 | The TLA+ model is the code's | unchanged: REF-1..5 (§17.2) |
+
+ASM-LEAN-TLA is the analogue of REF-5 for `tla.rs`: a transcription checked
+by equality on a finite graph and on traces, not proved. Its level is high:
+MC-4 compares every call in every state of a universe where every guard and
+every error fires, and REF-5L runs the real core's own traces.
+
+### 18.3 What is proved
+
+| ID | Theorem | TLA+ counterpart and its bound |
+|---|---|---|
+| LEAN-IND | `inv_init : Inv cfg init`; `inv_next : Inv cfg s → Next cfg s s' → Inv cfg s'`; hence `reach_inv : Reach cfg s → Inv cfg s` | TLA-IND (Apalache, arrays ≤ 3, `MaxPending = 2`), TLA-SAFE's state invariants (TLC, ≤ 3 requests) |
+| LEAN-STEP | `stepProps_next`, `stepProps_step`: every call from an `Inv` state satisfies HIST-1/2/3/7/8/10 | TLA-SAFE's `StepProperty`, TLA-IND's `StepProps` |
+| LEAN-TR | over `run cfg s ops` for any `ops` from a reachable `s`: TR-2 (`tr2_decision_final`), TR-3 (`tr3_void_terminal`), TR-1 (`tr1_provenance`), HIST-1/3/10 transitively | TLC's finite depth |
+| LEAN-GUARD | `err cfg s op = (firstFail (guards cfg s op)).getD .ok` and `(guards cfg s op).map Prod.fst = guardOrder op.kind` | C-2t, REF-1 |
+| LEAN-WIT | witnesses for approved, rejected, void, revival and the pending cap | TLA-WIT |
+
+Net effect on assumptions: **ASM-TLA-SCOPE is needed only for liveness
+(TLA-LIVE-1)**; the safety half is retired, given ASM-LEAN-TLA. ASM-MODEL
+(the Kani bound on the code) is unchanged: Lean proves facts about the
+model, and REF-1..3 relate the model to the code within the Kani bounds,
+extended by CUTOFF.md. Mechanising that cutoff argument is the optional L2
+step of the Lean proposal, not part of M1.6.
+
+### 18.4 Hygiene gate
+
+- `run-lean.sh build` fails on any `sorry` warning, and a scan of the
+  sources (comments stripped) fails on `sorry`, `admit`, `axiom`,
+  `native_decide`, `implemented_by`, `extern`, `unsafe` or `opaque`.
+- `run-lean.sh audit`: every headline theorem in `Audit.lean` depends only
+  on `propext`, `Classical.choice` and `Quot.sound`.
+- `canary/False.lean` and `canary/NotInv.lean` must fail to compile.
+- `lean/mutants/*.patch` are the 15 TLA+ spec mutants ported to
+  `Machine.lean`; each must break a proof (build), REF-5L or the guard
+  check. Four of them (05, 06, 13, 14) also restate the `rfl` field lemma
+  in `Lemmas.lean` that spells out the mutated effect, so that the kill
+  comes from an invariant or step-property proof, not from that lemma.
+  All 15 are killed by `Inv/*.lean`, `StepProps.lean` or `Guard.lean`
+  (`lean/RESULTS.md`).
+- No `Inv` conjunct is a step property, and no theorem assumes its
+  conclusion: hypotheses are `Inv cfg s`, `Reach cfg s` or an error
+  operator returning `ok`.
+
+### 18.5 Running and CI
+
+`tools/scripts/run-lean.sh near-approval [build|audit|canary|guards|replay|graph|mutants]`,
+default all. `tools/scripts/get-lean.sh` fetches the Lean
+release zip pinned in `tools/versions.env` (sha256-checked, no elan) and
+checks it against `lean/lean-toolchain`. Core library only, no Mathlib.
+CI job `lean` runs all of it on every PR: a clean build takes about 15 s,
+the mutants about 3 min and MC-4 about 4 min (TLC's two runs and
+`mc3.py`; the Lean export itself takes under a second).

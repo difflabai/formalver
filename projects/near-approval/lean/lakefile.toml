@@ -1,0 +1,16 @@
+name = "approval-lean"
+version = "0.1.0"
+defaultTargets = ["ApprovalLean", "approval-lean"]
+
+[leanOptions]
+linter.unusedSectionVars = false
+linter.unusedSimpArgs = false
+linter.deprecated = false
+
+[[lean_lib]]
+name = "ApprovalLean"
+
+[[lean_exe]]
+name = "approval-lean"
+root = "Main"
+

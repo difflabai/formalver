@@ -2,7 +2,7 @@
 %%
 %% Transcribed from strategy.md sections 3.1, 3.2 and 3.3 at pin 3426c92.
 %% ASM-TLA-SCOPE is not in section 3.3; it is taken from status.toml and
-%% strategy 17.3 (TLA+ bounds).
+%% strategy 17.3 (TLA+ bounds). Likewise ASM-LEAN-TLA (strategy 18).
 %%
 %%   adversary(Id, Capabilities)
 %%   threat(Id, Threat, Residual)        Residual = none | Text
@@ -132,9 +132,10 @@ assumption('ASM-META',    "NEP-366: the inner receipt has signer = relayer, so r
 assumption('ASM-FCKEY',   "Function-call keys restrict receiver and methods, can't attach a deposit, have an allowance and can't add keys.", high).
 assumption('ASM-COMPILE', "rustc/LLVM/wasm-opt preserve core semantics from host to wasm32; overflow-checks stay on in release.", 'n/a').
 assumption('ASM-MODEL',   "Until M5: a core step on a state larger than the Kani bound behaves like one within it (small scope).", med).
-assumption('ASM-TLA-SCOPE', "TLA+ model bounds: behaviours with more requests, keys or accounts than TLC and Apalache explore add no new violations.", med).
+assumption('ASM-TLA-SCOPE', "TLA+ model bounds: behaviours with more requests, keys or accounts than TLC and Apalache explore add no new violations (since strategy 18, needed for liveness only).", med).
+assumption('ASM-LEAN-TLA', "The Lean machine transcribes ApprovalCore.tla and ApprovalProps.tla.", high).
 assumption('ASM-SPEC',    "The specs (spec.rs, Verus, Prolog) state the intended behaviour.", 'n/a').
-assumption('ASM-TOOLS',   "Kani, Verus with Z3 and scryer-prolog are sound at the pinned versions.", 'n/a').
+assumption('ASM-TOOLS',   "Kani, Verus with Z3, scryer-prolog, TLC, Apalache and the Lean 4 kernel are sound at the pinned versions.", 'n/a').
 assumption('ASM-OWNER',   "The owner registers keys honestly.", policy).
 assumption('ASM-DEPLOY',  "The deployed code is the reproducible build of the pin, locked at deploy.", policy).
 assumption('ASM-DISPLAY', "The approver UI renders action faithfully (escaped).", policy).
@@ -164,6 +165,9 @@ assumption_checked_by('ASM-COMPILE', 'RT-TRACE').
 assumption_checked_by('ASM-MODEL', 'MC-2').
 assumption_checked_by('ASM-TLA-SCOPE', 'TLA-IND').
 assumption_checked_by('ASM-TLA-SCOPE', 'REF-5').
+assumption_checked_by('ASM-TLA-SCOPE', 'LEAN-IND').
+assumption_checked_by('ASM-LEAN-TLA', 'MC-4').
+assumption_checked_by('ASM-LEAN-TLA', 'REF-5L').
 assumption_checked_by('ASM-SPEC', 'C-7').
 assumption_checked_by('ASM-SPEC', 'MC-2').
 assumption_checked_by('ASM-OWNER', 'DEP-1').
