@@ -35,15 +35,15 @@ kani = "0.68.0"             # built from tag kani-0.68.0; nightly-2026-08-21
 cbmc = "6.11.0"
 verus = ""
 scryer_prolog = "0.10.0"     # crates.io, cargo install --locked
-cargo_near = ""
-near_sandbox = ""
+cargo_near = "0.22.0"            # M6 local builds (release binary); the reproducible image pins its own
+near_sandbox = "2.13.4"         # near-workspaces 0.23.0 / near-sandbox 0.3.16 default (M6)
 near_sdk = "5.29.1"         # from source-mirror Cargo.lock
 borsh = "1.8.1"             # from source-mirror Cargo.lock
 
 [protocol_reference]        # what each assumption's `source` was read against
 nomicon_commit = "a013a3fc08bdb50c9f39a1c7f62942bcc3107257"   # near/nearcore master (docs/ is nomicon.io), read 2026-10-09
-nearcore = ""               # release the RT-* tests run on (near_sandbox pin, M6)
-protocol_version = ""       # ditto
+nearcore = "2.13.4"          # near-sandbox 2.13.4, commit 44f7ae6cd7ef08bab604e20a473bf77e35d4c993: what the RT-* tests ran on (M6)
+protocol_version = "86"       # ditto (RPC status of the sandbox)
 near_proof_arena = "cb16c4090a82a6179d8e1a23d6e83e74e9d5d017"  # contract v1; tools/upstream-watch.toml tracks changes
 
 [source_hashes]             # sha256 at pinned_commit; check-pin.sh recomputes
@@ -97,7 +97,9 @@ level = "high"
 checked_by = ["RT-KEY"]
 source = ["https://nomicon.io/DataStructures/AccessKey.html", "https://nomicon.io/RuntimeSpec/Transactions.html", "https://nomicon.io/RuntimeSpec/Components/BindingsSpec/ContextAPI.html"]
 arena_excludes = ["transactions", "signature_verification"]
-status = "unverified"
+observed = "RT-KEY: function-call keys (ed25519 and secp256k1) arrive as signer = predecessor = their account with signer_pk = the key; an unregistered key on the right account fails UnknownKey; a key registered to another account fails KeyAccountMismatch"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
+status = "in-progress"
 
 [assumptions.ASM-PRED]
 statement = "predecessor_account_id() is unforgeable; equals the signer for the first receipt and when code on the signer's own account calls (F-9)"
@@ -105,7 +107,9 @@ level = "high"
 checked_by = ["RT-RELAY", "RT-SELFACCT"]
 source = ["https://nomicon.io/RuntimeSpec/Receipts.html", "https://nomicon.io/RuntimeSpec/Components/BindingsSpec/ContextAPI.html", "https://nomicon.io/RuntimeSpec/Scenarios/CrossContractCall.html"]
 arena_excludes = ["function_calls_and_wasm"]
-status = "unverified"
+observed = "RT-RELAY: request_action, approve and reject through a third-party relay contract fail IndirectCall with no log and no state change; a DEP-1.4 key cannot even sign to the relay (ReceiverMismatch). RT-SELFACCT: code on the agent's own account calling C succeeds and is attributed to the agent's full-access key (F-9); a DEP-1.4 key cannot call that code (ReceiverMismatch)"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
+status = "in-progress"
 
 [assumptions.ASM-ATOMIC]
 statement = "Atomicity is per receipt: panic, out-of-gas or LackBalanceForState reverts all writes, including earlier actions batched in the same receipt; logs of a failed receipt may remain"
@@ -113,7 +117,9 @@ level = "med"
 checked_by = ["RT-REVERT", "RT-BATCH"]
 source = ["https://nomicon.io/RuntimeSpec/Receipts.html", "https://nomicon.io/RuntimeSpec/Actions.html", "https://nomicon.io/DataStructures/Account.html"]
 arena_excludes = ["failure_paths_and_rollback", "function_calls_and_wasm"]
-status = "unverified"
+observed = "RT-REVERT: a core panic, out of gas after the emit and LackBalanceForState (request_action and approve) leave counters, principals, requests and approvals unchanged. The event line SURVIVES in the failed outcome for out of gas (attached gas between about 27/40 and 39/40 of the minimum) and for LackBalanceForState. RT-BATCH: [request_action(a), request_action('')] fails at action index 1, counters unchanged, and the first action's approval_requested line appears in the failed outcome. So VER-1's success requirement is load-bearing"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
+status = "in-progress"
 
 [assumptions.ASM-SEQ]
 statement = "Receipts on one account execute one at a time; the contract creates no promises, so no reentrancy; each successful action is one model step"
@@ -145,14 +151,18 @@ level = "med"
 checked_by = ["RT-RESET", "DEP-1"]
 source = ["https://nomicon.io/RuntimeSpec/Actions.html", "https://github.com/near/NEPs/blob/master/neps/nep-0591.md"]
 arena_excludes = ["non_transfer_actions", "account_v2_global_contracts"]
-status = "unverified"
+observed = "RT-RESET: an unlocked C deleted and recreated under the same name starts with counters 0; check_deployment VER-3 flags the DeleteAccount, the recreation AddKey and the DeployContract receipts since the original b0"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
+status = "in-progress"
 
 [assumptions.ASM-SDK]
 statement = "#[init] panics if state exists; #[private] requires predecessor = current account; non-payable change methods reject deposits; &self never writes; only #[near] impl methods exported; PanicOnDefault blocks default init"
 level = "high"
 checked_by = ["SH-9", "SH-10", "SH-11"]
 source = ["https://docs.rs/near-sdk/5.29.1/near_sdk/"]
-status = "unverified"
+observed = "SH-9: new fails 'Method new is private' from another account; every other method, views included, fails 'The contract is not initialized' before init; post-init views equal Init(owner); a second new fails. SH-10: every change method and new fail 'Method <m> doesn't accept deposit' with 1 yocto; all 9 get_* methods and contract_source_metadata ACCEPT a 1 yocto deposit when called as a transaction (the wrapper checks only &mut self methods). Function exports: the 16 methods plus contract_source_metadata and __contract_abi"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
+status = "in-progress"
 
 [assumptions.ASM-STORE]
 statement = "store::LookupMap is a map keyed prefix ++ borsh(key); writes flushed when the contract struct drops after state_write"
@@ -174,7 +184,9 @@ level = "med"
 checked_by = ["RES-1"]
 source = ["https://nomicon.io/DataStructures/Account.html", "https://nomicon.io/GenesisConfig/RuntimeConfig.html"]
 arena_excludes = ["non_transfer_actions"]
-status = "unverified"
+observed = "RES-1 measured storage deltas (short names, ed25519 / 64-char names, secp256k1): add_agent 118/199 B, request_action(1 B) 144/225, request_action(2048 B) 2191/2272, approve 148/226, reject 83/161, revoke_key -53/-134, failures 0; 16 maximum requests lock 0.3506/0.3635 NEAR. LackBalanceForState when the balance is below storage_usage x 1e19 (RT-REVERT)"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
+status = "in-progress"
 
 [assumptions.ASM-LIMITS]
 statement = "max_total_log_length 16384 B; 100 logs; 4 MiB return data; 300 TGas per call; view gas cap per node"
@@ -182,7 +194,9 @@ level = "med"
 checked_by = ["RES-2", "RES-3"]
 source = ["https://nomicon.io/GenesisConfig/VMConfig.html", "https://nomicon.io/RuntimeSpec/Components/BindingsSpec/MiscellaneousAPI.html"]
 arena_excludes = ["function_calls_and_wasm"]
-status = "unverified"
+observed = "RES-3: get_approvals(0,100) over 100 maximum-size proofs returns about 1.30 MB (1,299,658-1,299,659 B across runs, < 4 MiB) as a view, and burns about 88.3-88.4 TGas as a transaction. RES-2 (sandbox cross-check): worst-case receipt logs 12,727-12,728 B (approval_requested) and 13,088 B (action_approved) of 16,384"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
+status = "in-progress"
 
 [assumptions.ASM-META]
 statement = "NEP-366 (and NEP-518 eth-implicit) inner receipts carry the relayer as signer, so relayed calls fail IndirectCall"
@@ -190,7 +204,9 @@ level = "med"
 checked_by = ["RT-METATX"]
 source = ["https://github.com/near/NEPs/blob/master/neps/nep-0366.md", "https://github.com/near/NEPs/blob/master/neps/nep-0518.md", "https://nomicon.io/RuntimeSpec/Actions.html#delegateaction", "https://nomicon.io/architecture/how/meta-tx.html"]
 arena_excludes = ["transactions", "signature_verification", "non_transfer_actions"]
-status = "unverified"
+observed = "RT-METATX: a NEP-366 delegate action (relayer signs, inner request_action signed by the agent's function-call key, and again by its full-access key) reaches C with signer = relayer and fails IndirectCall; the relayer's transaction itself succeeds; state unchanged. NEP-518 eth-implicit accounts not tested"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
+status = "in-progress"
 
 [assumptions.ASM-FCKEY]
 statement = "Function-call keys restrict receiver and methods, cannot attach deposits, have an allowance, and cannot add keys"
@@ -198,14 +214,18 @@ level = "high"
 checked_by = ["RT-FCKEY"]
 source = ["https://nomicon.io/DataStructures/AccessKey.html#accesskeypermissionfunctioncall", "https://nomicon.io/RuntimeSpec/Transactions.html"]
 arena_excludes = ["transactions", "signature_verification", "non_transfer_actions"]
-status = "unverified"
+observed = "RT-FCKEY: an agent key scoped to request_action calling approve or add_agent, and an approver key calling request_action, are rejected before execution with InvalidTxError InvalidAccessKeyError(MethodNameMismatch) (not a contract panic); a deposit through a function-call key is DepositWithFunctionCall; AddKey signed by a function-call key is RequiresFullAccess"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
+status = "in-progress"
 
 [assumptions.ASM-COMPILE]
 statement = "rustc/LLVM/wasm-opt preserve core semantics host -> wasm32; overflow-checks on in release; the only on-chain usize use is action.len() > MAX_ACTION_LEN; cfg(feature=\"borsh\") gates only use/derive"
 level = "n/a"
 checked_by = ["RT-CODEHASH", "RT-TRACE"]
 source = ["https://doc.rust-lang.org/cargo/reference/profiles.html#overflow-checks"]
-status = "unverified"
+observed = "RT-TRACE: see results/RT-TRACE.json; RT-CODEHASH: on-chain code_hash = base58(sha256(wasm)) for the wasm under test. Ran on the reproducible build (sha256 5223150408c6bce4d857eb155228c8f5e2dcdc5a2748d933c6ec7369947e443d)"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
+status = "in-progress"
 
 [assumptions.ASM-MODEL]
 statement = "Until M5 path A: a core step on a state larger than the Kani bound behaves like one within it (strategy section 6.3)"
@@ -247,7 +267,9 @@ status = "unverified"
 statement = "The deployed code is the reproducible build of the pin, locked at deploy"
 level = "policy"
 checked_by = ["DEP-1", "VER-2", "VER-3"]
-status = "unverified"
+observed = "check_deployment.sh sandbox passes on a DEP-1 lock-batch deployment with DEP-1.4 keys and fails on a kept full-access key, a wrong code hash and a full-access agent key (sandbox/results/DEP-1.json). No testnet deployment"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
+status = "in-progress"
 
 [assumptions.ASM-DISPLAY]
 statement = "Approver UIs render the action text faithfully (the approve tx commits to the text itself)"
@@ -411,13 +433,13 @@ prolog_requirements = "prolog/requirements/approval_req.pl"
   SH-6 = { status = "unverified", layer = "unit", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], description = "No other method logs" }
   SH-7 = { status = "unverified", layer = "unit", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], description = "View mapping: get_approval(s), get_approvals defaults (0, 50); get_request None past #R else every field of R[i] plus request_status; get_principal None if unregistered else account, role, pending; get_owner; counts" }
   SH-8 = { status = "unverified", layer = "unit", evidence = "test", cross = ["sandbox"], depends_on = ["contract/src/lib.rs", "Cargo.lock"], description = "JSON shape: README field names, U64 strings for *_ns, numbers for ids, {} or null fields give defaults, whole-args null fails, lossless conversions" }
-  SH-9 = { status = "unverified", layer = "sandbox", evidence = "test", cross = ["review"], depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-SDK"], description = "Init once, only from C; methods fail before init; post-init state is Init(owner)" }
-  SH-10 = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-SDK"], description = "All 13 exports called with 1 yocto via full-access keys (new on a fresh deployment): change methods and new fail with the non-payable panic; view outcomes recorded" }
+  SH-9 = { status = "in-progress", layer = "sandbox", evidence = "test", cross = ["review"], harness = "sandbox/tests/shell.rs::sh9_init", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-SDK"], description = "Init once, only from C; methods fail before init; post-init state is Init(owner)" }
+  SH-10 = { status = "in-progress", layer = "sandbox", evidence = "test", harness = "sandbox/tests/shell.rs::sh10_deposits", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-SDK"], description = "All 16 exports at the pin (F-15; the row said 13) called with 1 yocto via full-access keys (new on a fresh deployment): every change method and new fail with the non-payable panic; observed: every get_* (and contract_source_metadata) accepts the deposit" }
   SH-11 = { status = "unverified", layer = "wasm-check", evidence = "check", cross = ["sandbox"], depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-SDK"], description = "Function exports exactly the 13 methods + contract_source_metadata (+ __contract_abi if embedded); non-function exports memory (+ __data_end/__heap_base); no Store, upgrade or owner-transfer export" }
   SH-12 = { status = "unverified", layer = "wasm-check", evidence = "check", cross = ["review"], depends_on = ["contract/src/lib.rs", "Cargo.lock"], description = "No promise_*, deploy, delete or transfer imports; only ST-5 storage keys written" }
   RES-1 = { status = "unverified", layer = "unit", evidence = "test", cross = ["sandbox"], depends_on = ["core/src/lib.rs", "contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-STAKE"], description = "Storage growth per op bounded from the Borsh layout; measured on-chain; <= 16 x B_req lockable per agent key without an approver" }
   RES-2 = { status = "unverified", layer = "unit", evidence = "test", cross = ["sandbox"], depends_on = ["core/src/lib.rs", "contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-LIMITS"], description = "Worst-case event lines (2048 escaped control bytes, 64-char accounts, secp256k1 keys) fit 16384 B (F-4)" }
-  RES-3 = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["core/src/lib.rs", "contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-LIMITS"], description = "get_approvals(0,100) over max-size proofs stays under view gas and 4 MiB return" }
+  RES-3 = { status = "in-progress", layer = "sandbox", evidence = "test", harness = "sandbox/tests/shell.rs::res3_full_page_of_max_proofs", depends_on = ["core/src/lib.rs", "contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-LIMITS"], description = "get_approvals(0,100) over 100 max-size proofs stays under view gas and 4 MiB return; measured about 1.30 MB (1,299,658-1,299,659 B) and about 88.3-88.4 TGas as a transaction (near-sandbox 2.13.4)" }
 
 # ---------------------------------------------------------------------------
 [modules.runtime_assumptions]
@@ -426,17 +448,17 @@ verus_model = ""
 prolog_requirements = "prolog/requirements/threat_model.pl"
 
   [modules.runtime_assumptions.properties]
-  RT-KEY = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-SIGNER"], description = "FC key of account a arrives as signer = predecessor = a with signer_pk = key; unregistered and cross-account keys rejected" }
-  RT-RELAY = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-PRED"], description = "Calls through a third-party relay contract fail IndirectCall" }
-  RT-SELFACCT = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-PRED"], description = "A contract on the signer's own account calling C succeeds (documents F-9)" }
-  RT-METATX = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-META"], description = "NEP-366 delegate action outcome recorded (expected IndirectCall)" }
-  RT-FCKEY = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-FCKEY"], description = "Agent FC key scoped to request_action cannot call approve or add_agent: InvalidAccessKeyError(MethodNameMismatch), not a contract panic" }
-  RT-REVERT = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-ATOMIC"], description = "Forced failures (LackBalanceForState, gas-starved after emit) leave state and views unchanged; record whether logs survive" }
-  RT-BATCH = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-ATOMIC"], description = "Batched [request_action(a), request_action('')] signed by a full-access registered agent key fails at action 1 and leaves counters unchanged; record whether the first event appears" }
-  RT-RESET = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-CODE"], description = "Delete + recreate C resets counters; VER-3 detects it (VER-6 only heuristically)" }
-  RT-SPOOF = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["contract/src/lib.rs", "Cargo.lock"], description = "Forged EVENT_JSON from a spoofer contract rejected by the VER-1 executor_id rule" }
-  RT-CODEHASH = { status = "unverified", layer = "sandbox", evidence = "check", depends_on = ["Cargo.toml", "Cargo.lock", "contract/Cargo.toml", "core/Cargo.toml", "core/src/lib.rs", "contract/src/lib.rs"], assumptions = ["ASM-DEPLOY", "ASM-COMPILE"], description = "Wasm under test is the reproducible build; record sha256 (hex) and NEAR code_hash (base58)" }
-  RT-TRACE = { status = "unverified", layer = "sandbox", evidence = "test", depends_on = ["core/src/lib.rs", "contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-COMPILE", "ASM-SDK"], description = "Prolog traces + 200 random sequences replayed on the reproducible wasm equal spec.rs: results, exact messages, logs, views" }
+  RT-KEY = { status = "in-progress", layer = "sandbox", evidence = "test", harness = "sandbox/tests/runtime.rs::rt_key", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-SIGNER"], description = "FC key of account a arrives as signer = predecessor = a with signer_pk = key; unregistered and cross-account keys rejected" }
+  RT-RELAY = { status = "in-progress", layer = "sandbox", evidence = "test", harness = "sandbox/tests/runtime.rs::rt_relay", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-PRED"], description = "Calls through a third-party relay contract fail IndirectCall" }
+  RT-SELFACCT = { status = "in-progress", layer = "sandbox", evidence = "test", harness = "sandbox/tests/runtime.rs::rt_selfacct", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-PRED"], description = "A contract on the signer's own account calling C succeeds (documents F-9)" }
+  RT-METATX = { status = "in-progress", layer = "sandbox", evidence = "test", harness = "sandbox/tests/runtime.rs::rt_metatx", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-META"], description = "NEP-366 delegate action outcome recorded: IndirectCall on C for both an agent function-call key and a full-access agent key (results/RT-METATX.json)" }
+  RT-FCKEY = { status = "in-progress", layer = "sandbox", evidence = "test", harness = "sandbox/tests/runtime.rs::rt_fckey", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-FCKEY"], description = "Agent FC key scoped to request_action cannot call approve or add_agent: InvalidAccessKeyError(MethodNameMismatch), not a contract panic" }
+  RT-REVERT = { status = "in-progress", layer = "sandbox", evidence = "test", harness = "sandbox/tests/runtime.rs::rt_revert", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-ATOMIC"], description = "Forced failures (core panic, out of gas after the emit, LackBalanceForState on request and approve) leave state and views unchanged; observed: the event survives in the failed outcome for out-of-gas and LackBalanceForState (results/RT-REVERT.json)" }
+  RT-BATCH = { status = "in-progress", layer = "sandbox", evidence = "test", harness = "sandbox/tests/runtime.rs::rt_batch", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-ATOMIC"], description = "Batched [request_action(a), request_action('')] signed by a full-access registered agent key fails at action 1 and leaves counters unchanged; observed: the first action's approval_requested event appears in the failed outcome" }
+  RT-RESET = { status = "in-progress", layer = "sandbox", evidence = "test", harness = "sandbox/tests/deploy.rs::rt_reset", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-CODE"], description = "Delete + recreate C resets counters; VER-3 detects it (VER-6 only heuristically)" }
+  RT-SPOOF = { status = "in-progress", layer = "sandbox", evidence = "test", harness = "sandbox/tests/runtime.rs::rt_spoof", depends_on = ["contract/src/lib.rs", "Cargo.lock"], description = "Forged EVENT_JSON from a spoofer contract rejected by the VER-1 executor_id rule" }
+  RT-CODEHASH = { status = "in-progress", layer = "sandbox", evidence = "check", harness = "sandbox/tests/runtime.rs::rt_codehash", depends_on = ["Cargo.toml", "Cargo.lock", "contract/Cargo.toml", "core/Cargo.toml", "core/src/lib.rs", "contract/src/lib.rs"], assumptions = ["ASM-DEPLOY", "ASM-COMPILE"], description = "Wasm under test is the reproducible build; record sha256 (hex) and NEAR code_hash (base58)" }
+  RT-TRACE = { status = "in-progress", layer = "sandbox", evidence = "test", harness = "sandbox/tests/trace.rs::rt_trace", depends_on = ["core/src/lib.rs", "contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-COMPILE", "ASM-SDK"], description = "Prolog traces + 200 random sequences replayed on the reproducible wasm equal spec.rs: results, exact messages, logs, views" }
 
 # ---------------------------------------------------------------------------
 [modules.deployment]
@@ -445,12 +467,12 @@ verus_model = ""
 prolog_requirements = "prolog/verification/verifier_rules.pl"
 
   [modules.deployment.properties]
-  DEP-1 = { status = "unverified", layer = "deploy-check", evidence = "check", depends_on = ["README.md", "contract/src/lib.rs"], assumptions = ["ASM-DEPLOY", "ASM-OWNER"], description = "Code hash = reproducible build, not a global contract referenced by account id; locked at deploy (deploy + new + full-access key deletion in one tx); owner is multisig/DAO; registered keys (rebuilt from an indexer) are FC keys scoped to C; balance buffer" }
-  VER-1 = { status = "unverified", layer = "prolog", evidence = "check", cross = ["sandbox"], depends_on = ["README.md"], assumptions = ["ASM-FINAL", "ASM-ATOMIC"], description = "Accept proofs only from get_approval at final, or action_approved logs of successful receipts with executor_id = C in final blocks" }
-  VER-2 = { status = "unverified", layer = "deploy-check", evidence = "check", depends_on = ["README.md"], assumptions = ["ASM-CODE"], description = "code_hash(C) = expected at the proof's block (archival) and now" }
-  VER-3 = { status = "unverified", layer = "deploy-check", evidence = "check", depends_on = ["README.md"], assumptions = ["ASM-CODE"], description = "No full-access key on C since b0, or an indexer scan finds no DeployContract/UseGlobalContract/AddKey/DeleteAccount" }
-  VER-4 = { status = "unverified", layer = "prolog", evidence = "check", depends_on = ["README.md"], assumptions = ["ASM-OWNER"], description = "Check action and both accounts against expectations; approver against the verifier's own allowlist" }
-  VER-5 = { status = "unverified", layer = "prolog", evidence = "check", depends_on = ["README.md"], description = "Enumerate with the RD-4 loop at one block_id" }
-  VER-6 = { status = "unverified", layer = "prolog", evidence = "check", depends_on = ["README.md"], description = "Counter decrease or code-hash change invalidates cached proofs" }
-  VER-7 = { status = "unverified", layer = "prolog", evidence = "check", depends_on = ["README.md"], description = "Executors deduplicate on (C, request_id) and enforce a maximum approval age" }
-  VER-8 = { status = "unverified", layer = "deploy-check", evidence = "check", cross = ["prolog"], depends_on = ["README.md"], assumptions = ["ASM-FCKEY", "ASM-PRED"], description = "Per proof: archival view_access_key for the agent key at the request block and the approver key at the approval block both show a function-call permission with receiver C and the DEP-1 method names (closes F-9)" }
+  DEP-1 = { status = "in-progress", layer = "deploy-check", evidence = "check", harness = "deploy-checks/check_deployment.py; sandbox/tests/deploy.rs::dep1_check_deployment_in_sandbox", depends_on = ["README.md", "contract/src/lib.rs"], assumptions = ["ASM-DEPLOY", "ASM-OWNER"], description = "Code hash = reproducible build, not a global contract referenced by account id; locked at deploy (deploy + new + full-access key deletion in one tx); owner is multisig/DAO; registered keys (rebuilt from an indexer) are FC keys scoped to C ([request_action]; [approve] or [approve, reject]) with finite allowance; balance buffer. Demonstrated on near-sandbox only: no testnet deployment" }
+  VER-1 = { status = "in-progress", layer = "prolog", evidence = "check", cross = ["sandbox"], harness = "prolog/tests/test_verifier_rules.pl; sandbox/tests/runtime.rs::rt_spoof", depends_on = ["README.md"], assumptions = ["ASM-FINAL", "ASM-ATOMIC"], description = "Accept proofs only from get_approval at final, or action_approved logs of successful receipts with executor_id = C in final blocks" }
+  VER-2 = { status = "in-progress", layer = "deploy-check", evidence = "check", harness = "deploy-checks/check_deployment.py; sandbox/tests/deploy.rs::dep1_check_deployment_in_sandbox", cross = ["prolog"], depends_on = ["README.md"], assumptions = ["ASM-CODE"], description = "code_hash(C) = expected at the proof's block (archival) and now" }
+  VER-3 = { status = "in-progress", layer = "deploy-check", evidence = "check", harness = "deploy-checks/check_deployment.py; sandbox/tests/deploy.rs::dep1_check_deployment_in_sandbox", cross = ["prolog", "sandbox"], depends_on = ["README.md"], assumptions = ["ASM-CODE"], description = "No full-access key on C since b0, or an indexer scan finds no DeployContract/UseGlobalContract/AddKey/DeleteAccount" }
+  VER-4 = { status = "in-progress", layer = "prolog", evidence = "check", harness = "prolog/tests/test_verifier_rules.pl", depends_on = ["README.md"], assumptions = ["ASM-OWNER"], description = "Check action and both accounts against expectations; approver against the verifier's own allowlist" }
+  VER-5 = { status = "in-progress", layer = "prolog", evidence = "check", harness = "prolog/tests/test_verifier_rules.pl", depends_on = ["README.md"], description = "Enumerate with the RD-4 loop at one block_id" }
+  VER-6 = { status = "in-progress", layer = "prolog", evidence = "check", harness = "prolog/tests/test_verifier_rules.pl; sandbox/tests/deploy.rs::rt_reset", depends_on = ["README.md"], description = "Counter decrease or code-hash change invalidates cached proofs" }
+  VER-7 = { status = "in-progress", layer = "prolog", evidence = "check", harness = "prolog/tests/test_verifier_rules.pl", depends_on = ["README.md"], description = "Executors deduplicate on (C, request_id) and enforce a maximum approval age" }
+  VER-8 = { status = "in-progress", layer = "deploy-check", evidence = "check", cross = ["prolog"], harness = "deploy-checks/check_deployment.py; prolog/tests/test_verifier_rules.pl; sandbox/tests/deploy.rs::dep1_check_deployment_in_sandbox", depends_on = ["README.md"], assumptions = ["ASM-FCKEY", "ASM-PRED"], description = "Per proof: archival view_access_key for the agent key at the request block and the approver key at the approval block both show a function-call permission with receiver C and the DEP-1 method names (closes F-9)" }

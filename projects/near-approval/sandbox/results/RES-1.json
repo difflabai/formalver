@@ -1,6 +1,5 @@
 {
   "long64_secp256k1": {
-    "(add_key on agent account, not C)": 0,
     "16 x B_req(max) in NEAR": "0.3635",
     "add_agent": 199,
     "approve": 226,
@@ -14,7 +13,6 @@
   },
   "near_sandbox": "2.13.4 (near-sandbox 0.3.16 default)",
   "short_ed25519": {
-    "(add_key on agent account, not C)": 0,
     "16 x B_req(max) in NEAR": "0.3506",
     "add_agent": 118,
     "approve": 148,
@@ -26,5 +24,5 @@
     "request_action(2048 bytes)": 2191,
     "revoke_key": -53
   },
-  "wasm_kind": "non-reproducible"
+  "wasm_kind": "reproducible"
 }

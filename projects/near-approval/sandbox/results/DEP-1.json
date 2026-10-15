@@ -39,7 +39,7 @@
     ]
   },
   "near_sandbox": "2.13.4 (near-sandbox 0.3.16 default)",
-  "wasm_kind": "non-reproducible",
+  "wasm_kind": "reproducible",
   "wrong_code_hash": {
     "exit": 1,
     "verdicts": [

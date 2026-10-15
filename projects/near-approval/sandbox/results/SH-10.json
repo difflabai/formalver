@@ -17,5 +17,5 @@
   "reject": "Smart contract panicked: Method reject doesn't accept deposit",
   "request_action": "Smart contract panicked: Method request_action doesn't accept deposit",
   "revoke_key": "Smart contract panicked: Method revoke_key doesn't accept deposit",
-  "wasm_kind": "non-reproducible"
+  "wasm_kind": "reproducible"
 }

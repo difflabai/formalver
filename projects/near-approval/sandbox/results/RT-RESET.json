@@ -11,5 +11,5 @@
   "near_sandbox": "2.13.4 (near-sandbox 0.3.16 default)",
   "ver3": "FAIL (DeleteAccount, AddKey, DeployContract receipts on C since b0)",
   "ver6": "invalidates while counters are below the cache; misses a reset that caught up",
-  "wasm_kind": "non-reproducible"
+  "wasm_kind": "reproducible"
 }

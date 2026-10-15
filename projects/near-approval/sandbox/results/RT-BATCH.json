@@ -6,5 +6,5 @@
   "failure": "ActionError index 1: Smart contract panicked: action is empty",
   "first_event_appears": true,
   "near_sandbox": "2.13.4 (near-sandbox 0.3.16 default)",
-  "wasm_kind": "non-reproducible"
+  "wasm_kind": "reproducible"
 }
