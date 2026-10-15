@@ -623,7 +623,10 @@ pub fn abs_store<S: Store<AccountId, PublicKey>>(s: &S, universe: &[PublicKey]) 
         .collect();
     principals.sort_by(|a, b| a.0.cmp(&b.0));
     let requests = (0..s.request_count())
-        .map(|i| s.request(i).unwrap_or_else(|| panic!("request {i} < count missing")))
+        .map(|i| {
+            s.request(i)
+                .unwrap_or_else(|| panic!("request {i} < count missing"))
+        })
         .collect();
     let log = (0..s.approval_count())
         .map(|j| {
@@ -656,7 +659,9 @@ pub fn abs_contract(storage: &Storage, universe: &[PublicKey]) -> Abs {
 /// The top-level `STATE` value, decoded field by field. A mirror of
 /// `ApprovalContract`'s Borsh layout as the README and the struct definition
 /// describe it; `tests/shell.rs` checks it round-trips the real struct.
-#[derive(near_sdk::borsh::BorshSerialize, near_sdk::borsh::BorshDeserialize, Clone, Debug, PartialEq)]
+#[derive(
+    near_sdk::borsh::BorshSerialize, near_sdk::borsh::BorshDeserialize, Clone, Debug, PartialEq,
+)]
 #[borsh(crate = "near_sdk::borsh")]
 pub struct StateMirror {
     pub owner: String,
@@ -682,10 +687,18 @@ pub fn expected_keys(a: &Abs, st: &StateMirror) -> Vec<Vec<u8>> {
     let cat = |p: &[u8], k: Vec<u8>| [p.to_vec(), k].concat();
     let b = |x: u64| near_sdk::borsh::to_vec(&x).unwrap();
     let mut keys = vec![STATE_KEY.to_vec()];
-    keys.extend(a.principals.iter().map(|(k, _)| cat(&st.principals_prefix, k.clone())));
+    keys.extend(
+        a.principals
+            .iter()
+            .map(|(k, _)| cat(&st.principals_prefix, k.clone())),
+    );
     keys.extend((0..a.requests.len() as u64).map(|i| cat(&st.requests_prefix, b(i))));
     keys.extend((0..a.log.len() as u64).map(|j| cat(&st.approval_log_prefix, b(j))));
-    keys.extend(a.revocations.iter().map(|(g, _)| cat(&st.revocations_prefix, b(*g))));
+    keys.extend(
+        a.revocations
+            .iter()
+            .map(|(g, _)| cat(&st.revocations_prefix, b(*g))),
+    );
     keys.sort();
     keys
 }
@@ -707,7 +720,7 @@ impl Rng {
     pub fn new(seed: u64) -> Self {
         Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1)
     }
-    pub fn next(&mut self) -> u64 {
+    pub fn next_u64(&mut self) -> u64 {
         let mut x = self.0;
         x ^= x >> 12;
         x ^= x << 25;
@@ -716,7 +729,7 @@ impl Rng {
         x.wrapping_mul(0x2545_F491_4F6C_DD1D)
     }
     pub fn below(&mut self, n: u64) -> u64 {
-        self.next() % n
+        self.next_u64() % n
     }
     pub fn chance(&mut self, percent: u64) -> bool {
         self.below(100) < percent
@@ -729,7 +742,10 @@ impl Rng {
 pub fn env_u64(name: &str, default: u64) -> u64 {
     std::env::var(name)
         .ok()
-        .map(|v| v.parse().unwrap_or_else(|_| panic!("{name} must be a number")))
+        .map(|v| {
+            v.parse()
+                .unwrap_or_else(|_| panic!("{name} must be a number"))
+        })
         .unwrap_or(default)
 }
 
@@ -743,7 +759,13 @@ pub fn check_views(storage: &Storage, mem: &Mem, rng: &mut Rng, ctx: &str) {
     let n = mem.request_count();
     let g = mem.registration_count();
     let (f, l) = (
-        [None, Some(0), Some(1), Some(rng.below(n + 2)), Some(u64::MAX)][rng.below(5) as usize],
+        [
+            None,
+            Some(0),
+            Some(1),
+            Some(rng.below(n + 2)),
+            Some(u64::MAX),
+        ][rng.below(5) as usize],
         [None, Some(0), Some(1), Some(rng.below(120)), Some(u64::MAX)][rng.below(5) as usize],
     );
     let got = view(storage, |c| {
@@ -780,17 +802,34 @@ pub fn check_views(storage: &Storage, mem: &Mem, rng: &mut Rng, ctx: &str) {
             Some(r) => request_json(&r, approval_core::request_status(mem, i).unwrap()),
             None => Value::Null,
         });
-        want.push(approval_core::approval(mem, i).map(proof).unwrap_or(Value::Null));
-        want.push(mem.request(i).and_then(|r| rejection_json(&r)).unwrap_or(Value::Null));
+        want.push(
+            approval_core::approval(mem, i)
+                .map(proof)
+                .unwrap_or(Value::Null),
+        );
+        want.push(
+            mem.request(i)
+                .and_then(|r| rejection_json(&r))
+                .unwrap_or(Value::Null),
+        );
     }
     for r in 0..=g {
         want.push(time_json(mem.revocation(r)));
     }
     for k in &ks {
-        want.push(mem.principal(k).map(|p| principal_json(&p)).unwrap_or(Value::Null));
+        want.push(
+            mem.principal(k)
+                .map(|p| principal_json(&p))
+                .unwrap_or(Value::Null),
+        );
     }
     let page = |f: u64, l: u64| {
-        Value::Array(approval_core::approvals(mem, f, l).into_iter().map(proof).collect())
+        Value::Array(
+            approval_core::approvals(mem, f, l)
+                .into_iter()
+                .map(proof)
+                .collect(),
+        )
     };
     want.push(page(0, 50));
     want.push(page(f.unwrap_or(0), l.unwrap_or(50)));
@@ -808,13 +847,26 @@ pub fn step(storage: Storage, mem: &mut Mem, c: &Ctx, op: &Op, what: &str) -> Ou
     match (&core, &out.result) {
         (Err(e), Err(msg)) => {
             assert_eq!(msg, e.as_str(), "{what}: wrong panic message");
-            assert!(out.logs.is_empty(), "{what}: failed call logged {:?}", out.logs);
+            assert!(
+                out.logs.is_empty(),
+                "{what}: failed call logged {:?}",
+                out.logs
+            );
         }
         (Ok(ok), Ok(ret)) => {
             let (want_ret, event, data) = expected_effect(mem, c, op, ok);
             assert_eq!(ret, &want_ret, "{what}: return value");
-            assert_eq!(out.logs.len(), 1, "{what}: expected one log, got {:?}", out.logs);
-            assert_eq!(parse_event(&out.logs[0]), event_json(event, data), "{what}: event");
+            assert_eq!(
+                out.logs.len(),
+                1,
+                "{what}: expected one log, got {:?}",
+                out.logs
+            );
+            assert_eq!(
+                parse_event(&out.logs[0]),
+                event_json(event, data),
+                "{what}: event"
+            );
         }
         _ => panic!("{what}: core {core:?} but contract {:?}", out.result),
     }
@@ -822,7 +874,10 @@ pub fn step(storage: Storage, mem: &mut Mem, c: &Ctx, op: &Op, what: &str) -> Ou
     let a = abs_contract(&out.storage, &keys());
     assert_eq!(a, abs_mem(mem), "{what}: α differs");
     let st = state_of(&out.storage);
-    assert_eq!(sorted_keys(&out.storage), expected_keys(&a, &st), "{what}: storage keys");
+    assert_eq!(
+        sorted_keys(&out.storage),
+        expected_keys(&a, &st),
+        "{what}: storage keys"
+    );
     out
 }
-

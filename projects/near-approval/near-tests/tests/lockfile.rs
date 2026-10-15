@@ -36,7 +36,9 @@ fn shared_packages_match_the_mirror_lockfile() {
     let mut shared = 0;
     let mut bad = Vec::new();
     for (name, ours_v) in &ours {
-        let Some(theirs) = mirror.get(name) else { continue };
+        let Some(theirs) = mirror.get(name) else {
+            continue;
+        };
         shared += 1;
         // A name may appear in several versions; each of ours must be one of
         // the mirror's, with the same checksum.
@@ -46,10 +48,28 @@ fn shared_packages_match_the_mirror_lockfile() {
             }
         }
     }
-    assert!(bad.is_empty(), "lockfile drift from the mirror:\n{}", bad.join("\n"));
+    assert!(
+        bad.is_empty(),
+        "lockfile drift from the mirror:\n{}",
+        bad.join("\n")
+    );
     // The TCB packages of the strategy's Target table must be among them.
-    for tcb in ["near-sdk", "near-sdk-macros", "borsh", "serde_json", "near-account-id", "approval-core"] {
-        assert!(ours.contains_key(tcb) && mirror.contains_key(tcb), "{tcb} not in both lockfiles");
+    for tcb in [
+        "near-sdk",
+        "near-sdk-macros",
+        "near-sdk-core",
+        "near-sdk-env",
+        "near-account-id",
+        "near-sys",
+        "borsh",
+        "serde_json",
+        "approval-core",
+        "approval-contract",
+    ] {
+        assert!(
+            ours.contains_key(tcb) && mirror.contains_key(tcb),
+            "{tcb} not in both lockfiles"
+        );
     }
     eprintln!("lockfile: {shared} shared packages, all equal");
 }

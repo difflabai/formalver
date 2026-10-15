@@ -78,16 +78,25 @@ fn carol() -> AccountId {
 }
 
 fn add_agent(a: &AccountId, k: &PublicKey) -> Op {
-    Op::AddAgent { account: a.clone(), key: k.clone() }
+    Op::AddAgent {
+        account: a.clone(),
+        key: k.clone(),
+    }
 }
 fn add_approver(a: &AccountId, k: &PublicKey) -> Op {
-    Op::AddApprover { account: a.clone(), key: k.clone() }
+    Op::AddApprover {
+        account: a.clone(),
+        key: k.clone(),
+    }
 }
 fn req(a: &str) -> Op {
     Op::Request { action: a.into() }
 }
 fn appr(id: u64, a: &str) -> Op {
-    Op::Approve { id, action: a.into() }
+    Op::Approve {
+        id,
+        action: a.into(),
+    }
 }
 
 /// Owner registers alice/k0 as agent and bob/k1 as approver.
@@ -100,7 +109,12 @@ fn setup() -> Sim {
 
 /// The single event logged by `out`.
 fn event_of(out: &Outcome<Value>) -> Value {
-    assert_eq!(out.logs.len(), 1, "expected exactly one log: {:?}", out.logs);
+    assert_eq!(
+        out.logs.len(),
+        1,
+        "expected exactly one log: {:?}",
+        out.logs
+    );
     parse_event(&out.logs[0])
 }
 
@@ -138,26 +152,59 @@ fn sh1_env_mapping() {
     assert_eq!(r["requested_at_block"], json!(7));
     assert_eq!(r["requested_at_ns"], json!("123456789012"));
     // predecessor != signer in either direction is an indirect call.
-    s.err(&Ctx::new(&bob(), &alice(), k0, t_req), req("x"), E::IndirectCall);
-    s.err(&Ctx::new(&alice(), &bob(), k1, t_req), appr(0, "x"), E::IndirectCall);
-    s.err(&Ctx::new(&alice(), &bob(), k1, t_req), Op::Reject { id: 0 }, E::IndirectCall);
+    s.err(
+        &Ctx::new(&bob(), &alice(), k0, t_req),
+        req("x"),
+        E::IndirectCall,
+    );
+    s.err(
+        &Ctx::new(&alice(), &bob(), k1, t_req),
+        appr(0, "x"),
+        E::IndirectCall,
+    );
+    s.err(
+        &Ctx::new(&alice(), &bob(), k1, t_req),
+        Op::Reject { id: 0 },
+        E::IndirectCall,
+    );
 
-    let out = s.ok(&Ctx::signed(&bob(), k1, at(9, 987_654_321_000)), appr(0, "x"));
+    let out = s.ok(
+        &Ctx::signed(&bob(), k1, at(9, 987_654_321_000)),
+        appr(0, "x"),
+    );
     let p = &event_of(&out)["data"];
     assert_eq!(p["approver_account_id"], json!(bob()));
     assert_eq!(p["approver_public_key"], json!(pk_str(k1)));
-    assert_eq!((p["approved_at_block"].clone(), p["approved_at_ns"].clone()), (json!(9), json!("987654321000")));
+    assert_eq!(
+        (p["approved_at_block"].clone(), p["approved_at_ns"].clone()),
+        (json!(9), json!("987654321000"))
+    );
 
     s.ok(&Ctx::signed(&carol(), k2, at(10, 11)), req("y"));
-    let out = s.ok(&Ctx::signed(&bob(), k1, at(12, 345_000_000_013)), Op::Reject { id: 1 });
+    let out = s.ok(
+        &Ctx::signed(&bob(), k1, at(12, 345_000_000_013)),
+        Op::Reject { id: 1 },
+    );
     let j = &event_of(&out)["data"];
-    assert_eq!((j["approver_account_id"].clone(), j["rejected_at_block"].clone(), j["rejected_at_ns"].clone()),
-               (json!(bob()), json!(12), json!("345000000013")));
+    assert_eq!(
+        (
+            j["approver_account_id"].clone(),
+            j["rejected_at_block"].clone(),
+            j["rejected_at_ns"].clone()
+        ),
+        (json!(bob()), json!(12), json!("345000000013"))
+    );
 
     // revoke_key passes the predecessor (DAO owner) and records now().
-    let out = s.ok(&Ctx::new(&owner(), &alice(), k3, at(20, 21)), Op::Revoke { key: k2.clone() });
+    let out = s.ok(
+        &Ctx::new(&owner(), &alice(), k3, at(20, 21)),
+        Op::Revoke { key: k2.clone() },
+    );
     let d = &event_of(&out)["data"];
-    assert_eq!((d["revoked_at_block"].clone(), d["revoked_at_ns"].clone()), (json!(20), json!("21")));
+    assert_eq!(
+        (d["revoked_at_block"].clone(), d["revoked_at_ns"].clone()),
+        (json!(20), json!("21"))
+    );
     s.views("sh1 end");
 }
 
@@ -167,7 +214,12 @@ fn sh1_env_mapping() {
 
 /// Rewrites the counters in `STATE` (non-reachable states for the LogFull
 /// guards; the core decides on them exactly as on reachable ones).
-fn with_counters(storage: &Storage, reqs: Option<u64>, apprs: Option<u64>, regs: Option<u64>) -> Storage {
+fn with_counters(
+    storage: &Storage,
+    reqs: Option<u64>,
+    apprs: Option<u64>,
+    regs: Option<u64>,
+) -> Storage {
     let mut st = state_of(storage);
     st.request_count = reqs.unwrap_or(st.request_count);
     st.approval_count = apprs.unwrap_or(st.approval_count);
@@ -185,16 +237,44 @@ fn sh3_every_error_is_the_exact_message_and_logs_nothing() {
     let mut s = setup();
     let ag = |t| signed(&alice(), k0, t);
     let ap = |t| signed(&bob(), k1, t);
-    s.err(&signed(&alice(), k0, 2), add_agent(&carol(), k2), E::NotOwner);
-    s.err(&by_owner(2), add_approver(&carol(), k0), E::KeyAlreadyRegistered);
-    s.err(&by_owner(2), Op::Revoke { key: k2.clone() }, E::KeyNotRegistered);
-    s.err(&Ctx::new(&bob(), &alice(), k0, at(2, 2)), req("x"), E::IndirectCall);
+    s.err(
+        &signed(&alice(), k0, 2),
+        add_agent(&carol(), k2),
+        E::NotOwner,
+    );
+    s.err(
+        &by_owner(2),
+        add_approver(&carol(), k0),
+        E::KeyAlreadyRegistered,
+    );
+    s.err(
+        &by_owner(2),
+        Op::Revoke { key: k2.clone() },
+        E::KeyNotRegistered,
+    );
+    s.err(
+        &Ctx::new(&bob(), &alice(), k0, at(2, 2)),
+        req("x"),
+        E::IndirectCall,
+    );
     s.err(&signed(&alice(), k2, 2), req("x"), E::UnknownKey);
     s.err(&signed(&bob(), k1, 2), req("x"), E::WrongRole);
     s.err(&signed(&bob(), k0, 2), req("x"), E::KeyAccountMismatch);
     s.err(&ag(2), req(""), E::EmptyAction);
-    s.err(&ag(2), Op::Request { action: "a".repeat(MAX_ACTION_LEN + 1) }, E::ActionTooLong);
-    s.err(&ag(2), Op::Request { action: "é".repeat(1025) }, E::ActionTooLong);
+    s.err(
+        &ag(2),
+        Op::Request {
+            action: "a".repeat(MAX_ACTION_LEN + 1),
+        },
+        E::ActionTooLong,
+    );
+    s.err(
+        &ag(2),
+        Op::Request {
+            action: "é".repeat(1025),
+        },
+        E::ActionTooLong,
+    );
     for _ in 0..MAX_PENDING_PER_KEY {
         s.ok(&ag(3), req("x"));
     }
@@ -209,7 +289,11 @@ fn sh3_every_error_is_the_exact_message_and_logs_nothing() {
     // An approver key of the agent's own account.
     s.ok(&by_owner(5), add_approver(&alice(), k3));
     s.err(&signed(&alice(), k3, 6), appr(2, "x"), E::SelfApproval);
-    s.err(&signed(&alice(), k3, 6), Op::Reject { id: 2 }, E::SelfApproval);
+    s.err(
+        &signed(&alice(), k3, 6),
+        Op::Reject { id: 2 },
+        E::SelfApproval,
+    );
     s.ok(&by_owner(7), Op::Revoke { key: k0.clone() });
     s.err(&ap(8), appr(2, "x"), E::AgentRevoked);
     s.err(&ap(8), Op::Reject { id: 2 }, E::AgentRevoked);
@@ -240,7 +324,10 @@ fn sh3_panic_payload_format() {
     let mut c: ApprovalContract = env::state_read().unwrap();
     let p = catch_quiet(|| c.request_action("x".into())).unwrap_err();
     let raw = p.downcast_ref::<String>().expect("String payload").clone();
-    assert_eq!(raw, format!("{PANIC_PREFIX}{}{PANIC_SUFFIX}", E::UnknownKey.as_str()));
+    assert_eq!(
+        raw,
+        format!("{PANIC_PREFIX}{}{PANIC_SUFFIX}", E::UnknownKey.as_str())
+    );
     std::mem::forget(c);
 }
 
@@ -253,7 +340,10 @@ fn assert_envelope(line: &str, event: &str) {
     let full = event_line(event, "{");
     let head = &full[..full.len() - 1];
     assert!(line.starts_with(head), "envelope: {line}");
-    assert!(line.ends_with('}') && !line.contains('\n'), "one compact line: {line}");
+    assert!(
+        line.ends_with('}') && !line.contains('\n'),
+        "one compact line: {line}"
+    );
 }
 
 #[test]
@@ -267,7 +357,9 @@ fn sh4_approval_requested_is_one_exact_line() {
     let data = &parse_event(&out.logs[0])["data"];
     assert_eq!(data["status"], json!("pending"));
     // The event data equals get_request at that point.
-    let now = view(&s.storage, |c| serde_json::to_value(c.get_request(0)).unwrap());
+    let now = view(&s.storage, |c| {
+        serde_json::to_value(c.get_request(0)).unwrap()
+    });
     assert_eq!(data, &now);
 }
 
@@ -281,7 +373,11 @@ fn sh5_action_approved_equals_return_value_and_get_approval_forever() {
     assert_envelope(&out.logs[0], "action_approved");
     let data = event_of(&out)["data"].clone();
     assert_eq!(out.result.as_ref().unwrap(), &data, "data = return value");
-    let get = |s: &Sim| view(&s.storage, |c| serde_json::to_value(c.get_approval(0)).unwrap());
+    let get = |s: &Sim| {
+        view(&s.storage, |c| {
+            serde_json::to_value(c.get_approval(0)).unwrap()
+        })
+    };
     assert_eq!(get(&s), data, "= get_approval now");
     assert_eq!(data["agent_key_revoked_at"], Value::Null);
     // Later: only the revocation fields may change (F-15), and they report
@@ -309,7 +405,11 @@ fn sh6_each_change_method_logs_exactly_its_event_and_nothing_else_logs() {
         (signed(&alice(), k0, 2), req("x"), "approval_requested"),
         (signed(&alice(), k0, 2), req("y"), "approval_requested"),
         (signed(&bob(), k1, 3), appr(0, "x"), "action_approved"),
-        (signed(&bob(), k1, 3), Op::Reject { id: 1 }, "action_rejected"),
+        (
+            signed(&bob(), k1, 3),
+            Op::Reject { id: 1 },
+            "action_rejected",
+        ),
         (by_owner(4), Op::Revoke { key: k0.clone() }, "key_revoked"),
     ];
     for (c, op, event) in cases {
@@ -333,8 +433,18 @@ fn sh7_views_equal_core_reads_in_every_status() {
     s.ok(&by_owner(1), add_agent(&carol(), k2));
     s.ok(&by_owner(1), add_approver(&carol(), k3));
     for i in 0..6 {
-        s.ok(&signed(&alice(), k0, 2 + i), Op::Request { action: format!("a{i}") });
-        s.ok(&signed(&carol(), k2, 2 + i), Op::Request { action: format!("c{i}") });
+        s.ok(
+            &signed(&alice(), k0, 2 + i),
+            Op::Request {
+                action: format!("a{i}"),
+            },
+        );
+        s.ok(
+            &signed(&carol(), k2, 2 + i),
+            Op::Request {
+                action: format!("c{i}"),
+            },
+        );
     }
     // approved (out of order), rejected, pending, void, and void after re-add.
     for (id, a) in [(4, "a2"), (0, "a0"), (7, "c3")] {
@@ -351,7 +461,10 @@ fn sh7_views_equal_core_reads_in_every_status() {
             .collect::<Vec<_>>()
     });
     for st in ["pending", "approved", "rejected", "void"] {
-        assert!(statuses.contains(&json!(st)), "no {st} request: {statuses:?}");
+        assert!(
+            statuses.contains(&json!(st)),
+            "no {st} request: {statuses:?}"
+        );
     }
     for seed in 0..20 {
         check_views(&s.storage, &s.mem, &mut Rng::new(seed), "sh7");
@@ -407,7 +520,10 @@ fn sh8_json_shape() {
     s.ok(&Ctx::signed(&alice(), k0, big), req("y"));
     s.ok(&Ctx::signed(&bob(), k1, big), appr(0, "x"));
     s.ok(&Ctx::signed(&bob(), k1, big), Op::Reject { id: 1 });
-    s.ok(&Ctx::new(&owner(), &owner(), k1, big), Op::Revoke { key: k1.clone() });
+    s.ok(
+        &Ctx::new(&owner(), &owner(), k1, big),
+        Op::Revoke { key: k1.clone() },
+    );
     let (r, p, j, pr, rv) = view(&s.storage, |c| {
         (
             serde_json::to_value(c.get_request(0)).unwrap(),
@@ -418,16 +534,60 @@ fn sh8_json_shape() {
         )
     });
     // README field names.
-    assert_eq!(keys_of(&r), sorted(&["request_id", "agent_account_id", "agent_public_key",
-        "agent_registration_id", "action", "requested_at_block", "requested_at_ns", "status"]));
-    assert_eq!(keys_of(&p), sorted(&["approval_index", "request_id", "action", "agent_account_id",
-        "agent_public_key", "agent_registration_id", "requested_at_block", "requested_at_ns",
-        "approver_account_id", "approver_public_key", "approver_registration_id",
-        "approved_at_block", "approved_at_ns", "agent_key_revoked_at", "approver_key_revoked_at"]));
-    assert_eq!(keys_of(&j), sorted(&["request_id", "action", "agent_account_id", "agent_public_key",
-        "agent_registration_id", "requested_at_block", "requested_at_ns", "approver_account_id",
-        "approver_public_key", "approver_registration_id", "rejected_at_block", "rejected_at_ns"]));
-    assert_eq!(keys_of(&pr), sorted(&["account_id", "role", "registration_id", "pending"]));
+    assert_eq!(
+        keys_of(&r),
+        sorted(&[
+            "request_id",
+            "agent_account_id",
+            "agent_public_key",
+            "agent_registration_id",
+            "action",
+            "requested_at_block",
+            "requested_at_ns",
+            "status"
+        ])
+    );
+    assert_eq!(
+        keys_of(&p),
+        sorted(&[
+            "approval_index",
+            "request_id",
+            "action",
+            "agent_account_id",
+            "agent_public_key",
+            "agent_registration_id",
+            "requested_at_block",
+            "requested_at_ns",
+            "approver_account_id",
+            "approver_public_key",
+            "approver_registration_id",
+            "approved_at_block",
+            "approved_at_ns",
+            "agent_key_revoked_at",
+            "approver_key_revoked_at"
+        ])
+    );
+    assert_eq!(
+        keys_of(&j),
+        sorted(&[
+            "request_id",
+            "action",
+            "agent_account_id",
+            "agent_public_key",
+            "agent_registration_id",
+            "requested_at_block",
+            "requested_at_ns",
+            "approver_account_id",
+            "approver_public_key",
+            "approver_registration_id",
+            "rejected_at_block",
+            "rejected_at_ns"
+        ])
+    );
+    assert_eq!(
+        keys_of(&pr),
+        sorted(&["account_id", "role", "registration_id", "pending"])
+    );
     assert_eq!(keys_of(&rv), sorted(&["block", "ns"]));
     // Types: ids, indices and heights are numbers (exact past 2^53); *_ns strings.
     let ns = u64::MAX.to_string();
@@ -435,7 +595,10 @@ fn sh8_json_shape() {
     assert_eq!(r["requested_at_ns"], json!(ns));
     assert_eq!(p["approved_at_ns"], json!(ns));
     assert_eq!(j["rejected_at_ns"], json!(ns));
-    assert_eq!(p["approver_key_revoked_at"], json!({"block": (1u64 << 60) + 1, "ns": ns}));
+    assert_eq!(
+        p["approver_key_revoked_at"],
+        json!({"block": (1u64 << 60) + 1, "ns": ns})
+    );
     assert_eq!(rv["ns"], json!(ns));
     for v in [&r, &p, &j] {
         for (k, x) in v.as_object().unwrap() {
@@ -450,7 +613,14 @@ fn sh8_json_shape() {
     assert_eq!(pr["role"], json!("agent"));
     // `null` for absent results.
     let nulls = view(&s.storage, |c| {
-        serde_json::to_value((c.get_request(9), c.get_approval(1), c.get_rejection(0), c.get_revocation(0), c.get_principal(keys()[2].clone()))).unwrap()
+        serde_json::to_value((
+            c.get_request(9),
+            c.get_approval(1),
+            c.get_rejection(0),
+            c.get_revocation(0),
+            c.get_principal(keys()[2].clone()),
+        ))
+        .unwrap()
     });
     assert_eq!(nulls, json!([null, null, null, null, null]));
 }
@@ -462,20 +632,44 @@ fn sh8_json_shape() {
 #[test]
 fn st5_prefixes_distinct_and_state_roundtrips() {
     let storage = deploy(&owner());
-    assert_eq!(sorted_keys(&storage), vec![STATE_KEY.to_vec()], "new() writes only STATE");
+    assert_eq!(
+        sorted_keys(&storage),
+        vec![STATE_KEY.to_vec()],
+        "new() writes only STATE"
+    );
     let st = state_of(&storage);
-    let prefixes = [&st.principals_prefix, &st.requests_prefix, &st.approval_log_prefix, &st.revocations_prefix];
-    assert_eq!(prefixes.map(|p| p.as_slice()), [b"p".as_slice(), b"r", b"a", b"v"]);
+    let prefixes = [
+        &st.principals_prefix,
+        &st.requests_prefix,
+        &st.approval_log_prefix,
+        &st.revocations_prefix,
+    ];
+    assert_eq!(
+        prefixes.map(|p| p.as_slice()),
+        [b"p".as_slice(), b"r", b"a", b"v"]
+    );
     for (i, a) in prefixes.iter().enumerate() {
-        assert!(!STATE_KEY.starts_with(a) && !a.starts_with(STATE_KEY), "prefix {a:?} overlaps STATE");
+        assert!(
+            !STATE_KEY.starts_with(a) && !a.starts_with(STATE_KEY),
+            "prefix {a:?} overlaps STATE"
+        );
         for b in &prefixes[i + 1..] {
-            assert!(!a.starts_with(b) && !b.starts_with(a), "prefixes {a:?} and {b:?} overlap");
+            assert!(
+                !a.starts_with(b) && !b.starts_with(a),
+                "prefixes {a:?} and {b:?} overlap"
+            );
         }
     }
     // The mirror struct is the real layout: re-encoding gives the same bytes.
-    assert_eq!(&near_sdk::borsh::to_vec(&st).unwrap(), storage.get(STATE_KEY).unwrap());
+    assert_eq!(
+        &near_sdk::borsh::to_vec(&st).unwrap(),
+        storage.get(STATE_KEY).unwrap()
+    );
     assert_eq!(st.owner, owner().to_string());
-    assert_eq!((st.request_count, st.approval_count, st.registration_count), (0, 0, 0));
+    assert_eq!(
+        (st.request_count, st.approval_count, st.registration_count),
+        (0, 0, 0)
+    );
 }
 
 /// A fixed scenario touching every map with both curve types.
@@ -490,7 +684,10 @@ fn golden_scenario() -> Sim {
     s.ok(&Ctx::signed(&alice(), k0, at(2, 22)), req("pay 7"));
     s.ok(&Ctx::signed(&bob(), k1, at(3, 30)), appr(0, "pay 5"));
     s.ok(&Ctx::signed(&bob(), k1, at(3, 31)), Op::Reject { id: 1 });
-    s.ok(&Ctx::new(&owner(), &owner(), k1, at(4, 40)), Op::Revoke { key: k1.clone() });
+    s.ok(
+        &Ctx::new(&owner(), &owner(), k1, at(4, 40)),
+        Op::Revoke { key: k1.clone() },
+    );
     s
 }
 
@@ -506,7 +703,13 @@ fn st6_golden_borsh_bytes() {
     let key = |p: &[u8], k: Vec<u8>| [p.to_vec(), k].concat();
     let entries: Vec<(&str, Vec<u8>)> = vec![
         ("state_new", STATE_KEY.to_vec()),
-        ("principal_ed25519", key(&st.principals_prefix, near_sdk::borsh::to_vec(&keys()[0]).unwrap())),
+        (
+            "principal_ed25519",
+            key(
+                &st.principals_prefix,
+                near_sdk::borsh::to_vec(&keys()[0]).unwrap(),
+            ),
+        ),
         ("request_approved", key(&st.requests_prefix, b(0))),
         ("request_rejected", key(&st.requests_prefix, b(1))),
         ("request_pending", key(&st.requests_prefix, b(2))),
@@ -520,16 +723,31 @@ fn st6_golden_borsh_bytes() {
     ];
     let state_new = deploy(&owner());
     for (name, k) in &entries {
-        let v = if *name == "state_new" { state_new.get(STATE_KEY) } else { s.storage.get(k) };
+        let v = if *name == "state_new" {
+            state_new.get(STATE_KEY)
+        } else {
+            s.storage.get(k)
+        };
         let v = v.unwrap_or_else(|| panic!("{name}: key missing"));
         lines.push(format!("{name} {} {}", hex(k), hex(v)));
     }
-    lines.push(format!("state_after_scenario {} {}", hex(STATE_KEY), hex(&s.storage[STATE_KEY])));
+    lines.push(format!(
+        "state_after_scenario {} {}",
+        hex(STATE_KEY),
+        hex(&s.storage[STATE_KEY])
+    ));
     // A secp256k1 principal: re-register the revoked approver key's slot.
     let mut s2 = golden_scenario();
     s2.ok(&by_owner(5), add_approver(&bob(), &keys()[1]));
-    let k = key(&st.principals_prefix, near_sdk::borsh::to_vec(&keys()[1]).unwrap());
-    lines.push(format!("principal_secp256k1 {} {}", hex(&k), hex(&s2.storage[&k])));
+    let k = key(
+        &st.principals_prefix,
+        near_sdk::borsh::to_vec(&keys()[1]).unwrap(),
+    );
+    lines.push(format!(
+        "principal_secp256k1 {} {}",
+        hex(&k),
+        hex(&s2.storage[&k])
+    ));
     let text = lines.join("\n") + "\n";
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/layout.txt");
     if std::env::var_os("UPDATE_GOLDEN").is_some() {
@@ -599,9 +817,13 @@ fn res1_for(k_agent: PublicKey, k_appr: PublicKey) -> Bounds {
     let st = deploy(&owner());
     let b = bounds(&k_agent);
     let ba = bounds(&k_appr);
-    let (d, st) = measured(&by_owner(1), st, |c| c.add_agent(agent.clone(), k_agent.clone()));
+    let (d, st) = measured(&by_owner(1), st, |c| {
+        c.add_agent(agent.clone(), k_agent.clone())
+    });
     assert_eq!(d as u64, b.p, "Add (agent)");
-    let (d, st) = measured(&by_owner(1), st, |c| c.add_approver(approver.clone(), k_appr.clone()));
+    let (d, st) = measured(&by_owner(1), st, |c| {
+        c.add_approver(approver.clone(), k_appr.clone())
+    });
     assert_eq!(d as u64, ba.p, "Add (approver)");
     // Req: one new record; the principal is rewritten at the same size.
     let (d, st) = measured(&Ctx::signed(&agent, &k_agent, at(2, 2)), st, |c| {
@@ -661,28 +883,72 @@ fn worst_case_lines(ka: &PublicKey, kb: &PublicKey) -> Result<[usize; 3], String
     let approver = long_account('b');
     let action = "\u{1}".repeat(MAX_ACTION_LEN);
     let t = at(u64::MAX, u64::MAX);
-    let base = with_counters(&deploy(&owner()), Some(u64::MAX - 2), Some(u64::MAX - 1), Some(u64::MAX - 3));
+    let base = with_counters(
+        &deploy(&owner()),
+        Some(u64::MAX - 2),
+        Some(u64::MAX - 1),
+        Some(u64::MAX - 3),
+    );
     let ok = |o: Outcome<Value>| -> Result<(Storage, usize), String> {
         let r = o.result?;
         let _ = r;
         assert_eq!(o.logs.len(), 1);
         Ok((o.storage, o.logs[0].len()))
     };
-    let (st, _) = ok(contract_step(&Ctx::signed(&owner(), ka, t), base, &add_agent(&agent, ka)))?;
-    let (st, _) = ok(contract_step(&Ctx::signed(&owner(), ka, t), st, &add_approver(&approver, kb)))?;
-    let (st, l_req) = ok(contract_step(&Ctx::signed(&agent, ka, t), st, &Op::Request { action: action.clone() }))?;
-    let (st, _) = ok(contract_step(&Ctx::signed(&agent, ka, t), st, &Op::Request { action: action.clone() }))?;
-    let (st, l_rej) = ok(contract_step(&Ctx::signed(&approver, kb, t), st, &Op::Reject { id: u64::MAX - 1 }))?;
-    let (_, l_appr) = ok(contract_step(&Ctx::signed(&approver, kb, t), st, &Op::Approve { id: u64::MAX - 2, action }))?;
+    let (st, _) = ok(contract_step(
+        &Ctx::signed(&owner(), ka, t),
+        base,
+        &add_agent(&agent, ka),
+    ))?;
+    let (st, _) = ok(contract_step(
+        &Ctx::signed(&owner(), ka, t),
+        st,
+        &add_approver(&approver, kb),
+    ))?;
+    let (st, l_req) = ok(contract_step(
+        &Ctx::signed(&agent, ka, t),
+        st,
+        &Op::Request {
+            action: action.clone(),
+        },
+    ))?;
+    let (st, _) = ok(contract_step(
+        &Ctx::signed(&agent, ka, t),
+        st,
+        &Op::Request {
+            action: action.clone(),
+        },
+    ))?;
+    let (st, l_rej) = ok(contract_step(
+        &Ctx::signed(&approver, kb, t),
+        st,
+        &Op::Reject { id: u64::MAX - 1 },
+    ))?;
+    let (_, l_appr) = ok(contract_step(
+        &Ctx::signed(&approver, kb, t),
+        st,
+        &Op::Approve {
+            id: u64::MAX - 2,
+            action,
+        },
+    ))?;
     Ok([l_req, l_appr, l_rej])
 }
 
 #[test]
 fn res2_worst_case_event_lines_fit_16384_bytes() {
     // The mocked runtime enforces the protocol's limit itself.
-    assert_eq!(near_sdk::test_vm_config().limit_config.max_total_log_length, LOG_LIMIT);
+    assert_eq!(
+        near_sdk::test_vm_config().limit_config.max_total_log_length,
+        LOG_LIMIT
+    );
     let mut worst = 0;
-    for (ka, kb) in [(ed25519(1), ed25519(2)), (secp256k1(1), secp256k1(2)), (ed25519(1), secp256k1(2)), (secp256k1(1), ed25519(2))] {
+    for (ka, kb) in [
+        (ed25519(1), ed25519(2)),
+        (secp256k1(1), secp256k1(2)),
+        (ed25519(1), secp256k1(2)),
+        (secp256k1(1), ed25519(2)),
+    ] {
         let lens = worst_case_lines(&ka, &kb).unwrap_or_else(|e| panic!("worst case failed: {e}"));
         for l in lens {
             assert!(l as u64 <= LOG_LIMIT, "{l} B > {LOG_LIMIT}");
@@ -691,7 +957,9 @@ fn res2_worst_case_event_lines_fit_16384_bytes() {
     }
     // Non-vacuity: the escaping really produced the ~13 KB worst case (F-4).
     assert!(worst > 12_800, "worst line only {worst} B");
-    eprintln!("RES-2: worst event line with ed25519/secp256k1 keys = {worst} B (limit {LOG_LIMIT})");
+    eprintln!(
+        "RES-2: worst event line with ed25519/secp256k1 keys = {worst} B (limit {LOG_LIMIT})"
+    );
 }
 
 /// F-17: with ML-DSA-65 keys (1952-byte keys, about 2676 characters each in
@@ -702,7 +970,10 @@ fn res2_worst_case_event_lines_fit_16384_bytes() {
 fn f17_mldsa65_worst_case_exceeds_the_log_limit() {
     let r = worst_case_lines(&mldsa65(1), &mldsa65(2));
     let e = r.expect_err("expected the approve log to exceed the limit");
-    assert!(e.contains("TotalLogLengthExceeded"), "unexpected failure: {e}");
+    assert!(
+        e.contains("TotalLogLengthExceeded"),
+        "unexpected failure: {e}"
+    );
     // One ML-DSA-65 key (either side) still fits.
     for (ka, kb) in [(mldsa65(1), secp256k1(2)), (secp256k1(1), mldsa65(2))] {
         let lens = worst_case_lines(&ka, &kb).expect("one ML-DSA-65 key fits");

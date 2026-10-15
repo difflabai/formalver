@@ -50,7 +50,11 @@ fn gen_step(rng: &mut Rng, mem: &Mem, time: &mut (u64, u64), heavy: bool) -> (Ct
     let registered = |k: &PublicKey| mem.principal(k).map(|p| p.account_id);
     // Admin calls: the owner as predecessor most of the time, any signer.
     let admin = |rng: &mut Rng| {
-        let pred = if rng.chance(85) { owner() } else { acct.clone() };
+        let pred = if rng.chance(85) {
+            owner()
+        } else {
+            acct.clone()
+        };
         Ctx::new(&pred, &other, &key, now)
     };
     // Signed calls: predecessor = signer mostly, the key's own account mostly.
@@ -59,7 +63,11 @@ fn gen_step(rng: &mut Rng, mem: &Mem, time: &mut (u64, u64), heavy: bool) -> (Ct
             Some(a) if rng.chance(80) => a,
             _ => acct.clone(),
         };
-        let pred = if rng.chance(92) { signer.clone() } else { other.clone() };
+        let pred = if rng.chance(92) {
+            signer.clone()
+        } else {
+            other.clone()
+        };
         Ctx::new(&pred, &signer, k, now)
     };
     let pick_id = |rng: &mut Rng| {
@@ -74,12 +82,27 @@ fn gen_step(rng: &mut Rng, mem: &Mem, time: &mut (u64, u64), heavy: bool) -> (Ct
     // Request-heavy sequences fill one agent key up to the pending cap.
     if heavy && rng.chance(60) {
         if let Some((k, p)) = mem.principals.iter().find(|(_, p)| p.role == Role::Agent) {
-            return (Ctx::signed(&p.account_id, k, now), Op::Request { action: "x".into() });
+            return (
+                Ctx::signed(&p.account_id, k, now),
+                Op::Request { action: "x".into() },
+            );
         }
     }
     match rng.below(100) {
-        0..=11 => (admin(rng), Op::AddAgent { account: acct.clone(), key }),
-        12..=21 => (admin(rng), Op::AddApprover { account: acct.clone(), key }),
+        0..=11 => (
+            admin(rng),
+            Op::AddAgent {
+                account: acct.clone(),
+                key,
+            },
+        ),
+        12..=21 => (
+            admin(rng),
+            Op::AddApprover {
+                account: acct.clone(),
+                key,
+            },
+        ),
         22..=27 => (admin(rng), Op::Revoke { key }),
         28..=59 => {
             // Request with an agent key when there is one.
@@ -89,8 +112,17 @@ fn gen_step(rng: &mut Rng, mem: &Mem, time: &mut (u64, u64), heavy: bool) -> (Ct
                 .filter(|(_, p)| p.role == Role::Agent)
                 .map(|(k, _)| k.clone())
                 .collect::<Vec<_>>();
-            let k = if !k.is_empty() && rng.chance(85) { rng.pick(&k).clone() } else { key };
-            (signed(rng, &k), Op::Request { action: action(rng) })
+            let k = if !k.is_empty() && rng.chance(85) {
+                rng.pick(&k).clone()
+            } else {
+                key
+            };
+            (
+                signed(rng, &k),
+                Op::Request {
+                    action: action(rng),
+                },
+            )
         }
         _ => {
             let k = mem
@@ -99,7 +131,11 @@ fn gen_step(rng: &mut Rng, mem: &Mem, time: &mut (u64, u64), heavy: bool) -> (Ct
                 .filter(|(_, p)| p.role == Role::Approver)
                 .map(|(k, _)| k.clone())
                 .collect::<Vec<_>>();
-            let k = if !k.is_empty() && rng.chance(85) { rng.pick(&k).clone() } else { key };
+            let k = if !k.is_empty() && rng.chance(85) {
+                rng.pick(&k).clone()
+            } else {
+                key
+            };
             let ctx = signed(rng, &k);
             let id = pick_id(rng);
             if rng.chance(70) {
@@ -171,10 +207,22 @@ fn store_refines_memstore_with_reload_every_step() {
             assert!(oks.get(k).copied().unwrap_or(0) > 0, "no successful {k}");
         }
         for e in [
-            "NotOwner", "IndirectCall", "UnknownKey", "WrongRole", "KeyAccountMismatch",
-            "KeyAlreadyRegistered", "KeyNotRegistered", "EmptyAction", "ActionTooLong",
-            "TooManyPending", "RequestNotFound", "AlreadyApproved", "AlreadyRejected",
-            "AgentRevoked", "ActionMismatch", "SelfApproval",
+            "NotOwner",
+            "IndirectCall",
+            "UnknownKey",
+            "WrongRole",
+            "KeyAccountMismatch",
+            "KeyAlreadyRegistered",
+            "KeyNotRegistered",
+            "EmptyAction",
+            "ActionTooLong",
+            "TooManyPending",
+            "RequestNotFound",
+            "AlreadyApproved",
+            "AlreadyRejected",
+            "AgentRevoked",
+            "ActionMismatch",
+            "SelfApproval",
         ] {
             assert!(errors.contains_key(e), "error {e} never produced");
         }

@@ -29,18 +29,35 @@ verdict() { # <rc> <log>: survived | killed | ERROR
   fi
 }
 
+# tree <patch|->: a fresh copy of the contract (patched) and the suite.
+tree() {
+  rm -rf "$work/tree"
+  mkdir -p "$work/tree/source-mirror/contracts/approval" "$work/tree/near-tests"
+  # Cargo.lock: tests/lockfile.rs compares against the mirror's lockfile.
+  cp -r "$proj/source-mirror/contracts/approval/core" "$proj/source-mirror/contracts/approval/contract" \
+    "$proj/source-mirror/contracts/approval/Cargo.lock" "$work/tree/source-mirror/contracts/approval/"
+  cp -r "$here/Cargo.toml" "$here/Cargo.lock" "$here/src" "$here/tests" "$work/tree/near-tests/"
+  [ "$1" = - ] || (cd "$work/tree/source-mirror/contracts/approval" && patch -s -p1 < "$1")
+}
+
+# Control: the unpatched copy must pass, or every "killed" below is noise.
+tree - || exit 2
+(cd "$work/tree/near-tests" && cargo test --locked --no-fail-fast) >"$work/log" 2>&1
+rc=$?
+v=$(verdict $rc "$work/log")
+printf '%-44s %-8s\n' "(unpatched control)" "$v"
+if [ "$v" != survived ]; then
+  tail -n 40 "$work/log"; echo "the unpatched suite does not pass in the mutant tree" >&2; exit 2
+fi
+
 fail=0
 n=0
 printf '%-44s %-8s %s\n' mutant verdict failing-tests
 for p in "$here"/mutants/$glob.patch; do
+  [ -e "$p" ] || continue
   name=$(basename "$p" .patch)
   n=$((n + 1))
-  rm -rf "$work/tree"
-  mkdir -p "$work/tree/source-mirror/contracts/approval" "$work/tree/near-tests"
-  cp -r "$proj/source-mirror/contracts/approval/core" "$proj/source-mirror/contracts/approval/contract" \
-    "$work/tree/source-mirror/contracts/approval/"
-  cp -r "$here/Cargo.toml" "$here/Cargo.lock" "$here/src" "$here/tests" "$work/tree/near-tests/"
-  if ! (cd "$work/tree/source-mirror/contracts/approval" && patch -s -p1 < "$p"); then
+  if ! tree "$p"; then
     printf '%-44s %s\n' "$name" "PATCH-FAILED"; fail=1; continue
   fi
   (cd "$work/tree/near-tests" && cargo test --locked --no-fail-fast) >"$work/log" 2>&1
