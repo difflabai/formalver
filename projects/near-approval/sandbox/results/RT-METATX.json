@@ -1,0 +1,14 @@
+{
+  "agent_fc_key": {
+    "receipt_on_C": "Smart contract panicked: caller must be the signing account (IndirectCall)",
+    "state_unchanged": true,
+    "transaction_status": "success"
+  },
+  "agent_full_access_key": {
+    "receipt_on_C": "Smart contract panicked: caller must be the signing account (IndirectCall)",
+    "state_unchanged": true,
+    "transaction_status": "success"
+  },
+  "near_sandbox": "2.13.4 (near-sandbox 0.3.16 default)",
+  "wasm_kind": "non-reproducible"
+}

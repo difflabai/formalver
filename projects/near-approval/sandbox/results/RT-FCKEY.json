@@ -1,0 +1,9 @@
+{
+  "agent_key+deposit": "DepositWithFunctionCall",
+  "agent_key->AddKey": "RequiresFullAccess",
+  "agent_key->add_agent": "InvalidTxError::InvalidAccessKeyError(MethodNameMismatch)",
+  "agent_key->approve": "InvalidTxError::InvalidAccessKeyError(MethodNameMismatch)",
+  "approver_key->request_action": "InvalidTxError::InvalidAccessKeyError(MethodNameMismatch)",
+  "near_sandbox": "2.13.4 (near-sandbox 0.3.16 default)",
+  "wasm_kind": "non-reproducible"
+}
