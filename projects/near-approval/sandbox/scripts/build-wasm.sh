@@ -27,7 +27,22 @@ cd "$contract"
 case "$mode" in
     non-reproducible) cargo near build non-reproducible-wasm --locked ;;
     reproducible)
-        cargo near build reproducible-wasm --out-dir "$CARGO_TARGET_DIR/near/approval_contract" ;;
+        # cargo-near opens the contract's git repository with libgit2 and
+        # clones it to a build site. From inside the source-mirror submodule
+        # (a `.git` file, not a directory) it resolves formalver's repository
+        # instead, then needs credentials for its remote. Build from a plain
+        # local clone of the mirror at the same commit: a filesystem clone
+        # needs no network or credentials, and the wasm records the commit
+        # and the Cargo.toml repository URL, not where the clone lives.
+        repo="$(git -C "$contract" rev-parse --show-toplevel)"
+        rev="$(git -C "$repo" rev-parse HEAD)"
+        [ -z "$(git -C "$repo" status --porcelain)" ] || { echo "$repo is dirty" >&2; exit 1; }
+        rel="${contract#"$repo"/}"
+        clone="$(mktemp -d)/trust-framework"
+        trap 'rm -rf "$(dirname "$clone")"' EXIT
+        git clone --quiet --no-checkout "$repo" "$clone"
+        git -C "$clone" checkout --quiet --detach "$rev"
+        (cd "$clone/$rel" && cargo near build reproducible-wasm --out-dir "$CARGO_TARGET_DIR/near/approval_contract") ;;
     reproducible-manual)
         repo="$(git -C "$contract" rev-parse --show-toplevel)"
         rev="$(git -C "$repo" rev-parse HEAD)"
