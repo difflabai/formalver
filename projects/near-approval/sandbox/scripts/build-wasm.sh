@@ -42,7 +42,10 @@ case "$mode" in
         trap 'rm -rf "$(dirname "$clone")"' EXIT
         git clone --quiet --no-checkout "$repo" "$clone"
         git -C "$clone" checkout --quiet --detach "$rev"
-        (cd "$clone/$rel" && cargo near build reproducible-wasm --out-dir "$CARGO_TARGET_DIR/near/approval_contract") ;;
+        # Without CARGO_TARGET_DIR: cargo-near looks for the container's output
+        # under the host's target directory, which the container never sees.
+        out="$CARGO_TARGET_DIR/near/approval_contract"
+        (cd "$clone/$rel" && env -u CARGO_TARGET_DIR cargo near build reproducible-wasm --out-dir "$out") ;;
     reproducible-manual)
         repo="$(git -C "$contract" rev-parse --show-toplevel)"
         rev="$(git -C "$repo" rev-parse HEAD)"
