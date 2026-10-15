@@ -41,7 +41,7 @@ trace_row('D8',  ['INV-1', 'INV-3', 'INV-4', 'INV-7', 'LEM-1', 'LEM-2', 'HIST-3'
 trace_row('D9',  ['INV-2', 'INV-9', 'ROB-3', 'TR-6', 'RES-1', 'RES-2']).
 trace_row('D10', ['TX-5', 'TR-1']).
 % D11 amended (decision D17): "no upgrade, expiry or threshold".
-trace_row('D11', ['SH-11', 'SH-12', 'C-1']).
+trace_row('D11', ['SH-11', 'SH-12', 'C-1', 'C-6']).
 trace_row('D12', ['TX-0', 'ROB-1', 'ROB-2', 'ROB-4', 'ST-1', 'ST-2', 'ST-3', 'ST-4', 'ST-5', 'ST-6', 'SH-2', 'SH-3', 'RD-6', 'LEM-3']).
 trace_row('D13', ['INV-10', 'TR-4']).
 trace_row('D14', ['RT-CODEHASH', 'RT-RESET', 'RT-TRACE', 'DEP-1', 'VER-2', 'VER-3', 'VER-6']).
@@ -51,7 +51,7 @@ trace_row('D16', ['VER-1', 'VER-4', 'VER-5', 'VER-7', 'VER-8']).
 %%% M4 additions (not in the 5.12 table, which predates PR #15 and M1.5)
 % D17 rejection: TX-7 (reject contract), HIST-9 (Rejected terminal), INV-13 (one
 % decision), INV-5/INV-6 for rejections, TR-2 (decided at most once), RD-7 (status).
-trace_row('D17', ['TX-7', 'HIST-9', 'INV-13', 'INV-5', 'INV-6', 'TR-2', 'RD-7', 'TLA-LIVE-2']).
+trace_row('D17', ['TX-7', 'HIST-9', 'INV-13', 'INV-5', 'INV-6', 'TR-2', 'RD-7', 'TLA-LIVE-2', 'SH-6']).
 % D7 recorded revocation (registration ids and revocation times, PR #15).
 trace_row('D7',  ['INV-11', 'INV-12', 'INV-14', 'INV-15', 'INV-16', 'HIST-10', 'TR-7', 'RD-8']).
 % D6/D7/D8/D9 at every depth in the TLA+ model; D9 "stays approvable" (TLA-LIVE).
@@ -84,9 +84,9 @@ status_pending_id(_) :- fail.
 property('C-1', prolog, "Authority matrix: one authority per change method; owner/agent/approver method sets disjoint; no key can both request and approve").
 property('C-2', prolog, "Guard table: every ApprovalError produced by >=1 guard; specified precedence equals generated code_precedence/2").
 property('C-3', prolog, "Error messages pairwise distinct and substring-free").
-property('C-4', prolog, "Each event from exactly one method; authority/proof-changing ops emit an event or carry accepted_risk (admin ops emit key_added / key_revoked since 3426c92)").
+property('C-4', prolog, "Each event from exactly one core operation (key_added from add_principal via add_agent and add_approver; key_revoked, approval_requested, action_approved, action_rejected); authority/proof-changing methods emit or carry accepted_risk (new); only change methods emit").
 property('C-5', prolog, "Generated constants equal requirement constants; DEFAULT_PAGE_SIZE <= MAX_PAGE_SIZE; MAX_PENDING_PER_KEY >= 1; MAX_ACTION_LEN within RES-2 bound").
-property('C-6', prolog, "Generated API surface (wasm exports + ABI) equals the requirements API table").
+property('C-6', prolog, "Generated API surface equals the requirements API table: #[near] wasm exports = method/3 names, other exports only near-sdk's, ABI kind and modifiers match each method's kind and authority").
 property('C-7', prolog, "Traceability both ways: every requirement has >=1 property; every property traces to a requirement or threat").
 property('C-8', prolog, "Every threat has mitigated_by or accepted_risk").
 property('C-9', prolog, "Property and assumption IDs in status.toml equal those in traceability.pl").
@@ -178,23 +178,23 @@ property('MC-4', lean, "Graph equivalence: the Lean machine and TLC export the f
 property('REF-5', plain, "Trace validation: 60 x 80-call core traces equal tla.rs on every step, and TLC accepts each as a behaviour of ApprovalCore.tla (>= 5 revival attempts, >= 20 rejections and revocations)").
 % [modules.contract_store]
 property('ST-4', difftest, "Real ApprovalContract store refines MemStore over 10k x 50 random ops, persisted and reloaded every step").
-property('ST-5', unit, "Storage prefixes p/r/a distinct from each other and STATE; all keys well-formed after random runs").
-property('ST-6', unit, "Golden Borsh bytes for STATE and each map value; layout changes flagged storage-breaking").
+property('ST-5', unit, "Storage prefixes p/r/a/v pairwise distinct, prefix-free and distinct from STATE; after every random step the keys are exactly STATE and prefix ++ borsh(key) for the entries alpha lists").
+property('ST-6', unit, "Golden Borsh bytes for STATE and one entry of each map (ed25519 and secp256k1 principals; pending, approved, rejected requests; log; revocation); layout changes flagged storage-breaking").
 % [modules.contract_shell]
 property('SH-1', unit, "Env mapping (caller, now); add_agent/add_approver pass the right role; owner methods pass the predecessor").
 property('SH-2', difftest, "Exactly one core transition per change call and no other writes").
 property('SH-3', unit, "Core Err(e) panics with exactly e.as_str() (catch_unwind) and logs nothing").
 property('SH-4', unit, "approval_requested: exactly one NEP-297 line with RequestView(r), status pending; emitted only after Ok").
-property('SH-5', unit, "action_approved: exactly one line; data = return value = get_approval(i)").
-property('SH-6', unit, "No other method logs").
-property('SH-7', unit, "View mapping: get_approval(s), get_approvals defaults (0, 50); get_request None past #R else every field of R[i] plus request_status; get_principal None if unregistered else account, role, pending; get_owner; counts").
-property('SH-8', unit, "JSON shape: README field names, U64 strings for *_ns, numbers for ids, {} or null fields give defaults, whole-args null fails, lossless conversions").
+property('SH-5', unit, "action_approved: exactly one line; data = return value = get_approval(i) at approval (revocation fields null); later get_approval differs only in agent_key_revoked_at / approver_key_revoked_at").
+property('SH-6', unit, "Each change method logs exactly its one event (key_added, key_revoked, approval_requested, action_approved, action_rejected = returned RejectionView); new, views and failed calls log nothing").
+property('SH-7', unit, "View mapping: get_approval(s) with proof_revocations, get_approvals defaults (0, 50); get_request None past #R else every field of R[i] plus request_status; get_rejection; get_revocation = V(g); get_principal None if unregistered else account, role, registration_id, pending; get_owner; counts").
+property('SH-8', unit, "JSON shape: README field names of every view and event payload (incl. revocation fields, RejectionView, KeyView, KeyRevokedView, BlockTimeView), U64 strings for *_ns, numbers for ids and heights, {} or null fields give defaults, whole-args null fails (wasm wrappers: sandbox), lossless conversions").
 property('SH-9', sandbox, "Init once, only from C; methods fail before init; post-init state is Init(owner)").
-property('SH-10', sandbox, "All 13 exports called with 1 yocto via full-access keys (new on a fresh deployment): change methods and new fail with the non-payable panic; view outcomes recorded").
-property('SH-11', 'wasm-check', "Function exports exactly the 13 methods + contract_source_metadata (+ __contract_abi if embedded); non-function exports memory (+ __data_end/__heap_base); no Store, upgrade or owner-transfer export").
-property('SH-12', 'wasm-check', "No promise_*, deploy, delete or transfer imports; only ST-5 storage keys written").
-property('RES-1', unit, "Storage growth per op bounded from the Borsh layout; measured on-chain; <= 16 x B_req lockable per agent key without an approver").
-property('RES-2', unit, "Worst-case event lines (2048 escaped control bytes, 64-char accounts, secp256k1 keys) fit 16384 B (F-4)").
+property('SH-10', sandbox, "All 16 #[near] methods (and contract_source_metadata) called with 1 yocto via full-access keys (new on a fresh deployment): change methods and new fail with the non-payable panic; view outcomes recorded").
+property('SH-11', 'wasm-check', "Function exports exactly the 16 #[near] methods + contract_source_metadata + __contract_abi (embedded by cargo-near); the only non-function export is memory; no Store, upgrade or owner-transfer export (wasm-surface.expected)").
+property('SH-12', 'wasm-check', "No promise_*, deploy, delete, add-key, global-contract or transfer imports (exact import set in wasm-surface.expected); only ST-5 storage keys written").
+property('RES-1', unit, "Storage growth per op (add, revoke, request, approve, reject) bounded from the Borsh layout and metered by VMLogic; measured on-chain; <= 16 x B_req lockable per agent key without an approver").
+property('RES-2', unit, "Worst-case approval_requested, action_approved and action_rejected lines (2048 escaped control bytes, 64-char accounts, ed25519/secp256k1 keys, max u64s) fit 16384 B (F-4); ML-DSA-65 keys on both sides do not (F-17)").
 property('RES-3', sandbox, "get_approvals(0,100) over max-size proofs stays under view gas and 4 MiB return").
 % [modules.runtime_assumptions]
 property('RT-KEY', sandbox, "FC key of account a arrives as signer = predecessor = a with signer_pk = key; unregistered and cross-account keys rejected").
