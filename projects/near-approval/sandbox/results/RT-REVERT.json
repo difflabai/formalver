@@ -1,0 +1,91 @@
+{
+  "core_rejection": {
+    "failure": "action is empty",
+    "logs_on_C": 0
+  },
+  "lack_balance_for_state": {
+    "approve": {
+      "event_survives_in_failed_outcome": true,
+      "failure": "LackBalanceForState",
+      "logs_on_C": 1
+    },
+    "request_action": {
+      "event_survives_in_failed_outcome": true,
+      "failure": "LackBalanceForState",
+      "logs_on_C": 1
+    }
+  },
+  "near_sandbox": "2.13.4 (near-sandbox 0.3.16 default)",
+  "out_of_gas": {
+    "event_survives_in_failed_outcome": true,
+    "min_success_gas_tgas_approx": 0.9,
+    "probes": [
+      {
+        "failure": "Exceeded the prepaid gas.",
+        "fraction_of_min": "39/40",
+        "logs_on_C": 1
+      },
+      {
+        "failure": "Exceeded the prepaid gas.",
+        "fraction_of_min": "38/40",
+        "logs_on_C": 1
+      },
+      {
+        "failure": "Exceeded the prepaid gas.",
+        "fraction_of_min": "37/40",
+        "logs_on_C": 1
+      },
+      {
+        "failure": "Exceeded the prepaid gas.",
+        "fraction_of_min": "36/40",
+        "logs_on_C": 1
+      },
+      {
+        "failure": "Exceeded the prepaid gas.",
+        "fraction_of_min": "35/40",
+        "logs_on_C": 1
+      },
+      {
+        "failure": "Exceeded the prepaid gas.",
+        "fraction_of_min": "34/40",
+        "logs_on_C": 1
+      },
+      {
+        "failure": "Exceeded the prepaid gas.",
+        "fraction_of_min": "33/40",
+        "logs_on_C": 1
+      },
+      {
+        "failure": "Exceeded the prepaid gas.",
+        "fraction_of_min": "32/40",
+        "logs_on_C": 1
+      },
+      {
+        "failure": "Exceeded the prepaid gas.",
+        "fraction_of_min": "31/40",
+        "logs_on_C": 1
+      },
+      {
+        "failure": "Exceeded the prepaid gas.",
+        "fraction_of_min": "30/40",
+        "logs_on_C": 1
+      },
+      {
+        "failure": "Exceeded the prepaid gas.",
+        "fraction_of_min": "29/40",
+        "logs_on_C": 1
+      },
+      {
+        "failure": "Exceeded the prepaid gas.",
+        "fraction_of_min": "28/40",
+        "logs_on_C": 1
+      },
+      {
+        "failure": "Exceeded the prepaid gas.",
+        "fraction_of_min": "27/40",
+        "logs_on_C": 0
+      }
+    ]
+  },
+  "wasm_kind": "reproducible"
+}

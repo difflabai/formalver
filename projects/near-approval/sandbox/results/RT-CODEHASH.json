@@ -1,0 +1,28 @@
+{
+  "bytes": 167540,
+  "code_hash": "6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg",
+  "function_exports": [
+    "__contract_abi",
+    "add_agent",
+    "add_approver",
+    "approve",
+    "contract_source_metadata",
+    "get_approval",
+    "get_approval_count",
+    "get_approvals",
+    "get_owner",
+    "get_principal",
+    "get_rejection",
+    "get_request",
+    "get_request_count",
+    "get_revocation",
+    "new",
+    "reject",
+    "request_action",
+    "revoke_key"
+  ],
+  "near_sandbox": "2.13.4 (near-sandbox 0.3.16 default)",
+  "reproducible": true,
+  "wasm_kind": "reproducible",
+  "wasm_sha256": "5223150408c6bce4d857eb155228c8f5e2dcdc5a2748d933c6ec7369947e443d"
+}

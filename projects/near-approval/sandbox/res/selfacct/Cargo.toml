@@ -1,0 +1,11 @@
+[package]
+name = "sandbox-selfacct"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+near-sdk = "5.29"

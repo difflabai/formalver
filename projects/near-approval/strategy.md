@@ -423,7 +423,7 @@ within bounds), VC/VM (unbounded), PM and Kp.
 |---|---|---|
 | RES-1 | **Storage growth per operation** (bytes, each record counted with its key and the 40-byte per-record overhead): <br>• `Req` adds one record of ≤ `B_req` and rewrites one principal at the same size (`pend` is fixed-width); <br>• `Appr` grows one request by ≤ `B_ap` and adds a log record of `B_log`; <br>• `Rej` grows one request by ≤ `B_rej`; <br>• `Add` adds ≤ `B_p`; <br>• `Revoke` removes one principal and adds a revocation record of `B_v`; <br>• failures add nothing. <br>With 64-character accounts, 2048-byte actions and ed25519/secp256k1 keys (secp256k1 is the larger): `B_p` = 199, `B_req` = 2272, `B_ap` = 169, `B_log` = 57, `B_rej` = 161, `B_v` = 65. The bounds come from the Borsh layout and equal VMLogic's metering of the worst case (D), and the deltas are measured on-chain (S). With INV-9, the worst case an agent key can lock without an approver is 16 × `B_req` = 0.364 NEAR (0.666 NEAR with ML-DSA-65 keys, `B_req` = 4160: F-17). | D / S |
 | RES-2 | Every accepted request is approvable within log limits: for `1 ≤ len(a) ≤ N`, the worst-case `approval_requested`, `action_approved` and `action_rejected` lines are each ≤ 16384 B. The worst case: 64-character accounts, ed25519 or secp256k1 keys, 2048 control bytes (each escaped to `\u00XX`), `u64::MAX` times and 20-digit ids; the longest line is `action_approved` at 13197 B (F-4). **Not true with ML-DSA-65 keys** on both the agent and the approver key: 18256 B (F-17). | D (explicit-limit unit test) / S |
-| RES-3 | `get_approvals(0,100)` over 100 maximum-size, fully escaped proofs stays under the view gas cap and the 4 MiB return limit (estimate about 1.3 MB). | S |
+| RES-3 | `get_approvals(0,100)` over 100 maximum-size, fully escaped proofs stays under the view gas cap and the 4 MiB return limit (estimate about 1.3 MB). *Measured (M6):* about 1.30 MB (1,299,658-1,299,659 B; the count varies by a byte between runs); about 88.3-88.4 TGas when called as a transaction. | S |
 
 ### 5.8 Contract shell (SH)
 
@@ -438,7 +438,7 @@ within bounds), VC/VM (unbounded), PM and Kp.
 | SH-7 | **View mapping:** <br>• `get_approval(i)` is `approval(s,i)` with the revocation fields from `proof_revocations` (RD-8), and `get_approvals(f?,l?)` is `approvals(f.unwrap_or(0), l.unwrap_or(50))` mapped the same way; <br>• `get_request(i)` is `None` for `i ≥ #R`, otherwise a `RequestView` with every field equal to `R[i]` (including `agent_registration_id`) and `status = request_status`; <br>• `get_rejection(i)` is `None` unless `R[i].rj ≠ None`, otherwise every field of `R[i]` and its rejection; <br>• `get_revocation(g)` is `V(g)` as `{block, ns}`; <br>• `get_principal(k)` is `None` for `k ∉ dom P`, otherwise `account_id`, `role`, `registration_id` and `pending` equal `P(k)`; <br>• `get_owner` is `o`; <br>• the counts are the store counters. | D |
 | SH-8 | **JSON shape:** <br>• field names as in the README for `RequestView`, `ApprovalProofView` (with `agent_key_revoked_at` / `approver_key_revoked_at`: `null` or `{block, ns}`), `RejectionView`, `PrincipalView` (with `registration_id`), `KeyView`, `KeyRevokedView` and `BlockTimeView`; <br>• `*_ns` and `ns` are strings (`U64`); ids, indices, heights and `block` are numbers, exact above 2⁵³; absent results are `null`; <br>• arguments `{}`, or `from_index`/`limit` set to `null`, give the defaults; whole-args `null` and empty input fail with near-sdk's deserialization panic (message recorded). The argument half exists only in the wasm wrappers: S (M6); <br>• `From` conversions, `request_view`, `proof_view` and `rejection_view` preserve every field. | D, S |
 | SH-9 | **Init:** `new` succeeds once (`#[init]`) and only from `C` (`#[private]`). Every method fails before init (`PanicOnDefault`). Post-init state is `Init(owner_id)`. Wrapper-only, so unit tests can't see it [conf: high]. | S / R |
-| SH-10 | **Deposits:** call all 16 `#[near]` methods (and `contract_source_metadata`) with 1 yocto attached, using **full-access** keys (function-call keys can't attach deposits), calling `new` on a fresh, uninitialized deployment. Every change method and `new` must fail with near-sdk's non-payable panic; record the outcome for each `get_*` [conf: med that the wrapper checks `&self` methods]. | S |
+| SH-10 | **Deposits:** call all 16 exports at the pin (13 before PR #15, F-15) with 1 yocto attached, using **full-access** keys (function-call keys can't attach deposits), calling `new` on a fresh, uninitialized deployment. Every change method and `new` must fail with near-sdk's non-payable panic; record the outcome for each `get_*`. *Observed (M6, near-sandbox 2.13.4):* every change method and `new` fail with `Method <m> doesn't accept deposit`; every `get_*` (and `contract_source_metadata`) **accepts** the deposit when called as a transaction, so the wrapper checks only `&mut self` methods. | S |
 | SH-11 | **Export surface:** function exports are exactly the 16 `#[near]` methods (`new`, `add_agent`, `add_approver`, `revoke_key`, `request_action`, `approve`, `reject`, `get_owner`, `get_principal`, `get_request`, `get_request_count`, `get_approval`, `get_rejection`, `get_revocation`, `get_approvals`, `get_approval_count`) plus `contract_source_metadata` and `__contract_abi` (cargo-near embeds the ABI; observed at M3). The only non-function export is `memory` (no `__data_end`/`__heap_base` after cargo-near's `wasm-opt`). `wasm-surface.expected` lists both sets. No `Store` method, upgrade or owner transfer is exported. | W / S |
 | SH-12 | **No escape hatches:** wasm imports include no `promise_*` (which covers create, then, batch, yield, and, return), no deploy, no delete, no add-key, no global-contract and no transfer host function; `wasm-surface.expected` lists the exact import set (17 `env` functions at the pin). The only storage keys written are those of ST-5. | W / R |
 
@@ -449,14 +449,14 @@ within bounds), VC/VM (unbounded), PM and Kp.
 | RT-KEY | A function-call key `k` of account `a` arrives as `signer = predecessor = a` with `signer_pk = k`. An unregistered key on the right account gets `UnknownKey`. A registered key added to another account gets `KeyAccountMismatch`. | ASM-SIGNER |
 | RT-RELAY | `request_action`/`approve` through a third-party relay contract fails with `IndirectCall`. | ASM-PRED |
 | RT-SELFACCT | A contract on the signer's own account calling `C` **succeeds** (documents F-9). | ASM-PRED |
-| RT-METATX | NEP-366 delegate action: record the outcome (expected `IndirectCall`). | ASM-META |
+| RT-METATX | NEP-366 delegate action: record the outcome (expected `IndirectCall`). *Observed:* `IndirectCall` on C, for an agent function-call key and for a full-access agent key; the relayer's transaction succeeds. | ASM-META |
 | RT-FCKEY | An agent function-call key scoped to `request_action` can't call `approve` or `add_agent`. Assert `InvalidTxError::InvalidAccessKeyError(MethodNameMismatch)`, not a contract panic: the contract would also reject both calls, so only the error kind shows the runtime enforced the scope. | ASM-FCKEY |
-| RT-REVERT | Force failures, including `LackBalanceForState` after draining `C`'s balance, and a call with just enough gas for the core step. State and views must be unchanged. Record whether the event survives in the failed outcome. | ASM-ATOMIC |
-| RT-BATCH | One tx `[request_action("a"), request_action("")]`, signed by a **full-access** key of the agent account that is also its registered agent key (a function-call key can sign only single-action txs). The outcome fails at action index 1 with "action is empty", and the counters are unchanged. Record whether the first event appears. | ASM-ATOMIC |
+| RT-REVERT | Force failures, including `LackBalanceForState` after draining `C`'s balance, and a call with just enough gas for the core step. State and views must be unchanged. Record whether the event survives in the failed outcome. *Observed:* state unchanged in every case; the event **survives** in the failed outcome for out of gas after the emit (attached gas from about 27/40 to 39/40 of the minimum) and for `LackBalanceForState` on `request_action` and `approve`. | ASM-ATOMIC |
+| RT-BATCH | One tx `[request_action("a"), request_action("")]`, signed by a **full-access** key of the agent account that is also its registered agent key (a function-call key can sign only single-action txs). The outcome fails at action index 1 with "action is empty", and the counters are unchanged. Record whether the first event appears. *Observed:* it **appears** in the failed outcome. | ASM-ATOMIC |
 | RT-RESET | Delete and recreate `C`: counters reset. VER-3 (a full-access key or a `DeleteAccount` since `b₀`) detects it. VER-6 is only a heuristic that catches it while counters are below cached values. | ASM-CODE |
 | RT-SPOOF | A spoofer contract logs a forged `EVENT_JSON`. The VER-1 `executor_id` rule rejects it. | VER-1 |
 | RT-CODEHASH | The wasm under test is the `cargo near build reproducible-wasm` output. Record its sha256 (hex) **and** the NEAR `code_hash` (base58 of sha256). *Was blocked by F-12 (resolved upstream, R-8).* | ASM-DEPLOY, ASM-COMPILE |
-| RT-TRACE | **Main flows on the deployed artifact.** Replay every `conformance/traces/*.txt`, plus 200 random sequences of ≤30 ops, on the reproducible wasm. For each step, these must equal `spec.rs`: the result or return value, the exact failure message, the receipt logs, and the `get_*` views (including `{}` args, nulls, `limit = 0`, and values > 2⁵³). *Was blocked by F-12 (resolved upstream, R-8).* | ASM-COMPILE, ASM-SDK |
+| RT-TRACE | **Main flows on the deployed artifact.** Replay every `conformance/traces/*.txt`, plus 200 random sequences of ≤30 ops, on the reproducible wasm. For each step, these must equal `spec.rs`: the result or return value, the exact failure message, the receipt logs, and the `get_*` views (including `{}` args, nulls, `limit = 0`, and values > 2⁵³). *As built (M6):* `spec.rs` runs over the Kani `ArrStore` (at most 4 requests), so the per-step oracle is the real core on the host over `MemStore`, with the sandbox's block times and JSON rendered from the README; it is tied to `spec.rs` by Kani and plain mode, and to `tla.rs` and `step/4` because every step must also match the trace file (`prolog.txt` from `step/4`; `core-random.txt`, the 200 × 30 random sequences, from `kani/src/trace.rs`, each step checked against `tla.rs`). *Observed (M6):* 210 traces, 6,800 steps, every step equal, on the reproducible wasm (near-sandbox 2.13.4, about 10.5 min with 6 jobs). | ASM-COMPILE, ASM-SDK |
 
 ### 5.10 Deployment and verifier rules (DEP, VER)
 
@@ -473,7 +473,8 @@ within bounds), VC/VM (unbounded), PM and Kp.
 3. The owner is a multisig or DAO.
 4. Every registered key exists on its bound account as a **function-call
    key**: receiver `C`, `method_names = [request_action]` for agents or
-   `[approve]` for approvers, finite allowance. The contract can't list its
+   `[approve]` or `[approve, reject]` for approvers (the README asks for both
+   since PR #15 added `reject`), finite allowance. The contract can't list its
    keys, so the registered-key set is rebuilt by replaying every successful
    `add_agent`/`add_approver`/`revoke_key` receipt to `C` since `b₀` from an
    indexer (or NEAR Lake). This is a point-in-time check. VER-8 is the
@@ -825,6 +826,54 @@ facts.
   and regenerates `prolog/extracted/api_facts.pl` from the exports and the
   ABI. C-6 passes on it.
 
+**Status (2026-10-15, M6 and M7 built; statuses `in-progress` pending the spec
+review).**
+- **`sandbox/`** is a standalone workspace (`near-workspaces` 0.23.0, the
+  default near-sandbox 2.13.4, protocol 86) with its lockfile seeded from the
+  mirror (`scripts/check-lock.py`: 343 shared packages, no mismatch).
+  `scripts/run-sandbox.sh` is the job: lockfile check, `scripts/build-res.sh`
+  (the three helper contracts, via `cargo near`), `cargo test --locked`.
+  `scripts/build-wasm.sh [non-reproducible|reproducible|reproducible-manual]`
+  builds the wasm under test; tests take `APPROVAL_WASM`.
+- **Tests:** `runtime.rs` (RT-CODEHASH, RT-KEY, RT-RELAY, RT-SELFACCT,
+  RT-METATX, RT-FCKEY, RT-REVERT, RT-BATCH, RT-SPOOF), `shell.rs` (SH-9,
+  SH-10, RES-1 measured deltas, RES-3), `deploy.rs` (DEP-1/VER-2/VER-3/VER-8
+  demo, RT-RESET), `trace.rs` (RT-TRACE). Tests that record an outcome write
+  `results/<ID>.json`; the observations are copied into the `observed` field
+  of the matching `[assumptions]` entries.
+- **Wasm under test:** the reproducible build of the pin, sha256
+  `5223150408c6bce4d857eb155228c8f5e2dcdc5a2748d933c6ec7369947e443d`,
+  `code_hash` `6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg`, built with the
+  pinned `sourcescan/cargo-near:0.22.0-rust-1.97.0` image and cargo-near's
+  NEP-330 environment (`reproducible-manual`; the container needed a proxy).
+  Every test also passes on the non-reproducible host build (`ffdbb5a7…`).
+- **RT-TRACE inputs** are checked in under `conformance/traces/`
+  (`sandbox/scripts/gen-traces.sh`): `prolog.txt` (10 × 80 calls from
+  `step/4`) and `core-random.txt` (the 200 random sequences, 30 calls each,
+  from `kani/src/trace.rs`). Each step is compared with the trace file and
+  with the real core run on the host (see RT-TRACE in §5.9). The full run
+  (210 traces, 6,800 steps) passed on the reproducible wasm in 632 s with
+  `RT_TRACE_JOBS=6`.
+- **Recorded outcomes:** see §5.9 (RT-METATX, RT-REVERT, RT-BATCH) and §5.8
+  (SH-10). The event of a failed receipt **does** survive in its outcome
+  (out of gas after the emit, `LackBalanceForState`, a failed batch), so
+  VER-1's "successful receipt" clause is load-bearing.
+- **`deploy-checks/check_deployment.sh <net>`** (Python 3.11 behind a shell
+  wrapper) implements DEP-1.1–1.5, VER-2, VER-3 and VER-8 from
+  `[deployment.<net>]`, with `CHECK_<KEY>` overrides. Its only indexer is
+  `rpc-scan` (walk every block from `b0`), fit for a local chain; on a public
+  net without an indexer DEP-1.4, VER-3's scan and VER-8 fail as unchecked.
+  `[deployment.sandbox]` drives the demo; `[deployment.testnet]` is an empty
+  template (no testnet deployment has been made).
+- **`prolog/verification/verifier_rules.pl`** encodes VER-1..8;
+  `tests/test_verifier_rules.pl` (run by `run-prolog.sh`) has accepting and
+  rejecting cases for each. The sandbox feeds it real observations: RT-SPOOF
+  (VER-1 on real, copied, forged and failed-receipt events), the VER-8 key
+  views of sandbox proofs, and RT-RESET (VER-6).
+- **Local only:** neard raises `RLIMIT_NOFILE` to 65535; where the hard
+  limit is lower, `scripts/dev-nofile-shim.sh` (an `LD_PRELOAD` shim) is
+  needed. CI's runners don't use it.
+
 ---
 
 ## 10. Correspondence and staleness
@@ -975,7 +1024,17 @@ the `near-unit` CI job; F-17 is new.
 
 **Progress (2026-10-14).** M0, M1.5, M1.6 and M4 are done, except C-6 (waits
 on M3). M1 is done except its "spec reviewer sign-off" line, so its statuses
-stay `in-progress`. M2, M3, M5, M6 and M7 have not started. Remaining effort
+stay `in-progress`. M2, M3, M5, M6 and M7 have not started.
+
+**M6 and M7 (2026-10-15).** Built and passing locally on near-sandbox 2.13.4
+with the reproducible wasm (§9): every RT-* test, SH-9, SH-10, RES-1
+(measured), RES-3, RT-TRACE, the `check_deployment.sh sandbox` demo with its
+negative cases, and `verifier_rules.pl`. Not done: the `wasm-surface.sh` diff
+on the reproducible build (needs M3's script; RT-CODEHASH records the export
+list), the `cargo expand` review of SH-9/RD-6, the testnet deployment and
+`[deployment.testnet]`, the `sandbox` and `deploy-check` CI jobs, and
+`docs/architecture.md`. Statuses stay `in-progress` (spec reviewer sign-off;
+M7 also needs the testnet decision). Remaining effort
 on the critical path (re-pin, review, M2, M3, M6) is about 6–10 days plus
 the review; M7 adds 2 and needs a testnet decision.
 
