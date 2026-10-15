@@ -12,7 +12,7 @@
 #        CI_AREAS_EXPLAIN=1 ...              (also each path's jobs on stderr)
 set -euo pipefail
 
-jobs="plain loops kani tla lean prolog"
+jobs="plain loops kani tla lean prolog near_unit"
 on=" "
 p=projects/near-approval
 s=tools/scripts
@@ -42,9 +42,14 @@ else
       $p/lean/* | $s/run-lean.sh | $s/get-lean.sh) add="lean" ;;
       # plain's `facts` test reads code_facts.pl; run-lean.sh reads
       # tla_facts.pl.
+      # near-unit regenerates api_facts.pl from the wasm and diffs it.
+      $p/prolog/extracted/api_facts.pl) add="prolog near_unit" ;;
       $p/prolog/extracted/*) add="prolog plain lean" ;;
       $p/prolog/* | $s/run-prolog.sh | $s/run-mc3.sh | $s/tla-facts.py) add="prolog" ;;
       $s/mc3.py) add="prolog lean" ;;
+      # M3: the shell tests and the wasm surface.
+      $p/near-tests/mutants/* | $p/near-tests/run-mutants.sh) add="" ;;
+      $p/near-tests/* | $p/wasm-surface.expected | $s/wasm-surface.sh | $s/get-cargo-near.sh) add="near_unit" ;;
       # Everything else, including the kani crate (every job builds or runs
       # it), the trust-framework gitlink, versions.env, ci-submodule.sh,
       # this script and the workflow itself.

@@ -60,6 +60,7 @@ jobs:
       tla: ${{ steps.areas.outputs.tla }}
       lean: ${{ steps.areas.outputs.lean }}
       prolog: ${{ steps.areas.outputs.prolog }}
+      near_unit: ${{ steps.areas.outputs.near_unit }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -490,6 +491,47 @@ jobs:
           MC3_DIR: ${{ runner.temp }}/mc3
         run: tools/scripts/run-mc3.sh near-approval
 
+  # M3 (strategy.md section 9): the near-sdk shell and store on the host
+  # (near-tests/: ST-4..6, SH-1..8, RES-1/2, lockfile rule) and the export and
+  # import surface of the non-reproducible wasm (SH-11, SH-12, C-6's
+  # api_facts.pl).
+  near-unit:
+    needs: pin
+    if: needs.pin.outputs.near_unit == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out trust-framework at the pin
+        env:
+          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+        run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
+      - name: Toolchain from versions.env, with the wasm target
+        run: |
+          . tools/versions.env
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target wasm32-unknown-unknown
+          # For this job only: `rustup default` would outlive it on a
+          # self-hosted runner.
+          echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
+      - name: cargo-near from versions.env
+        # Into RUNNER_TEMP, not the shared CARGO_HOME of a self-hosted runner.
+        run: tools/scripts/get-cargo-near.sh "$RUNNER_TEMP/cargo-near" >> "$GITHUB_PATH"
+      - uses: actions/cache@v4
+        if: runner.environment == 'github-hosted'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            projects/near-approval/near-tests/target
+          key: near-unit-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/versions.env', 'projects/near-approval/near-tests/Cargo.lock') }}
+      - name: Shell and store tests (store_diff 10k x 50, shell, lockfile)
+        working-directory: projects/near-approval/near-tests
+        run: cargo test --release --locked
+      - name: Wasm surface (SH-11, SH-12) and api_facts.pl drift
+        run: tools/scripts/wasm-surface.sh
+
   covers:
     # Every cover SATISFIED in at least one harness of its family, across the
     # kani jobs (each uploads its covers.tsv with its logs).
@@ -570,3 +612,26 @@ jobs:
         env:
           KANI_TIMEOUT: "3600"
         run: tools/scripts/run-mutants.sh near-approval --kani '${{ matrix.mutant }}-*'
+
+  # Weekly with the core mutants: every near-tests/mutants patch must make the
+  # shell suite fail.
+  shell-mutants:
+    needs: pin
+    if: github.event.schedule == '41 4 * * 0' || inputs.mutants
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out trust-framework at the pin
+        env:
+          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+        run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
+      - name: Toolchain from versions.env
+        run: |
+          . tools/versions.env
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
+      - name: Shell mutants
+        run: projects/near-approval/near-tests/run-mutants.sh
