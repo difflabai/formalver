@@ -37,7 +37,7 @@ case "$mode" in
         repo="$(git -C "$contract" rev-parse --show-toplevel)"
         rev="$(git -C "$repo" rev-parse HEAD)"
         [ -z "$(git -C "$repo" status --porcelain)" ] || { echo "$repo is dirty" >&2; exit 1; }
-        rel="${contract#"$repo"/}"
+        rel="$(git -C "$contract" rev-parse --show-prefix)"
         clone="$(mktemp -d)/trust-framework"
         trap 'rm -rf "$(dirname "$clone")"' EXIT
         git clone --quiet --no-checkout "$repo" "$clone"
