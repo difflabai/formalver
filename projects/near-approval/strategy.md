@@ -455,7 +455,7 @@ within bounds), VC/VM (unbounded), PM and Kp.
 | RT-RESET | Delete and recreate `C`: counters reset. VER-3 (a full-access key or a `DeleteAccount` since `b₀`) detects it. VER-6 is only a heuristic that catches it while counters are below cached values. | ASM-CODE |
 | RT-SPOOF | A spoofer contract logs a forged `EVENT_JSON`. The VER-1 `executor_id` rule rejects it. | VER-1 |
 | RT-CODEHASH | The wasm under test is the `cargo near build reproducible-wasm` output. Record its sha256 (hex) **and** the NEAR `code_hash` (base58 of sha256). *Was blocked by F-12 (resolved upstream, R-8).* | ASM-DEPLOY, ASM-COMPILE |
-| RT-TRACE | **Main flows on the deployed artifact.** Replay every `conformance/traces/*.txt`, plus 200 random sequences of ≤30 ops, on the reproducible wasm. For each step, these must equal `spec.rs`: the result or return value, the exact failure message, the receipt logs, and the `get_*` views (including `{}` args, nulls, `limit = 0`, and values > 2⁵³). *As built (M6):* `spec.rs` runs over the Kani `ArrStore` (at most 4 requests), so the per-step oracle is the real core on the host over `MemStore`, with the sandbox's block times and JSON rendered from the README; it is tied to `spec.rs` by Kani and plain mode, and to `tla.rs` and `step/4` because every step must also match the trace file (`prolog.txt` from `step/4`; `core-random.txt`, the 200 × 30 random sequences, from `kani/src/trace.rs`, each step checked against `tla.rs`). | ASM-COMPILE, ASM-SDK |
+| RT-TRACE | **Main flows on the deployed artifact.** Replay every `conformance/traces/*.txt`, plus 200 random sequences of ≤30 ops, on the reproducible wasm. For each step, these must equal `spec.rs`: the result or return value, the exact failure message, the receipt logs, and the `get_*` views (including `{}` args, nulls, `limit = 0`, and values > 2⁵³). *As built (M6):* `spec.rs` runs over the Kani `ArrStore` (at most 4 requests), so the per-step oracle is the real core on the host over `MemStore`, with the sandbox's block times and JSON rendered from the README; it is tied to `spec.rs` by Kani and plain mode, and to `tla.rs` and `step/4` because every step must also match the trace file (`prolog.txt` from `step/4`; `core-random.txt`, the 200 × 30 random sequences, from `kani/src/trace.rs`, each step checked against `tla.rs`). *Observed (M6):* 210 traces, 6,800 steps, every step equal, on the reproducible wasm (near-sandbox 2.13.4, about 10.5 min with 6 jobs). | ASM-COMPILE, ASM-SDK |
 
 ### 5.10 Deployment and verifier rules (DEP, VER)
 
@@ -806,7 +806,9 @@ review).**
   (`sandbox/scripts/gen-traces.sh`): `prolog.txt` (10 × 80 calls from
   `step/4`) and `core-random.txt` (the 200 random sequences, 30 calls each,
   from `kani/src/trace.rs`). Each step is compared with the trace file and
-  with the real core run on the host (see RT-TRACE in §5.9).
+  with the real core run on the host (see RT-TRACE in §5.9). The full run
+  (210 traces, 6,800 steps) passed on the reproducible wasm in 632 s with
+  `RT_TRACE_JOBS=6`.
 - **Recorded outcomes:** see §5.9 (RT-METATX, RT-REVERT, RT-BATCH) and §5.8
   (SH-10). The event of a failed receipt **does** survive in its outcome
   (out of gas after the emit, `LackBalanceForState`, a failed batch), so

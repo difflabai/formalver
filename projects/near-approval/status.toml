@@ -223,7 +223,7 @@ statement = "rustc/LLVM/wasm-opt preserve core semantics host -> wasm32; overflo
 level = "n/a"
 checked_by = ["RT-CODEHASH", "RT-TRACE"]
 source = ["https://doc.rust-lang.org/cargo/reference/profiles.html#overflow-checks"]
-observed = "RT-TRACE: see results/RT-TRACE.json; RT-CODEHASH: on-chain code_hash = base58(sha256(wasm)) for the wasm under test. Ran on the reproducible build (sha256 5223150408c6bce4d857eb155228c8f5e2dcdc5a2748d933c6ec7369947e443d)"
+observed = "RT-TRACE: 210 traces / 6,800 steps (prolog.txt 10x80, core-random.txt 200x30), every step equal to the host core and the trace file (results/RT-TRACE.json); RT-CODEHASH: on-chain code_hash = base58(sha256(wasm)) for the wasm under test. Ran on the reproducible build (sha256 5223150408c6bce4d857eb155228c8f5e2dcdc5a2748d933c6ec7369947e443d)"
 observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
 status = "in-progress"
 
