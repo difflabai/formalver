@@ -278,6 +278,16 @@ evaluates fires.
 ### Mutants
 
 <!-- M2-MUTANTS -->
+Seven new mutants (37-43), each with its `# killed-by:` harness:
+action length off by one and counted in chars (`h_action_len`), the page
+clamp removed and the page addition wrapping (`h_page_arith`), request's
+and approve's `LogFull` guard dropped (`h_proto_request`,
+`h_proto_approve`), `MemStore::insert_principal` appending a duplicate
+key (`h_store_laws_mem`). `run-mutants.sh near-approval` (plain mode, all
+43): 41 killed, the 2 equivalent ones (25, 26) survive. The survival check
+now also skips `h_proto*` and `facts`: both see raw (non-INV-8) states, and
+`facts::facts` already killed 25 and 26 on `7200b99` before M2. Not yet
+run under Kani (`--kani`); CI's mutants matrix needs entries 37-43.
 <!-- /M2-MUTANTS -->
 
 ## Status in `status.toml`
