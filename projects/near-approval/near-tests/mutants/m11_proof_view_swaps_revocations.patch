@@ -1,0 +1,15 @@
+# SH-5/SH-7 (PR #15): proof_view swaps agent_key_revoked_at and approver_key_revoked_at
+# Shell mutant (strategy.md section 9): the near-tests suite must fail on it.
+--- a/contract/src/lib.rs
++++ b/contract/src/lib.rs
+@@ -371,8 +371,8 @@
+             approver_registration_id: proof.approver_registration_id,
+             approved_at_block: proof.approved_at.height,
+             approved_at_ns: proof.approved_at.timestamp_ns.into(),
+-            agent_key_revoked_at: revoked.agent.map(Into::into),
+-            approver_key_revoked_at: revoked.approver.map(Into::into),
++            agent_key_revoked_at: revoked.approver.map(Into::into),
++            approver_key_revoked_at: revoked.agent.map(Into::into),
+         }
+     }
+ 

@@ -1,0 +1,13 @@
+# ST-5: the revocation map shares the approval log's prefix
+# Shell mutant (strategy.md section 9): the near-tests suite must fail on it.
+--- a/contract/src/lib.rs
++++ b/contract/src/lib.rs
+@@ -198,7 +198,7 @@
+             approval_log: LookupMap::new(b"a".to_vec()),
+             approval_count: 0,
+             registration_count: 0,
+-            revocations: LookupMap::new(b"v".to_vec()),
++            revocations: LookupMap::new(b"a".to_vec()),
+         }
+     }
+ 

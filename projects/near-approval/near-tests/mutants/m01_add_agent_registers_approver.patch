@@ -1,0 +1,13 @@
+# SH-1: add_agent registers the key as Approver
+# Shell mutant (strategy.md section 9): the near-tests suite must fail on it.
+--- a/contract/src/lib.rs
++++ b/contract/src/lib.rs
+@@ -205,7 +205,7 @@
+     /// Registers `public_key` as an agent key of `account_id`. Owner only.
+     /// Emits `key_added`.
+     pub fn add_agent(&mut self, account_id: AccountId, public_key: PublicKey) {
+-        self.add_principal(account_id, public_key, Role::Agent);
++        self.add_principal(account_id, public_key, Role::Approver);
+     }
+ 
+     /// Registers `public_key` as an approver key of `account_id`. Owner only.
