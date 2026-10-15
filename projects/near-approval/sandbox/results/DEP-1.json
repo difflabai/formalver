@@ -1,0 +1,56 @@
+{
+  "extra_full_access_key": {
+    "exit": 1,
+    "verdicts": [
+      "PASS DEP-1.1",
+      "FAIL DEP-1.2",
+      "WARN DEP-1.3",
+      "PASS DEP-1.4",
+      "PASS DEP-1.5",
+      "FAIL VER-3",
+      "PASS VER-2",
+      "PASS VER-8"
+    ]
+  },
+  "full_access_agent_key": {
+    "exit": 1,
+    "verdicts": [
+      "PASS DEP-1.1",
+      "PASS DEP-1.2",
+      "WARN DEP-1.3",
+      "FAIL DEP-1.4",
+      "PASS DEP-1.5",
+      "PASS VER-3",
+      "PASS VER-2",
+      "FAIL VER-8"
+    ]
+  },
+  "locked_fc_keys": {
+    "exit": 0,
+    "verdicts": [
+      "PASS DEP-1.1",
+      "PASS DEP-1.2",
+      "WARN DEP-1.3",
+      "PASS DEP-1.4",
+      "PASS DEP-1.5",
+      "PASS VER-3",
+      "PASS VER-2",
+      "PASS VER-8"
+    ]
+  },
+  "near_sandbox": "2.13.4 (near-sandbox 0.3.16 default)",
+  "wasm_kind": "non-reproducible",
+  "wrong_code_hash": {
+    "exit": 1,
+    "verdicts": [
+      "FAIL DEP-1.1",
+      "FAIL DEP-1.2",
+      "WARN DEP-1.3",
+      "PASS DEP-1.4",
+      "PASS DEP-1.5",
+      "PASS VER-3",
+      "FAIL VER-2",
+      "PASS VER-8"
+    ]
+  }
+}

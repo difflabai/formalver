@@ -1,0 +1,30 @@
+{
+  "long64_secp256k1": {
+    "(add_key on agent account, not C)": 0,
+    "16 x B_req(max) in NEAR": "0.3635",
+    "add_agent": 199,
+    "approve": 226,
+    "fail: add_agent(not owner)": 0,
+    "fail: approve(missing)": 0,
+    "fail: request_action('')": 0,
+    "reject": 161,
+    "request_action(1 byte)": 225,
+    "request_action(2048 bytes)": 2272,
+    "revoke_key": -134
+  },
+  "near_sandbox": "2.13.4 (near-sandbox 0.3.16 default)",
+  "short_ed25519": {
+    "(add_key on agent account, not C)": 0,
+    "16 x B_req(max) in NEAR": "0.3506",
+    "add_agent": 118,
+    "approve": 148,
+    "fail: add_agent(not owner)": 0,
+    "fail: approve(missing)": 0,
+    "fail: request_action('')": 0,
+    "reject": 83,
+    "request_action(1 byte)": 144,
+    "request_action(2048 bytes)": 2191,
+    "revoke_key": -53
+  },
+  "wasm_kind": "non-reproducible"
+}

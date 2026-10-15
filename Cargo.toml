@@ -7,6 +7,7 @@ members = [
 exclude = [
     "projects/near-approval/source-mirror",
     "projects/near-approval/kani",
+    "projects/near-approval/sandbox",
     "near-proofs",
 ]
 resolver = "2"

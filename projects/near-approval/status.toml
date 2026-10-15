@@ -59,10 +59,33 @@ near_proof_arena = "cb16c4090a82a6179d8e1a23d6e83e74e9d5d017"  # contract v1; to
 "sandbox/src/lib.rs" = "955bc6fe5ea34c92f70e479b618046f26ad37637ed96a59c6192982d45b7ce18"
 "sandbox/tests/sandbox.rs" = "6aee5fae9f0db89f2361aebd8e6069ae6f44a2de2652156132b7a69fd8773798"
 
-[deployment.testnet]
+# deploy-checks/check_deployment.sh <net> reads [deployment.<net>] (keys: see
+# deploy-checks/check_deployment.py; CHECK_<KEY> environment variables override).
+[deployment.testnet]        # template: no testnet deployment yet (M7 decision pending)
 contract_account = ""
-expected_code_hash = ""     # NEAR code_hash, base58(sha256)
+expected_code_hash = ""     # NEAR code_hash, base58(sha256) of the reproducible build
 wasm_sha256 = ""            # hex
+rpc_url = ""                # archival RPC (VER-2, VER-3, VER-8 read past blocks)
+lock_tx_hash = ""           # DEP-1.2: deploy + new + delete every full-access key, one tx signed by C
+lock_tx_signer = ""         # = contract_account
+owner_code_hashes = []      # DEP-1.3: code hashes of accepted multisig/DAO contracts
+allow_plain_owner = false
+balance_buffer_near = "1"   # DEP-1.5
+indexer = ""                # "" = none: DEP-1.4, the VER-3 scan and VER-8 FAIL as unchecked
+scan_max_blocks = 20000
+
+[deployment.sandbox]        # local near-sandbox demo (sandbox/tests/deploy.rs sets the per-run values)
+contract_account = ""       # CHECK_CONTRACT_ACCOUNT
+expected_code_hash = ""     # CHECK_EXPECTED_CODE_HASH (the wasm under test)
+wasm_sha256 = ""            # CHECK_WASM_SHA256
+rpc_url = ""                # CHECK_RPC_URL (near-workspaces picks the port)
+lock_tx_hash = ""           # CHECK_LOCK_TX_HASH
+lock_tx_signer = ""
+owner_code_hashes = []
+allow_plain_owner = true    # the sandbox owner is a plain account: DEP-1.3 is a WARN
+balance_buffer_near = "1"
+indexer = "rpc-scan"        # walk every block from b0 over RPC (fine for a local chain)
+scan_max_blocks = 20000
 
 # ---------------------------------------------------------------------------
 # Trust assumptions (strategy.md section 3.3). level: high | med | low | policy | n/a
