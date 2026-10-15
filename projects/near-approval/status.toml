@@ -3,9 +3,13 @@ name = "near-approval"
 upstream = "https://github.com/difflabai/trust-framework"
 upstream_path = "contracts/approval"
 pinned_commit = "8635ca7b8b1d64bb226eb0b3b3a35779fcbf461b"   # trust-framework main (2026-10-14); code identical to PR #15 head 3426c92, only README.md differs (OQ-1)
-last_reviewed = "2026-10-14"
+last_reviewed = "2026-10-15"
 verus_min_verified = 0      # raised at M5; run-verus.sh fails below it
 mc1_state_floor = 51568     # recorded at M4 (2026-10-11); MC-1 fails below it
+# RT-CODEHASH: `cargo near build reproducible-wasm` of the pin (sandbox job
+# asserts it; recompute on every pin bump).
+reproducible_wasm_sha256 = "5223150408c6bce4d857eb155228c8f5e2dcdc5a2748d933c6ec7369947e443d"
+reproducible_code_hash = "6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg"
 release_overflow_checks = true  # ASM-COMPILE: check-pin.sh fails unless upstream [profile.release] sets overflow-checks = true
 
 # Status values: unverified | in-progress | verified | verified-with-assumptions | stale

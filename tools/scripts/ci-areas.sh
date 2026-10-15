@@ -12,7 +12,7 @@
 #        CI_AREAS_EXPLAIN=1 ...              (also each path's jobs on stderr)
 set -euo pipefail
 
-jobs="plain loops kani tla lean prolog near_unit"
+jobs="plain loops kani tla lean prolog near_unit sandbox"
 on=" "
 p=projects/near-approval
 s=tools/scripts
@@ -42,6 +42,7 @@ else
       $p/lean/* | $s/run-lean.sh | $s/get-lean.sh) add="lean" ;;
       # plain's `facts` test reads code_facts.pl; run-lean.sh reads
       # tla_facts.pl.
+      $p/prolog/verification/verifier_rules.pl | $p/prolog/tests/test_verifier_rules.pl) add="prolog sandbox" ;;
       # near-unit regenerates api_facts.pl from the wasm and diffs it.
       $p/prolog/extracted/api_facts.pl) add="prolog near_unit" ;;
       $p/prolog/extracted/*) add="prolog plain lean" ;;
@@ -49,7 +50,11 @@ else
       $s/mc3.py) add="prolog lean" ;;
       # M3: the shell tests and the wasm surface.
       $p/near-tests/mutants/* | $p/near-tests/run-mutants.sh) add="" ;;
-      $p/near-tests/* | $p/wasm-surface.expected | $s/wasm-surface.sh | $s/get-cargo-near.sh) add="near_unit" ;;
+      $p/near-tests/* | $p/wasm-surface.expected | $s/wasm-surface.sh) add="near_unit" ;;
+      $s/get-cargo-near.sh) add="near_unit sandbox" ;;
+      # M6/M7: the sandbox suite, its traces and the deploy checks it
+      # demonstrates; the verifier rules also run in prolog.
+      $p/sandbox/* | $p/conformance/* | $p/deploy-checks/*) add="sandbox" ;;
       # Everything else, including the kani crate (every job builds or runs
       # it), the trust-framework gitlink, versions.env, ci-submodule.sh,
       # this script and the workflow itself.

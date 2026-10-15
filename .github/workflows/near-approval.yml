@@ -26,6 +26,14 @@ on:
         description: "Also run the mutant job"
         type: boolean
         default: false
+      sandbox:
+        description: "Also run the sandbox job (M6)"
+        type: boolean
+        default: false
+      deploy_check:
+        description: "Run deploy-checks/check_deployment.sh for this net ([deployment.<net>] in status.toml; empty: skip)"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -61,6 +69,7 @@ jobs:
       lean: ${{ steps.areas.outputs.lean }}
       prolog: ${{ steps.areas.outputs.prolog }}
       near_unit: ${{ steps.areas.outputs.near_unit }}
+      sandbox: ${{ steps.areas.outputs.sandbox }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -531,6 +540,124 @@ jobs:
         run: cargo test --release --locked
       - name: Wasm surface (SH-11, SH-12) and api_facts.pl drift
         run: tools/scripts/wasm-surface.sh
+
+  # M6 (strategy.md sections 5.9 and 9): the reproducible wasm of the pin in a
+  # local near-sandbox: RT-*, SH-9, SH-10, RES-1/3, the DEP-1/VER demo on the
+  # sandbox chain, and RT-TRACE. Nightly, on PRs that change what it runs,
+  # and on manual dispatch.
+  sandbox:
+    needs: pin
+    if: >-
+      (github.event_name == 'schedule' && github.event.schedule == '17 3 * * *') ||
+      inputs.sandbox ||
+      (github.event_name != 'schedule' && needs.pin.outputs.sandbox == 'true')
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    # The reproducible build runs an amd64 image (emulated on the Mac) and
+    # RT-TRACE replays 210 traces.
+    timeout-minutes: 120
+    env:
+      RT_TRACE_JOBS: "4"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Tool cache paths
+        run: echo "SCRYER_ROOT=$RUNNER_TOOL_CACHE/formalver-scryer" >> "$GITHUB_ENV"
+      - name: Check out trust-framework at the pin
+        env:
+          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+        run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
+      - name: Toolchain from versions.env, with the wasm target
+        run: |
+          . tools/versions.env
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target wasm32-unknown-unknown
+          echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
+      - name: cargo-near from versions.env
+        run: tools/scripts/get-cargo-near.sh "$RUNNER_TEMP/cargo-near" >> "$GITHUB_PATH"
+      - name: Scryer Prolog from versions.env
+        run: |
+          . tools/versions.env
+          root="$SCRYER_ROOT/$SCRYER"
+          if ! "$root/bin/scryer-prolog" --version 2>/dev/null | grep -q "$SCRYER"; then
+            cargo install --locked scryer-prolog --version "$SCRYER" --root "$root"
+          fi
+          echo "$root/bin" >> "$GITHUB_PATH"
+      - name: Python >= 3.11 (tomllib)
+        if: runner.os == 'macOS'
+        run: |
+          python3 -c 'import tomllib' 2>/dev/null && exit 0
+          for py in python3.13 python3.12 python3.11; do
+            if p=$(command -v "$py"); then
+              mkdir -p "$RUNNER_TEMP/python-bin"
+              ln -sf "$p" "$RUNNER_TEMP/python-bin/python3"
+              echo "$RUNNER_TEMP/python-bin" >> "$GITHUB_PATH"
+              exit 0
+            fi
+          done
+          echo "::error::no python3 >= 3.11 on PATH"; exit 1
+      - name: Docker daemon (the reproducible build runs in a container)
+        run: |
+          if ! docker info >/dev/null 2>&1; then
+            echo "::error::No reachable Docker daemon on runner '${RUNNER_NAME}'. Start Docker Desktop and re-run."
+            exit 1
+          fi
+      - name: Reproducible wasm of the pin (RT-CODEHASH)
+        run: |
+          projects/near-approval/sandbox/scripts/build-wasm.sh reproducible
+          want=$(python3 -c 'import tomllib; print(tomllib.load(open("projects/near-approval/status.toml","rb"))["project"]["reproducible_wasm_sha256"])')
+          wasm=projects/near-approval/sandbox/target/approval/near/approval_contract/approval_contract.wasm
+          { echo "APPROVAL_WASM=$PWD/$wasm"; echo "APPROVAL_WASM_KIND=reproducible"; echo "APPROVAL_WASM_EXPECTED_SHA256=$want"; } >> "$GITHUB_ENV"
+      - name: Wasm surface of the reproducible build (SH-11, SH-12)
+        run: |
+          wasm=projects/near-approval/sandbox/target/approval/near/approval_contract/approval_contract.wasm
+          abi=$(ls "$(dirname "$wasm")"/*abi*.json 2>/dev/null | head -1 || true)
+          tools/scripts/wasm-surface.sh --wasm "$wasm" ${abi:+--abi "$abi"}
+      - name: Sandbox tests
+        run: projects/near-approval/sandbox/scripts/run-sandbox.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sandbox-results
+          path: projects/near-approval/sandbox/results/
+
+  # M7: DEP-1, VER-2, VER-3, VER-8 against a real deployment, on manual
+  # dispatch with the net name. [deployment.testnet] in status.toml is empty
+  # until a deployment exists; NEAR_ARCHIVAL_RPC_URL (a secret) overrides
+  # rpc_url so a keyed provider URL stays out of the repository.
+  deploy-check:
+    needs: pin
+    if: inputs.deploy_check != ''
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Python >= 3.11 (tomllib)
+        if: runner.os == 'macOS'
+        run: |
+          python3 -c 'import tomllib' 2>/dev/null && exit 0
+          for py in python3.13 python3.12 python3.11; do
+            if p=$(command -v "$py"); then
+              mkdir -p "$RUNNER_TEMP/python-bin"
+              ln -sf "$p" "$RUNNER_TEMP/python-bin/python3"
+              echo "$RUNNER_TEMP/python-bin" >> "$GITHUB_PATH"
+              exit 0
+            fi
+          done
+          echo "::error::no python3 >= 3.11 on PATH"; exit 1
+      - name: check_deployment.sh ${{ inputs.deploy_check }}
+        env:
+          NET: ${{ inputs.deploy_check }}
+          RPC: ${{ secrets.NEAR_ARCHIVAL_RPC_URL }}
+        run: |
+          if [ -n "$RPC" ]; then export CHECK_RPC_URL="$RPC"; fi
+          projects/near-approval/deploy-checks/check_deployment.sh "$NET" --json "$RUNNER_TEMP/deploy-check.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: deploy-check
+          path: ${{ runner.temp }}/deploy-check.json
 
   covers:
     # Every cover SATISFIED in at least one harness of its family, across the
