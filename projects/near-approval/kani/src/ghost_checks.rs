@@ -12,7 +12,7 @@
 //! - `h_action_len`: the byte-length boundaries of `request_action` (ROB-3).
 //! - `client_enum` (plain mode only): the RD-4 client loop.
 
-use crate::checks::LONG;
+use crate::checks::{LONG, PART_POST, PART_REG, PART_TX};
 use crate::gen;
 use crate::ghost::*;
 use crate::ids::{Acct, Key, NA, OWNER};
@@ -28,13 +28,59 @@ use approval_core::{
 // h_page_arith
 // ---------------------------------------------------------------------------
 
+/// `h_page_arith`: requests approved, `limit ≤ PAGE_SMALL`.
+pub const PAGE_FULL: u8 = 1;
+/// `h_page_arith_empty`: requests absent, any `limit`.
+pub const PAGE_EMPTY: u8 = 2;
+
 /// `approvals(from, limit)` over a log of any length `count`: the core reads
 /// `approval_count` once, then exactly slots `from..e` in order, each
 /// followed by the request it names, and nothing else; it writes nothing and
-/// cannot overflow. `e = min(from ⊕ min(limit, PG), count)`.
+/// cannot overflow. `e = min(from ⊕ min(limit, PG), count)`. Under Kani
+/// `src.part()` picks one `Window` instance (see there); plain mode runs
+/// both, with any limit.
 pub fn page_arith(src: &mut impl Src) {
+    let part = src.part();
+    if part & PAGE_FULL != 0 && (part & PAGE_EMPTY == 0 || src.bool()) {
+        // Under Kani the limit is at most PAGE_SMALL; plain mode takes any.
+        let small = part & PAGE_EMPTY == 0;
+        page_case::<true>(src, small);
+    } else {
+        page_case::<false>(src, false);
+    }
+}
+
+/// `from` values for the 100-slot instance under Kani: the bottom, the
+/// middle, and every distance to `u64::MAX` that changes the page (more than
+/// a page away, exactly a page, inside a page, the last slot, past it).
+pub const PAGE_FROMS: [u64; 10] = [
+    0,
+    1,
+    1 << 32,
+    1 << 63,
+    u64::MAX - 200,
+    u64::MAX - 100,
+    u64::MAX - 99,
+    u64::MAX - 50,
+    u64::MAX - 1,
+    u64::MAX,
+];
+
+fn page_case<const APPROVED: bool>(src: &mut impl Src, small: bool) {
     let mut from = src.u64();
-    let limit = src.u64();
+    // Under Kani with any limit (h_page_arith_empty), `from` is one of
+    // PAGE_FROMS: with `from` free, relating 100 unrolled increments of the
+    // range to `from + min(l, PG)` was a SAT query that did not finish in
+    // 40 minutes. `h_page_arith` keeps `from` free (limit <= PAGE_SMALL).
+    #[cfg(kani)]
+    if !small {
+        from = PAGE_FROMS[src.below(PAGE_FROMS.len() as u8) as usize];
+    }
+    let limit = if small {
+        src.below(PAGE_SMALL as u8 + 1) as u64
+    } else {
+        src.u64()
+    };
     let mut count = src.u64();
     let shift = src.u64();
     // Plain mode: steer toward the top of the u64 range, where saturation
@@ -43,38 +89,46 @@ pub fn page_arith(src: &mut impl Src) {
         from = u64::MAX - src.below(4) as u64 - 100 * src.below(2) as u64;
         count = u64::MAX - src.below(2) as u64;
     }
-    // Under Kani `full` is false: at most one proof (see `Window`).
-    let full = src.hint(50);
-    let w = Window::new(count, from, shift, full);
-    // PROP: RD-3 RD-6 (`approvals` takes `&S`; every Window write panics)
-    let page = approvals(&w, from, limit);
     let e = from.saturating_add(limit.min(MAX_PAGE_SIZE)).min(count);
     let n = e.saturating_sub(from);
+    let w = Window::<APPROVED>::new(count, from, shift, e);
+    // PROP: RD-3 RD-6 (`approvals` takes `&S`; every Window write panics)
+    // Inside each read the Window asserts: slot `j` is the next one from
+    // `f` and `j < e`; its request is read before the next slot; nothing
+    // else is read or written.
+    let page = approvals(&w, from, limit);
     // PROP: RD-3
-    let want_len = if full { n } else { n.min(1) };
-    assert!(page.len() as u64 == want_len, "RD-3 page length e - f");
     assert!(w.count_reads.get() == 1, "RD-3 approval_count read once");
-    assert!(w.slot_reads.get() == n, "RD-3 reads exactly slots f..e");
-    assert!(
-        w.request_reads.get() == n,
-        "RD-3 reads one request per slot"
-    );
-    let mut k = 0;
-    while k < MAX_PAGE_SIZE as usize {
-        if k < page.len() {
+    assert!(w.settled(), "RD-3 reads one request per slot");
+    // PROP: ROB-4
+    // The slots read are f, f + 1, ... (each checked against `next`), all
+    // below e, so there are at most e - f <= min(l, PG) of them, and the
+    // reads are 1 + 2 * slots <= 2 min(l, PG) + 1. The empty-page instance
+    // relies on that argument: asserting the count itself (or completeness)
+    // over 100 unrolled iterations was a SAT query that did not finish in
+    // 40 minutes. The approved instance asserts both.
+    if APPROVED {
+        assert!(w.slots() == n, "RD-3 reads every slot f..e");
+        assert!(page.len() as u64 == n, "RD-3 page length e - f");
+        assert!(
+            w.slots() <= limit.min(MAX_PAGE_SIZE),
+            "ROB-4 approvals reads <= 2 min(l, PG) + 1"
+        );
+        let mut k = 0;
+        while k < page.len() {
             let j = from + k as u64;
             assert!(
                 page[k].approval_index == j && page[k].request_id == j.wrapping_add(shift),
                 "RD-3 page entry k is slot f + k"
             );
+            k += 1;
         }
-        k += 1;
+    } else {
+        assert!(page.is_empty(), "RD-3 absent requests are dropped");
     }
-    // PROP: ROB-4
-    assert!(
-        w.reads() <= 2 * limit.min(MAX_PAGE_SIZE) + 1,
-        "ROB-4 approvals reads <= 2 min(l, PG) + 1"
-    );
+    // Plain mode checks completeness for empty pages too.
+    #[cfg(not(kani))]
+    assert!(w.slots() == n, "RD-3 reads every slot f..e");
     cover!(
         !page.is_empty() && count == u64::MAX,
         "page: non-empty page at count = MAXU"
@@ -83,7 +137,7 @@ pub fn page_arith(src: &mut impl Src) {
         !page.is_empty() && from.checked_add(limit.min(MAX_PAGE_SIZE)).is_none(),
         "page: non-empty page where f + l overflows"
     );
-    cover!(n == MAX_PAGE_SIZE, "page: full page");
+    cover!(n == MAX_PAGE_SIZE, "page: a full page of slots read");
 }
 
 // ---------------------------------------------------------------------------
@@ -358,27 +412,42 @@ fn refine(src: &mut impl Src, kind: u8) {
         3 => gen::op_appr(src, &a, &h),
         _ => gen::op_rej(src, &a, &h),
     };
+    // `part`: PART_TX checks the results and the ST-2 calls, PART_POST the
+    // observations. Under Kani `h_refine_approve` and `h_refine_reject` run
+    // the two as `_tx` and `_post` (as one, approve ran out of memory at
+    // 15 GB); the other harnesses and plain mode pass both bits.
+    let part = src.part();
     let mut sp = Sparse::from_arr(&a);
     #[cfg(not(kani))]
     let mut m = to_mem(&a);
-    let o0 = obs(&a);
-    assert!(obs(&sp) == o0, "ST-3 the start states agree");
-    #[cfg(not(kani))]
-    assert!(obs(&m) == o0, "ST-3 the start states agree (MemStore)");
-    let exp = expect(&sp, &op);
-    let calls = protocol(&sp, &op, &exp);
+    if part & PART_POST != 0 {
+        let o0 = obs(&a);
+        assert!(obs(&sp) == o0, "ST-3 the start states agree");
+        #[cfg(not(kani))]
+        assert!(obs(&m) == o0, "ST-3 the start states agree (MemStore)");
+    }
+    let tx = part & PART_TX != 0;
+    let exp = if tx { Some(expect(&sp, &op)) } else { None };
+    let calls = match &exp {
+        Some(e) => protocol(&sp, &op, e),
+        None => Rec::new(),
+    };
     let out_a = apply(&mut a, &op);
     let out_s = run(&mut sp, &op);
-    assert!(out_s == out_a, "ST-3 Sparse result = ArrStore result");
-    assert!(out_s == exp, "TX exact result (Sparse)");
-    let o1 = obs(&a);
-    assert!(obs(&sp) == o1, "ST-3 Sparse α = ArrStore α");
-    assert!(sp.calls == calls, "ST-2 store protocol (counters = sizes)");
+    if let Some(e) = exp {
+        assert!(out_s == out_a, "ST-3 Sparse result = ArrStore result");
+        assert!(out_s == e, "TX exact result (Sparse)");
+        assert!(sp.calls == calls, "ST-2 store protocol (counters = sizes)");
+    }
+    if part & PART_POST != 0 {
+        let o1 = obs(&a);
+        assert!(obs(&sp) == o1, "ST-3 Sparse α = ArrStore α");
+    }
     #[cfg(not(kani))]
     {
         let out_m = run(&mut m, &op);
         assert!(out_m == out_a, "ST-3 MemStore result = ArrStore result");
-        assert!(obs(&m) == o1, "ST-3 MemStore α = ArrStore α");
+        assert!(obs(&m) == obs(&a), "ST-3 MemStore α = ArrStore α");
     }
 }
 
@@ -421,7 +490,17 @@ fn law_case(src: &mut impl Src) -> Option<(S, Law)> {
     if !assume(wf(&a)) {
         return None;
     }
-    let law = match src.below(7) {
+    let k = src.below(7);
+    // `part` picks the laws: PART_REG the registry's two (insert and remove
+    // principal), PART_POST the other five. Under Kani `h_store_laws_mem`
+    // runs them as two harnesses (as one it ran out of memory at 15 GB);
+    // every other caller passes both bits.
+    let part = src.part();
+    let bit = if k < 2 { PART_REG } else { PART_POST };
+    if !assume(part & bit != 0) {
+        return None;
+    }
+    let law = match k {
         0 => Law::InsertPrincipal(
             src.key(),
             Principal {

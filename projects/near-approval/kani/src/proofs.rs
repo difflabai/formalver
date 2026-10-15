@@ -278,12 +278,40 @@ const MEM_SHAPE: Shape = Shape {
     nv: 3,
 };
 
-/// RD-3, RD-6, ROB-4 (approvals): any `from`, `limit`, `count`. Unwind 102:
-/// a page has at most `MAX_PAGE_SIZE` = 100 entries.
+/// `h_store_laws_mem_reg`: the registry laws touch only principals, so the
+/// other parts are one entry each (the frame); `MEM_SHAPE` ran out of memory
+/// at 15 GB. `h_store_laws_mem`: the sequence, counter and revocation laws,
+/// one principal. The `Sparse` halves use the same shapes (with a symbolic
+/// shape 20 and 23 min at 9.7 GB); `h_store_laws_arr` keeps every shape.
+const MEM_SHAPE_REG: Shape = Shape {
+    np: 3,
+    nr: 1,
+    nl: 1,
+    nv: 1,
+};
+const MEM_SHAPE_SEQ: Shape = Shape {
+    np: 1,
+    nr: 3,
+    nl: 3,
+    nv: 3,
+};
+
+/// RD-3, RD-6, ROB-4 (approvals), one cover family. `h_page_arith`:
+/// approved requests, `from` and `count` any `u64`, `limit <= PAGE_SMALL`
+/// (non-empty pages, including at the top of the range). Unwind 5: at most
+/// `PAGE_SMALL` = 2 slots, and a page check loop of at most `CAP_R`.
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_page_arith() {
+    g2::page_arith(&mut Sym(None, g2::PAGE_FULL, false));
+}
+
+/// `h_page_arith_empty`: requests absent, `from`, `limit` and `count` any
+/// `u64`. Unwind 102: at most `MAX_PAGE_SIZE` = 100 slots.
 #[kani::proof]
 #[kani::unwind(102)]
-fn h_page_arith() {
-    g2::page_arith(&mut Sym(None, checks::PART_ALL, false));
+fn h_page_arith_empty() {
+    g2::page_arith(&mut Sym(None, g2::PAGE_EMPTY, false));
 }
 
 // ST-2, ROB-2, TR-5: raw recording `Sparse`, counters any u64 >= size.
@@ -378,27 +406,54 @@ fn h_refine_request() {
 
 #[kani::proof]
 #[kani::unwind(9)]
-fn h_refine_approve() {
-    g2::refine_approve(&mut Sym(None, checks::PART_ALL, false));
+fn h_refine_approve_tx() {
+    g2::refine_approve(&mut Sym(None, checks::PART_TX, false));
 }
 
 #[kani::proof]
 #[kani::unwind(9)]
-fn h_refine_reject() {
-    g2::refine_reject(&mut Sym(None, checks::PART_ALL, false));
+fn h_refine_approve_post() {
+    g2::refine_approve(&mut Sym(None, checks::PART_POST, false));
 }
 
-// ST-1, INV-0.
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_refine_reject_tx() {
+    g2::refine_reject(&mut Sym(None, checks::PART_TX, false));
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_refine_reject_post() {
+    g2::refine_reject(&mut Sym(None, checks::PART_POST, false));
+}
+
+// ST-1, INV-0. Two harnesses by law (`ghost_checks::law_case`): the five
+// sequence, counter and revocation laws, and (`_reg`) insert and remove
+// principal, which carry the covers and INV-0's interesting cases.
 #[kani::proof]
 #[kani::unwind(9)]
 fn h_store_laws_mem() {
-    g2::store_laws_mem(&mut Sym(Some(MEM_SHAPE), checks::PART_ALL, false));
+    g2::store_laws_mem(&mut Sym(Some(MEM_SHAPE_SEQ), checks::PART_POST, false));
 }
 
 #[kani::proof]
 #[kani::unwind(9)]
+fn h_store_laws_mem_reg() {
+    g2::store_laws_mem(&mut Sym(Some(MEM_SHAPE_REG), checks::PART_REG, false));
+}
+
+// Split like h_store_laws_mem: as one harness 29 min and 9.6 GB.
+#[kani::proof]
+#[kani::unwind(9)]
 fn h_store_laws_sparse() {
-    g2::store_laws_sparse(&mut Sym(None, checks::PART_ALL, false));
+    g2::store_laws_sparse(&mut Sym(Some(MEM_SHAPE_SEQ), checks::PART_POST, false));
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_store_laws_sparse_reg() {
+    g2::store_laws_sparse(&mut Sym(Some(MEM_SHAPE_REG), checks::PART_REG, false));
 }
 
 #[kani::proof]

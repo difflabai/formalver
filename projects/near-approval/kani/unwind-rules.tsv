@@ -13,6 +13,8 @@ kani_core/src/models\.rs:\d+ kani::rustc_intrinsics::panic_stub	1	placeholder bo
 # Panic and Debug formatting: only reached to build a panic message, which
 # Kani's panic hook never formats.
 core/src/fmt/	1	panic or Debug formatting, not executed under Kani
+core/src/unicode/unicode_data\.rs	1	escape_debug of a str in Result::unwrap's panic message (ghost::protocol), not executed under Kani
+ShortOffsetRunHeader	1	the same unicode table search, not executed under Kani
 #
 # String work on actions. Every string the harnesses traverse comes from
 # ACTION_BYTES (2 bytes); LONG (2049 bytes) is only copied and compared by
@@ -25,10 +27,27 @@ core/src/ptr/mod\.rs:\d+ std::ptr::align_offset::mod_inv	1	memchr's alignment st
 #
 # Fixed-size arrays and slices of the stores (ArrStore, Snap, PreViews).
 std::array::try_from_fn_erased.*clone<4>	CAP_P + 1	clone of a [_; 4] store array
+std::array::try_from_fn_erased.*ghost::ObsReq.*clone<5>	OR + 1	clone of Obs::r ([_; OR])
+#
+# Ghost stores (ghost.rs, M2). Obs arrays compared with ==, Rec::c compared
+# with ==, MemStore searches in the M2 harnesses.
+cmp\.rs:\d+ <std::option::Option<ghost::Call> as	CAP_CALLS + 1	Rec::c == ([_; CAP_CALLS])
+cmp\.rs:\d+ <std::option::Option<ghost::ObsReq> as	OR + 1	Obs::r == ([_; OR])
+cmp\.rs:\d+ <std::option::Option<u64> as	OR + 1	Obs::l == ([_; OR])
+cmp\.rs:\d+ <std::option::Option<approval_core::BlockTime> as	OV + 1	Obs::v == ([_; OV])
+cmp\.rs:\d+ <std::option::Option<approval_core::Principal<	NK + 1	Obs::p == ([_; NK])
+MemStore<ids::Acct, ids::Key> as approval_core::Store<ids::Acct, ids::Key>>::insert_principal	CAP_MEM + 1	MemStore principals <= CAP_MEM (h_store_laws_mem asserts it; h_count_* hold MEM_SHAPE <= 3)
+MemStore<ids::Acct, ids::Key> as approval_core::Store<ids::Acct, ids::Key>>::revocation	CAP_V + 2	MemStore revocations <= CAP_V + 1 (one insert onto a CAP_V store)
 std::ptr::drop_glue::<\[	CAP_R + 1	drop of a store array or page (<= 4 elements)
 <std::slice::Iter<'_, \(ids::Key, approval_core::Principal	CAP_P + 1	iteration over principals()
 <std::ops::Range<usize> as std::iter::Iterator>::try_fold.*checks\.rs	CAP_R + 1	(0..pre.nl).all(..) over the log
 #
 # approval_core::approvals: the page loop runs from `from` to
 # min(from + min(limit, MAX_PAGE_SIZE), #L), so at most #L <= CAP_R times.
+# Window (ghost.rs): Window<true> runs with limit <= PAGE_SMALL under Kani
+# (h_page_arith); Window<false> runs a full page (h_page_arith_empty). Each
+# page harness also instantiates the other Window, which its `part` never
+# reaches (kani/RESULTS.md, "Loop bounds").
+approval_core::approvals<ids::Acct, ids::Key, ghost::Window<true>>	PAGE_SMALL + 1	page <= limit <= PAGE_SMALL
+approval_core::approvals<ids::Acct, ids::Key, ghost::Window<false>>	MAX_PAGE_SIZE + 1	page <= MAX_PAGE_SIZE slots
 approval_core::approvals	CAP_R + 1	page clamped to #L <= CAP_R

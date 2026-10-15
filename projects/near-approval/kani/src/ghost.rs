@@ -348,53 +348,64 @@ impl Store<Acct, Key> for Sparse {
 // ---------------------------------------------------------------------------
 
 /// A store whose log has `count` entries (any `u64`), slot `j` holding
-/// request id `j + shift` (wrapping), and request `j + shift` approved with
-/// `approval_index = j`. Only slots `offset..offset + MAX_PAGE_SIZE` exist:
-/// any other read, any read of a principal, counter or revocation, and any
-/// write panics. It also checks the order of reads: slots strictly in
-/// sequence from `offset`, each followed by at most one `request` of the id
-/// that slot returned (RD-3).
+/// request id `j + shift` (wrapping). Only slots `offset..offset +
+/// MAX_PAGE_SIZE` exist: any other read, any read of a principal, counter
+/// or revocation, and any write panics. It also checks the order of reads:
+/// slots strictly in sequence from `offset`, each followed by at most one
+/// `request` of the id that slot returned (RD-3).
 ///
-/// With `full = false` only the first request read is returned (approved);
-/// later ones read as absent, which `approvals` drops. The page then holds
-/// at most one proof, while the read counts still pin it to exactly the
-/// slots `f..e` (section 6.3 cost fallback 6: a symbolic-length vector of
-/// up to 100 proofs exhausted 13.5 GB). Plain mode also runs `full = true`.
-pub struct Window {
+/// With `APPROVED`, request `j + shift` is approved with
+/// `approval_index = j`; without, every request reads as absent and
+/// `approvals` drops it, so the page stays empty while the read counts
+/// still pin it to exactly the slots `f..e`. Section 6.3 cost fallback 6:
+/// a vector of up to 100 proofs exhausted 13.5 GB, so `h_page_arith`
+/// (approved) bounds the limit at [`PAGE_SMALL`] and `h_page_arith_empty`
+/// (absent) takes any limit. The two instances are different types, so
+/// `unwind-rules.tsv` can bound their loops apart.
+pub struct Window<const APPROVED: bool> {
     pub count: u64,
     pub offset: u64,
     pub shift: u64,
-    pub full: bool,
+    /// The page end `e` the catalogue gives (RD-2, RD-3); no slot at or
+    /// past it may be read.
+    pub end: u64,
     /// Next slot the core may read.
     pub next: Cell<u64>,
     /// The id the last slot read returned, until it is requested.
     pending: Cell<Option<RequestId>>,
     pub count_reads: Cell<u32>,
-    pub slot_reads: Cell<u64>,
-    pub request_reads: Cell<u64>,
 }
 
-impl Window {
-    pub fn new(count: u64, offset: u64, shift: u64, full: bool) -> Self {
+/// Largest `limit` `h_page_arith` passes with approved requests.
+pub const PAGE_SMALL: u64 = 2;
+
+impl<const APPROVED: bool> Window<APPROVED> {
+    pub fn new(count: u64, offset: u64, shift: u64, end: u64) -> Self {
         Window {
             count,
             offset,
             shift,
-            full,
+            end,
             next: Cell::new(offset),
             pending: Cell::new(None),
             count_reads: Cell::new(0),
-            slot_reads: Cell::new(0),
-            request_reads: Cell::new(0),
         }
     }
-    /// Store-call count, for ROB-4.
-    pub fn reads(&self) -> u64 {
-        self.count_reads.get() as u64 + self.slot_reads.get() + self.request_reads.get()
+    /// Slots read so far: they are `offset..next`, each followed by the
+    /// request it names (both checked on every read), so the `Store` calls
+    /// so far are `approval_count` plus `2 * slots()`. Positions rather than
+    /// counters: equating a counter of 100 conditional increments with
+    /// `e - f` was a SAT query that ran over 15 minutes.
+    pub fn slots(&self) -> u64 {
+        self.next.get() - self.offset
+    }
+    /// Every slot read so far had its request read.
+    pub fn settled(&self) -> bool {
+        self.pending.get().is_none()
     }
 }
 
-impl Store<Acct, Key> for Window {
+impl<const APPROVED: bool> Store<Acct, Key> for Window<APPROVED> {
     fn owner(&self) -> &Acct {
         panic!("Window: owner read")
     }
@@ -416,9 +427,7 @@ impl Store<Acct, Key> for Window {
             "RD-3 request read only for the id a slot returned"
         );
         self.pending.set(None);
-        let first = self.request_reads.get() == 0;
-        self.request_reads.set(self.request_reads.get() + 1);
-        if !first && !self.full {
+        if !APPROVED {
             return None;
         }
         let j = id.wrapping_sub(self.shift);
@@ -456,10 +465,14 @@ impl Store<Acct, Key> for Window {
             j >= self.offset && j - self.offset < MAX_PAGE_SIZE && j < self.count,
             "RD-3 read outside the page"
         );
+        assert!(j < self.end, "RD-3 read at or past e");
         assert!(j == self.next.get(), "RD-3 slots read in order");
+        assert!(
+            self.pending.get().is_none(),
+            "RD-3 each slot's request is read before the next slot"
+        );
         // `j < count <= u64::MAX`, so this cannot wrap.
         self.next.set(j + 1);
-        self.slot_reads.set(self.slot_reads.get() + 1);
         let id = j.wrapping_add(self.shift);
         self.pending.set(Some(id));
         Some(id)
