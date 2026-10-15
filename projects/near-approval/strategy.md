@@ -10,7 +10,7 @@ readable per request or as a paged log.
 
 | | |
 |---|---|
-| Pinned commit | `3426c9246cee98dbfaa3ff7980bd85ff839d60d6`, the head of trust-framework PR #15 (adds `reject`, registration ids and revocation times, key events). PR #15 was squash-merged to `main` as `cbb16dd` on 2026-10-09, so the pin is not on `main`; `contracts/approval/` at `main` (`05afd5c`) differs from it only in `README.md` (3 lines). Re-pin to `main` is still open (OQ-1). Previous pin: `5736251`. |
+| Pinned commit | `8635ca7b8b1d64bb226eb0b3b3a35779fcbf461b`, trust-framework `main` (2026-10-14). PR #15 (adds `reject`, registration ids and revocation times, key events) was squash-merged as `cbb16dd`; the later commits on `main` touch only CI and 3 lines of `README.md`, so `contracts/approval/` code is identical to the PR #15 head `3426c92` that every model and harness was written against. Previous pins: `3426c92`, `5736251`. |
 | Crates | `approval-core` (`core/src/lib.rs`, 749 lines incl. docs). A dependency-free state machine, generic over account `A` and key `K`, holding *all* authorization and transition logic. `approval-contract` (`contract/src/lib.rs`, 976 lines incl. tests). A near-sdk 5.29 shell: env → `Caller`, `Store` over `LookupMap`, NEP-297 events, JSON views. |
 | In the TCB via `Cargo.lock` | near-sdk 5.29.1, near-sdk-macros 5.29.1, near-sdk-core 4.2.3, near-sdk-env 0.1.6, near-account-id 2.6.0, near-sys 0.2.14, borsh 1.8.1, serde_json 1.0.151 |
 | Mirror | git submodule `projects/near-approval/source-mirror` (same pattern as ironclaw) |
@@ -42,7 +42,7 @@ property yet.
 named spec reviewer (`[review] spec_reviewer`), and none is recorded. The
 proofs above pass in CI; `status.toml` will say so once that sign-off lands.
 
-**Next, in blocking order.** Re-pin to trust-framework `main` (OQ-1); spec
+**Next, in blocking order.** Spec
 reviewer sign-off plus the `status-lint` job; M2; M3 (fixes the F-15 drift,
 unblocks C-6); M6; M7. Decisions still open: who reviews the spec, Lean L2
 (mechanise `CUTOFF.md`), the Verus path A spike, the testnet deployment for
@@ -976,10 +976,8 @@ Not yet built: `verus` (M5), `near-unit` (M3), `sandbox` (M6), `status-lint`,
 
 ## 16. Open questions
 
-1. **OQ-1:** *Half done.* PR #15 merged to trust-framework `main` as
-   `cbb16dd` (2026-10-09). Still to do: re-pin the submodule and
-   `status.toml` to `main` and recompute `[source_hashes]`; under
-   `contracts/approval/` only `README.md` changed.
+1. **OQ-1:** *Done (2026-10-14).* Re-pinned to trust-framework `main`
+   (`8635ca7`); only `README.md`'s `[source_hashes]` entry changed.
 2. **OQ-2 (F-12):** *Answered in `3426c92` (R-8).*
 3. **OQ-3 (F-13):** *Answered in `3426c92`: upstream CI (R-9).*
 4. **OQ-4 (F-4):** Keep `MAX_ACTION_LEN = 2048` behind the RES-2 test, or

@@ -2,8 +2,8 @@
 name = "near-approval"
 upstream = "https://github.com/difflabai/trust-framework"
 upstream_path = "contracts/approval"
-pinned_commit = "3426c9246cee98dbfaa3ff7980bd85ff839d60d6"   # trust-framework PR #15 head; #15 squash-merged to main as cbb16dd (2026-10-09). Re-pin to main pending (OQ-1)
-last_reviewed = "2026-10-09"
+pinned_commit = "8635ca7b8b1d64bb226eb0b3b3a35779fcbf461b"   # trust-framework main (2026-10-14); code identical to PR #15 head 3426c92, only README.md differs (OQ-1)
+last_reviewed = "2026-10-14"
 verus_min_verified = 0      # raised at M5; run-verus.sh fails below it
 mc1_state_floor = 51568     # recorded at M4 (2026-10-11); MC-1 fails below it
 release_overflow_checks = true  # ASM-COMPILE: check-pin.sh fails unless upstream [profile.release] sets overflow-checks = true
@@ -49,7 +49,7 @@ near_proof_arena = "cb16c4090a82a6179d8e1a23d6e83e74e9d5d017"  # contract v1; to
 [source_hashes]             # sha256 at pinned_commit; check-pin.sh recomputes
 "Cargo.toml" = "1cbed4b212bec393ad67cdd2179357355a6b137694c1b604638b2f3e6ee382af"
 "Cargo.lock" = "3ef5ab18d24eb2fb74fc3033c9d2fefa611568b6e401127de8eb91557791b939"
-"README.md" = "9a79d64db5b96edc4a070f236eb5d4062129eacedb44ba3ef2de73f84c377f3d"
+"README.md" = "bb52e145fe726bd0bd8608ba63ac8c864f4246daef74d5e6d4cd8b90dc648843"
 "core/Cargo.toml" = "0a872e27977c514a3e35cba2afd0c4b9945f4eb6fbbfe60dd731d04937d4484a"
 "core/src/lib.rs" = "f5d72cc7bedd0866dfb7891246999315338410f06be00210e3ffd21452ea0d0c"
 "core/src/tests.rs" = "a5b29506a777012df246763a71d0d6bd7ac8f18c1927e341de766f8eab24c5b9"
