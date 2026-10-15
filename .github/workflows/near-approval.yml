@@ -99,6 +99,12 @@ jobs:
           echo "::error::no python3 >= 3.11 on PATH"; exit 1
       - name: Gitlink and source hashes match status.toml
         run: tools/scripts/check-pin.sh near-approval
+      # status-lint (strategy.md section 14): status.toml claims nothing the
+      # repository doesn't back. Runs here because pin always runs.
+      - name: status-lint
+        run: |
+          tools/scripts/test-check-status.sh
+          tools/scripts/check-status.sh near-approval
 
   plain:
     needs: pin

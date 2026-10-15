@@ -25,8 +25,8 @@ else
     case "$f" in
       # Docs: no script, test or proof reads a Markdown file.
       *.md) add="" ;;
-      # Checked by the pin job alone.
-      $p/status.toml | $s/check-pin.sh) add="" ;;
+      # Checked by the pin job alone (pin and status-lint).
+      $p/status.toml | $s/check-pin.sh | $s/check-status.sh | $s/test-check-status.sh) add="" ;;
       # Other projects and the weekly upstream watch.
       $s/run-verus.sh | $s/upstream-watch.sh | tools/upstream-watch.toml) add="" ;;
       # Mutant definitions: the weekly mutants job, and plain's self-test.
