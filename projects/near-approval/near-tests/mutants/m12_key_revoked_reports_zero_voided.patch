@@ -1,0 +1,13 @@
+# SH-6 (PR #15): key_revoked reports voided_pending = 0
+# Shell mutant (strategy.md section 9): the near-tests suite must fail on it.
+--- a/contract/src/lib.rs
++++ b/contract/src/lib.rs
+@@ -229,7 +229,7 @@
+             registration_id: removed.registration_id,
+             revoked_at_block: at.height,
+             revoked_at_ns: at.timestamp_ns.into(),
+-            voided_pending: removed.pending,
++            voided_pending: 0,
+         })
+         .emit();
+     }

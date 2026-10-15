@@ -1,0 +1,17 @@
+# SH-4/SH-7: request_view maps Pending to void and Void to pending
+# Shell mutant (strategy.md section 9): the near-tests suite must fail on it.
+--- a/contract/src/lib.rs
++++ b/contract/src/lib.rs
+@@ -378,10 +378,10 @@
+ 
+     fn request_view(&self, r: &Request) -> RequestView {
+         let status = match approval_core::status_of(self, r) {
+-            RequestStatus::Pending => RequestStatusView::Pending,
++            RequestStatus::Pending => RequestStatusView::Void,
+             RequestStatus::Approved => RequestStatusView::Approved,
+             RequestStatus::Rejected => RequestStatusView::Rejected,
+-            RequestStatus::Void => RequestStatusView::Void,
++            RequestStatus::Void => RequestStatusView::Pending,
+         };
+         RequestView {
+             request_id: r.id,

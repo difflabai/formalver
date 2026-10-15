@@ -1,0 +1,13 @@
+# ST-4: push_request stores the request under request_count + 1
+# Shell mutant (strategy.md section 9): the near-tests suite must fail on it.
+--- a/contract/src/lib.rs
++++ b/contract/src/lib.rs
+@@ -422,7 +422,7 @@
+     }
+ 
+     fn push_request(&mut self, request: Request) {
+-        self.requests.insert(self.request_count, request);
++        self.requests.insert(self.request_count + 1, request);
+         self.request_count += 1;
+     }
+ 

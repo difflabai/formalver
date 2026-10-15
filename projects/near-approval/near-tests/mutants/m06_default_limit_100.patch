@@ -1,0 +1,13 @@
+# SH-7: get_approvals defaults limit to 100 instead of 50
+# Shell mutant (strategy.md section 9): the near-tests suite must fail on it.
+--- a/contract/src/lib.rs
++++ b/contract/src/lib.rs
+@@ -324,7 +324,7 @@
+         approval_core::approvals::<AccountId, PublicKey, _>(
+             self,
+             from_index.unwrap_or(0),
+-            limit.unwrap_or(DEFAULT_PAGE_SIZE),
++            limit.unwrap_or(100),
+         )
+         .into_iter()
+         .map(|p| self.proof_view(p))
