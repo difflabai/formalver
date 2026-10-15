@@ -256,3 +256,147 @@ fn h_cut_approve() {
 fn h_cut_reject() {
     crate::cutoff::cut_reject(&mut Sym(None, checks::PART_ALL, false));
 }
+
+// ---------------------------------------------------------------------------
+// M2: ghost stores (ghost.rs, ghost_checks.rs; strategy.md section 6.2)
+// ---------------------------------------------------------------------------
+
+use crate::ghost_checks as g2;
+
+/// RD-3, RD-6, ROB-4 (approvals): any `from`, `limit`, `count`. Unwind 102:
+/// a page has at most `MAX_PAGE_SIZE` = 100 entries.
+#[kani::proof]
+#[kani::unwind(102)]
+fn h_page_arith() {
+    g2::page_arith(&mut Sym(None, checks::PART_ALL, false));
+}
+
+// ST-2, ROB-2, TR-5: raw recording `Sparse`, counters any u64 >= size.
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_proto_add() {
+    g2::proto_add(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_proto_revoke() {
+    g2::proto_revoke(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_proto_request() {
+    g2::proto_request(&mut Sym(None, checks::PART_ALL, false));
+}
+
+/// `""` action instance (lengths stay concrete, see `Src::empty_action`).
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_proto_request_empty() {
+    g2::proto_request(&mut Sym(None, checks::PART_ALL, true));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_proto_approve() {
+    g2::proto_approve(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_proto_reject() {
+    g2::proto_reject(&mut Sym(None, checks::PART_ALL, false));
+}
+
+// ROB-4: `Counting` over `MemStore`.
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_count_add() {
+    g2::count_add(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_count_revoke() {
+    g2::count_revoke(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_count_request() {
+    g2::count_request(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_count_approve() {
+    g2::count_approve(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_count_reject() {
+    g2::count_reject(&mut Sym(None, checks::PART_ALL, false));
+}
+
+// ST-3 (and ST-2 with counters equal to size): ArrStore, Sparse, MemStore.
+// Unwind 9: `Obs` probes 8 registration ids.
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_refine_add() {
+    g2::refine_add(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_refine_revoke() {
+    g2::refine_revoke(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_refine_request() {
+    g2::refine_request(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_refine_approve() {
+    g2::refine_approve(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_refine_reject() {
+    g2::refine_reject(&mut Sym(None, checks::PART_ALL, false));
+}
+
+// ST-1, INV-0.
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_store_laws_mem() {
+    g2::store_laws_mem(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_store_laws_sparse() {
+    g2::store_laws_sparse(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_store_laws_arr() {
+    g2::store_laws_arr(&mut Sym(None, checks::PART_ALL, false));
+}
+
+/// ROB-3. Every string is concrete. Unwind 2051: no loop of the harness
+/// itself needs more than 6, but a mutant that counts characters walks all
+/// 2050 bytes of the last case and must fail on its assertion, not on an
+/// unwinding assertion.
+#[kani::proof]
+#[kani::unwind(2051)]
+fn h_action_len() {
+    g2::action_len(&mut Sym(None, checks::PART_ALL, false));
+}

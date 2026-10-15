@@ -1,0 +1,13 @@
+# killed-by: h_page_arith
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -634,8 +634,7 @@
+     S: Store<A, K>,
+ {
+     let end = from_index
+-        .saturating_add(limit.min(MAX_PAGE_SIZE))
+-        .min(store.approval_count());
++        .saturating_add(limit.min(MAX_PAGE_SIZE));
+     (from_index..end)
+         .filter_map(|i| store.approved_request_id(i))
+         .filter_map(|id| approval(store, id))
