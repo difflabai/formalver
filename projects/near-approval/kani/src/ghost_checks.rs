@@ -43,13 +43,16 @@ pub fn page_arith(src: &mut impl Src) {
         from = u64::MAX - src.below(4) as u64 - 100 * src.below(2) as u64;
         count = u64::MAX - src.below(2) as u64;
     }
-    let w = Window::new(count, from, shift);
+    // Under Kani `full` is false: at most one proof (see `Window`).
+    let full = src.hint(50);
+    let w = Window::new(count, from, shift, full);
     // PROP: RD-3 RD-6 (`approvals` takes `&S`; every Window write panics)
     let page = approvals(&w, from, limit);
     let e = from.saturating_add(limit.min(MAX_PAGE_SIZE)).min(count);
     let n = e.saturating_sub(from);
     // PROP: RD-3
-    assert!(page.len() as u64 == n, "RD-3 page length e - f");
+    let want_len = if full { n } else { n.min(1) };
+    assert!(page.len() as u64 == want_len, "RD-3 page length e - f");
     assert!(w.count_reads.get() == 1, "RD-3 approval_count read once");
     assert!(w.slot_reads.get() == n, "RD-3 reads exactly slots f..e");
     assert!(
@@ -57,12 +60,14 @@ pub fn page_arith(src: &mut impl Src) {
         "RD-3 reads one request per slot"
     );
     let mut k = 0;
-    while k < page.len() {
-        let j = from + k as u64;
-        assert!(
-            page[k].approval_index == j && page[k].request_id == j.wrapping_add(shift),
-            "RD-3 page entry k is slot f + k"
-        );
+    while k < MAX_PAGE_SIZE as usize {
+        if k < page.len() {
+            let j = from + k as u64;
+            assert!(
+                page[k].approval_index == j && page[k].request_id == j.wrapping_add(shift),
+                "RD-3 page entry k is slot f + k"
+            );
+        }
         k += 1;
     }
     // PROP: ROB-4
@@ -288,9 +293,8 @@ pub fn count_reject(src: &mut impl Src) {
 // h_refine_*: ArrStore, Sparse and MemStore in lockstep
 // ---------------------------------------------------------------------------
 
-/// Revocation ids are distinct (the map part of INV-12) and no live
-/// registration is revoked (part of INV-11).
-pub fn rev_wf(s: &S) -> bool {
+/// Revocation ids are distinct: the map part of INV-12.
+pub fn rev_distinct(s: &S) -> bool {
     let mut ok = true;
     let mut j = 0;
     while j < CAP_V {
@@ -301,6 +305,12 @@ pub fn rev_wf(s: &S) -> bool {
         }
         j += 1;
     }
+    ok
+}
+
+/// No live registration is revoked: part of INV-11.
+pub fn live_not_revoked(s: &S) -> bool {
+    let mut ok = true;
     let mut k = 0;
     while k < CAP_P {
         ok &= k >= s.np() || v_get(s, s.prin(k).1.registration_id).is_none();
@@ -309,18 +319,33 @@ pub fn rev_wf(s: &S) -> bool {
     ok
 }
 
-/// What refinement needs of a state, implied by `Inv`: one entry per key
-/// (INV-0), dense ids (INV-1), registration provenance (INV-8, under which
-/// `expect`'s liveness test agrees with the core's, F-14) and `rev_wf`.
-/// Generated with `raw = false`, so registration ids are in `0..8` and
-/// `G = #P + #V`. Every `Inv` state qualifies; so do many non-`Inv` ones.
-pub fn refine_pre(s: &S) -> bool {
-    inv0(s) && inv1(s) && inv8(s) && rev_wf(s)
+/// A well-formed store: one entry per key (INV-0, so `ArrStore`'s list and
+/// `MemStore`'s vector are maps), dense ids (INV-1, so requests are a
+/// sequence) and distinct revocation ids. Contents are otherwise arbitrary.
+pub fn wf(s: &S) -> bool {
+    inv0(s) && inv1(s) && rev_distinct(s)
 }
 
-/// The same state in all three stores; one operation on each. Same results,
-/// same `α` (as [`Obs`]) before and after, and `Sparse` makes exactly the
-/// ST-2 calls.
+/// What refinement needs of a state, implied by `Inv`: `wf`, registration
+/// provenance (INV-8, under which `expect`'s liveness test agrees with the
+/// core's, F-14) and `live_not_revoked` (so a revocation never overwrites
+/// one, F-16). Generated with `raw = false`, so registration ids are in
+/// `0..8` and `G = #P + #V`. Every `Inv` state qualifies; so do many
+/// non-`Inv` ones.
+pub fn refine_pre(s: &S) -> bool {
+    wf(s) && inv8(s) && live_not_revoked(s)
+}
+
+/// The same state in `ArrStore` and `Sparse` (and, in plain mode,
+/// `MemStore`); one operation on each. Same results, same `α` (as [`Obs`])
+/// before and after, and `Sparse` makes exactly the ST-2 calls.
+///
+/// Under Kani the `MemStore` leg is left out: a `Vec` of symbolic length
+/// exhausts memory (RESULTS.md deviation 1). `MemStore` is tied in by ST-1
+/// instead: the laws `h_store_laws_{mem,arr}` prove determine the post-`Obs`
+/// of every mutator call from the pre-`Obs` and the arguments, and ST-2 keeps
+/// the core's calls within the laws' preconditions, so two stores with equal
+/// `Obs` that both satisfy the laws stay equal under the core.
 // PROP: ST-3 ST-2
 fn refine(src: &mut impl Src, kind: u8) {
     let mut a = gen::state(src, false);
@@ -334,24 +359,27 @@ fn refine(src: &mut impl Src, kind: u8) {
         _ => gen::op_rej(src, &a, &h),
     };
     let mut sp = Sparse::from_arr(&a);
+    #[cfg(not(kani))]
     let mut m = to_mem(&a);
     let o0 = obs(&a);
-    assert!(
-        obs(&sp) == o0 && obs(&m) == o0,
-        "ST-3 the three start states agree"
-    );
+    assert!(obs(&sp) == o0, "ST-3 the start states agree");
+    #[cfg(not(kani))]
+    assert!(obs(&m) == o0, "ST-3 the start states agree (MemStore)");
     let exp = expect(&sp, &op);
     let calls = protocol(&sp, &op, &exp);
     let out_a = apply(&mut a, &op);
     let out_s = run(&mut sp, &op);
-    let out_m = run(&mut m, &op);
     assert!(out_s == out_a, "ST-3 Sparse result = ArrStore result");
-    assert!(out_m == out_a, "ST-3 MemStore result = ArrStore result");
     assert!(out_s == exp, "TX exact result (Sparse)");
     let o1 = obs(&a);
     assert!(obs(&sp) == o1, "ST-3 Sparse α = ArrStore α");
-    assert!(obs(&m) == o1, "ST-3 MemStore α = ArrStore α");
     assert!(sp.calls == calls, "ST-2 store protocol (counters = sizes)");
+    #[cfg(not(kani))]
+    {
+        let out_m = run(&mut m, &op);
+        assert!(out_m == out_a, "ST-3 MemStore result = ArrStore result");
+        assert!(obs(&m) == o1, "ST-3 MemStore α = ArrStore α");
+    }
 }
 
 pub fn refine_add(src: &mut impl Src) {
@@ -390,7 +418,7 @@ pub enum Law {
 /// its law's precondition.
 fn law_case(src: &mut impl Src) -> Option<(S, Law)> {
     let a = gen::state(src, false);
-    if !assume(refine_pre(&a)) {
+    if !assume(wf(&a)) {
         return None;
     }
     let law = match src.below(7) {
@@ -509,13 +537,17 @@ pub fn store_laws_mem(src: &mut impl Src) {
     assert!(mem_keys_distinct(&m), "INV-0 MemStore keys distinct");
 }
 
+/// Most entries a `MemStore` built from an `ArrStore` holds after one insert.
+pub const CAP_MEM: usize = 5;
+const _: () = assert!(CAP_MEM == CAP_P + 1);
+
 fn mem_keys_distinct(m: &MemStore<Acct, Key>) -> bool {
     let n = m.principals.len();
     let mut ok = true;
     let mut i = 0;
-    while i < CAP_P + 1 {
+    while i < CAP_MEM {
         let mut j = 0;
-        while j < CAP_P + 1 {
+        while j < CAP_MEM {
             ok &= !(i < j && j < n) || m.principals[i].0 != m.principals[j].0;
             j += 1;
         }
@@ -571,8 +603,10 @@ pub const MULTI: &str = match core::str::from_utf8(&MULTI_BYTES) {
     Err(_) => panic!(),
 };
 
+/// Number of ROB-3 cases.
+pub const N_CASES: usize = 5;
 /// ROB-3 cases: action and the exact result.
-pub const LEN_CASES: [(&str, Option<E>); 5] = [
+pub const LEN_CASES: [(&str, Option<E>); N_CASES] = [
     ("", Some(E::EmptyAction)),
     (" ", None),
     (AT_MAX, None),
@@ -590,7 +624,7 @@ pub const LEN_CASES: [(&str, Option<E>); 5] = [
 pub fn action_len(src: &mut impl Src) {
     let mut seen = [false; 3];
     let mut i = 0;
-    while i < LEN_CASES.len() {
+    while i < N_CASES {
         let (action, want) = LEN_CASES[i];
         let mut s = ArrStore::new(OWNER);
         let acct = Acct(1 + src.below(NA - 1));
@@ -732,7 +766,10 @@ pub fn client_enum(src: &mut crate::src::Rng) {
                 grow_to(&mut m, more, src);
             }
         }
-        assert!(got == m.approval_log, "RD-4 the client reads L exactly once, in order");
+        assert!(
+            got == m.approval_log,
+            "RD-4 the client reads L exactly once, in order"
+        );
     }
     cover!(n == 250, "rd4: log of 250");
     cover!(grow, "rd4: log grows while paging");

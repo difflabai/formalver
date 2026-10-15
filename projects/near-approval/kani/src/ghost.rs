@@ -63,10 +63,14 @@ pub fn run<T: Store<Acct, Key>>(s: &mut T, op: &Op) -> Out {
 /// adds at most one entry per map.
 pub const CAP_M: usize = 4;
 
-/// `near_sdk::store::LookupMap<K, V>` as an association list: `get`,
-/// `insert` (overwrite or add, returning the old value) and `remove`. Keys
-/// are distinct by construction, as in a map. Order carries no meaning.
-/// Loops run to the fixed capacity, guarded by the count (as in `ArrStore`).
+/// `near_sdk::store::LookupMap<K, V>` as an association list: `get_cloned`
+/// (`get(k).cloned()`), `insert` (overwrite or add, returning the old value)
+/// and `remove`. Keys are distinct by construction, as in a map; order
+/// carries no meaning. Every loop runs over the fixed capacity and touches
+/// slot `i` only at a concrete `i`, guarded by the count (as in `ArrStore`):
+/// reading or writing a slot through a symbolic index makes CBMC copy each
+/// `String` through a pointer that may alias every slot, which ran
+/// `h_proto_approve` out of memory.
 #[derive(Clone, Debug)]
 pub struct Assoc<K: Clone + PartialEq, V: Clone> {
     n: usize,
@@ -83,56 +87,57 @@ impl<K: Clone + PartialEq, V: Clone> Assoc<K, V> {
     pub fn len(&self) -> usize {
         self.n
     }
-    fn find(&self, k: &K) -> Option<usize> {
-        let mut found = None;
+    fn at(&self, i: usize, k: &K) -> bool {
+        i < self.n && matches!(&self.e[i], Some((k2, _)) if k2 == k)
+    }
+    /// `LookupMap::get(k).cloned()`.
+    pub fn get_cloned(&self, k: &K) -> Option<V> {
         let mut i = 0;
         while i < CAP_M {
-            if found.is_none() && i < self.n {
-                if let Some((k2, _)) = &self.e[i] {
-                    if k2 == k {
-                        found = Some(i);
-                    }
-                }
+            if self.at(i, k) {
+                return self.e[i].as_ref().map(|(_, v)| v.clone());
             }
             i += 1;
         }
-        found
-    }
-    pub fn get(&self, k: &K) -> Option<&V> {
-        let i = self.find(k)?;
-        self.e[i].as_ref().map(|(_, v)| v)
+        None
     }
     pub fn insert(&mut self, k: K, v: V) -> Option<V> {
-        match self.find(&k) {
-            Some(i) => self.e[i].replace((k, v)).map(|(_, old)| old),
-            None => {
-                assert!(self.n < CAP_M, "harness bound: Assoc capacity");
-                self.e[self.n] = Some((k, v));
-                self.n += 1;
-                None
+        let mut i = 0;
+        while i < CAP_M {
+            if self.at(i, &k) {
+                return self.e[i].replace((k, v)).map(|(_, old)| old);
             }
+            i += 1;
         }
+        let mut i = 0;
+        while i < CAP_M {
+            if i == self.n {
+                self.e[i] = Some((k, v));
+                self.n += 1;
+                return None;
+            }
+            i += 1;
+        }
+        panic!("harness bound: Assoc capacity")
     }
     pub fn remove(&mut self, k: &K) -> Option<V> {
-        let i = self.find(k)?;
-        let out = self.e[i].take();
-        let mut j = 0;
-        while j + 1 < CAP_M {
-            if j >= i && j + 1 < self.n {
-                self.e[j] = self.e[j + 1].take();
+        let mut out = None;
+        let mut i = 0;
+        while i < CAP_M {
+            if out.is_none() {
+                if self.at(i, k) {
+                    out = self.e[i].take();
+                }
+            } else if i < self.n {
+                // Shift the later entries down by one.
+                self.e[i - 1] = self.e[i].take();
             }
-            j += 1;
+            i += 1;
         }
-        self.n -= 1;
+        if out.is_some() {
+            self.n -= 1;
+        }
         out.map(|(_, v)| v)
-    }
-    /// The `i`-th entry (`i < len()`), for building and probing.
-    pub fn entry(&self, i: usize) -> Option<&(K, V)> {
-        if i < self.n {
-            self.e[i].as_ref()
-        } else {
-            None
-        }
     }
 }
 
@@ -177,12 +182,10 @@ impl Rec {
         }
         self.n += 1;
     }
-    pub fn of(calls: &[Call]) -> Self {
-        let mut r = Rec::new();
-        for c in calls {
-            r.push(c.clone());
-        }
-        r
+    /// `self` followed by `call` (no loop, for U-1).
+    pub fn then(mut self, call: Call) -> Self {
+        self.push(call);
+        self
     }
 }
 
@@ -264,16 +267,16 @@ impl Sparse {
     }
 }
 
-// The body of each method is the contract's, with `self.<map>.get(k)`,
-// `.insert(k, v)` and `.remove(k)` on an `Assoc`, plus one `self.calls.push`
-// in each mutator.
+// The body of each method is the contract's, with `self.<map>.get(k)
+// .cloned()` (or `.copied()`) as `get_cloned(k)`, and `.insert(k, v)` and
+// `.remove(k)` on an `Assoc`, plus one `self.calls.push` in each mutator.
 impl Store<Acct, Key> for Sparse {
     fn owner(&self) -> &Acct {
         &self.owner
     }
 
     fn principal(&self, key: &Key) -> Option<Principal<Acct>> {
-        self.principals.get(key).cloned()
+        self.principals.get_cloned(key)
     }
 
     fn insert_principal(&mut self, key: Key, principal: Principal<Acct>) {
@@ -292,7 +295,7 @@ impl Store<Acct, Key> for Sparse {
     }
 
     fn request(&self, id: RequestId) -> Option<Req> {
-        self.requests.get(&id).cloned()
+        self.requests.get_cloned(&id)
     }
 
     fn push_request(&mut self, request: Req) {
@@ -311,7 +314,7 @@ impl Store<Acct, Key> for Sparse {
     }
 
     fn approved_request_id(&self, approval_index: u64) -> Option<RequestId> {
-        self.approval_log.get(&approval_index).copied()
+        self.approval_log.get_cloned(&approval_index)
     }
 
     fn push_approval(&mut self, request_id: RequestId) {
@@ -330,7 +333,7 @@ impl Store<Acct, Key> for Sparse {
     }
 
     fn revocation(&self, registration_id: RegistrationId) -> Option<BlockTime> {
-        self.revocations.get(&registration_id).copied()
+        self.revocations.get_cloned(&registration_id)
     }
 
     fn insert_revocation(&mut self, registration_id: RegistrationId, revoked_at: BlockTime) {
@@ -351,10 +354,17 @@ impl Store<Acct, Key> for Sparse {
 /// write panics. It also checks the order of reads: slots strictly in
 /// sequence from `offset`, each followed by at most one `request` of the id
 /// that slot returned (RD-3).
+///
+/// With `full = false` only the first request read is returned (approved);
+/// later ones read as absent, which `approvals` drops. The page then holds
+/// at most one proof, while the read counts still pin it to exactly the
+/// slots `f..e` (section 6.3 cost fallback 6: a symbolic-length vector of
+/// up to 100 proofs exhausted 13.5 GB). Plain mode also runs `full = true`.
 pub struct Window {
     pub count: u64,
     pub offset: u64,
     pub shift: u64,
+    pub full: bool,
     /// Next slot the core may read.
     pub next: Cell<u64>,
     /// The id the last slot read returned, until it is requested.
@@ -365,11 +375,12 @@ pub struct Window {
 }
 
 impl Window {
-    pub fn new(count: u64, offset: u64, shift: u64) -> Self {
+    pub fn new(count: u64, offset: u64, shift: u64, full: bool) -> Self {
         Window {
             count,
             offset,
             shift,
+            full,
             next: Cell::new(offset),
             pending: Cell::new(None),
             count_reads: Cell::new(0),
@@ -405,7 +416,11 @@ impl Store<Acct, Key> for Window {
             "RD-3 request read only for the id a slot returned"
         );
         self.pending.set(None);
+        let first = self.request_reads.get() == 0;
         self.request_reads.set(self.request_reads.get() + 1);
+        if !first && !self.full {
+            return None;
+        }
         let j = id.wrapping_sub(self.shift);
         Some(ActionRequest {
             id,
@@ -827,25 +842,22 @@ pub fn expect<T: Store<Acct, Key>>(s: &T, op: &Op) -> Out {
 // PROP: ST-2
 pub fn protocol<T: Store<Acct, Key>>(s: &T, op: &Op, exp: &Out) -> Rec {
     match (op, exp) {
-        (Op::Add { key, .. }, Out::Add(Ok(p))) => Rec::of(&[
-            Call::IncrementRegistrationCount,
-            Call::InsertPrincipal(key.clone(), p.clone()),
-        ]),
+        (Op::Add { key, .. }, Out::Add(Ok(p))) => Rec::new()
+            .then(Call::IncrementRegistrationCount)
+            .then(Call::InsertPrincipal(key.clone(), p.clone())),
         // F-6: `remove_principal` runs before the absence is known.
         (Op::Revoke { key, .. }, Out::Revoke(Err(E::KeyNotRegistered))) => {
-            Rec::of(&[Call::RemovePrincipal(key.clone())])
+            Rec::new().then(Call::RemovePrincipal(key.clone()))
         }
-        (Op::Revoke { key, t, .. }, Out::Revoke(Ok(p))) => Rec::of(&[
-            Call::RemovePrincipal(key.clone()),
-            Call::InsertRevocation(p.registration_id, *t),
-        ]),
+        (Op::Revoke { key, t, .. }, Out::Revoke(Ok(p))) => Rec::new()
+            .then(Call::RemovePrincipal(key.clone()))
+            .then(Call::InsertRevocation(p.registration_id, *t)),
         (Op::Req { c, .. }, Out::Req(Ok(r))) => {
             let mut p = s.principal(&c.signer_key).unwrap();
             p.pending += 1;
-            Rec::of(&[
-                Call::InsertPrincipal(c.signer_key.clone(), p),
-                Call::PushRequest(r.clone()),
-            ])
+            Rec::new()
+                .then(Call::InsertPrincipal(c.signer_key.clone(), p))
+                .then(Call::PushRequest(r.clone()))
         }
         (Op::Appr { c, id, t, .. }, Out::Appr(Ok(pi))) => {
             let (mut r, mut agent) = decidable(s, *id).unwrap();
@@ -857,19 +869,17 @@ pub fn protocol<T: Store<Acct, Key>>(s: &T, op: &Op, exp: &Out) -> Rec {
                 approver_registration_id: pi.approver_registration_id,
                 approved_at: *t,
             });
-            Rec::of(&[
-                Call::InsertPrincipal(r.agent_key.clone(), agent),
-                Call::ReplaceRequest(r),
-                Call::PushApproval(*id),
-            ])
+            Rec::new()
+                .then(Call::InsertPrincipal(r.agent_key.clone(), agent))
+                .then(Call::ReplaceRequest(r))
+                .then(Call::PushApproval(*id))
         }
         (Op::Rej { id, .. }, Out::Rej(Ok(r))) => {
             let (_, mut agent) = decidable(s, *id).unwrap();
             agent.pending = agent.pending.saturating_sub(1);
-            Rec::of(&[
-                Call::InsertPrincipal(r.agent_key.clone(), agent),
-                Call::ReplaceRequest(r.clone()),
-            ])
+            Rec::new()
+                .then(Call::InsertPrincipal(r.agent_key.clone(), agent))
+                .then(Call::ReplaceRequest(r.clone()))
         }
         _ => Rec::new(),
     }

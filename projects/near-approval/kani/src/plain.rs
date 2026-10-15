@@ -166,7 +166,12 @@ fn h_refine() {
 #[test]
 fn h_store_laws() {
     run("h_store_laws_mem", 0x59F1_11F1, 20_000, g2::store_laws_mem);
-    run("h_store_laws_sparse", 0x923F_82A4, 20_000, g2::store_laws_sparse);
+    run(
+        "h_store_laws_sparse",
+        0x923F_82A4,
+        20_000,
+        g2::store_laws_sparse,
+    );
     run("h_store_laws_arr", 0xAB1C_5ED5, 20_000, g2::store_laws_arr);
 }
 

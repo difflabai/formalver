@@ -590,13 +590,13 @@ more than 15 GB once PR #15's state was added. They form one cover family.
 | `h_bmc_from_init` | `Init` + ≤ 5 ops (any kind, ≤ 2 requests), ghost history | GH (TR-1, TR-7) and TR-2 over every such trace | approved; rejected |
 | `h_bmc_from_init_witness` | `Init` + the 6 ops add, add, request, revoke, add, approve (any arguments) | the same, along that shape | revoke → re-add → approve old id fails with AgentRevoked |
 | `h_read` | like `h_step`; `id`, `from`, `limit` any `u64` | RD-1, RD-2, RD-5, RD-7, RD-8, LEM-4 | non-empty page; void status; rejected status; a proof whose agent key was revoked |
-| `h_page_arith` | `Window`: `from`, `limit`, `count`, `offset` any `u64`; out-of-page reads and any write panic; `#[kani::unwind(102)]` | RD-3, RD-6, and the page clamp | non-empty page at `count = MAXU` |
-| `h_proto_{request,approve}` | `Sparse` **raw** state (no `assume(inv)`), counters any `u64` ≥ stored size. ST-2 is also checked from `Inv` states with counters equal to size. | ST-2, ROB-2 | Ok; LogFull (approve's only from non-`Inv` states, per LEM-3) |
-| `h_proto_{add,revoke}` | same | ST-2 | Ok, each error |
-| `h_count_{op}` | `Counting` over `MemStore` | ROB-4 | none |
-| `h_refine_{op}` | the same `Inv` state in `MemStore` and `Sparse` | ST-3 | none |
-| `h_store_laws_{mem,sparse}` | small arbitrary stores | ST-1, INV-0 (`MemStore`) | none |
-| `h_action_len` | agent registered; `len ∈ {0, 1, 2048, 2049}` with the 1-byte case `" "`, plus the 2050-byte multi-byte case | ROB-3 | Ok, EmptyAction, ActionTooLong |
+| `h_page_arith` | `Window`: `from`, `limit`, `count`, `offset` any `u64`; out-of-page reads and any write panic; reads checked in order; only the first request read is approved (fallback 6), plain mode also runs full pages; `#[kani::unwind(102)]` | RD-3, RD-6, ROB-4 (`approvals` reads), and the page clamp | non-empty page at `count = MAXU`; non-empty page where `f + l` overflows; full page |
+| `h_proto_{request,approve}` | `Sparse` **raw** state (no `assume(inv)`), counters any `u64` ≥ stored size; `h_proto_request_empty` is the `""` instance. ST-2 is also checked from states with counters equal to size, in `h_refine_*`. | ST-2, ROB-2, TR-5 (exact result via `ghost::expect`, which adds both counter `LogFull` guards to `spec::expected`) | Ok; LogFull (approve's only from non-`Inv` states, per LEM-3) |
+| `h_proto_{add,revoke,reject}` | same | ST-2 | Ok, each error (add, revoke); Ok (reject) |
+| `h_count_{op}` | `Counting` over `MemStore`, raw state | ROB-4 (per-operation read and write bounds; no write on failure except F-6) | none |
+| `h_refine_{op}` | the same state in `ArrStore`, `Sparse` and `MemStore`: INV-0, INV-1, INV-8, distinct revocation ids and no live registration revoked (every `Inv` state, and more) | ST-3 (same results, same `α` read through `Store`), ST-2 with counters equal to size | none |
+| `h_store_laws_{mem,sparse,arr}` | small well-formed stores (distinct keys, dense ids, distinct revocation ids), one mutator within its law's precondition | ST-1, INV-0 (`MemStore`, `ArrStore`) | insert over an existing key; remove of an absent key |
+| `h_action_len` | agent registered; `len ∈ {0, 1, 2048, 2049}` with the 1-byte case `" "`, plus the 2050-byte multi-byte case; result by kind and non-action fields (fallback 5); `#[kani::unwind(2051)]` so the chars-vs-bytes mutant fails on its assertion | ROB-3 | Ok, EmptyAction, ActionTooLong |
 | `h_canary` | any | asserts a false property; must report FAILED | none |
 
 ### 6.3 Bounds and the small-scope argument
@@ -648,11 +648,11 @@ seeded against the upstream suite during planning (27/27 killed).
 | `h_step_*` (M1) | self-approval check; relay check; key-account binding; double log push; drop-empty; `trim`-empty; `active_from` dropped / strict / +1 / 0; no increment; no decrement; no principal write-back; action-mismatch dropped; already-approved dropped; three guard swaps; void reported as pending (`h_read`); revoke not owner-only; `approval_index` from request count; proof copies agent as approver; `push_approval` before the checks |
 | `h_step_*`, `h_read` (M1, PR #15 API) | reject: self-approval check dropped, no decrement, rejection records the agent's registration; already-rejected dropped; revocation not recorded; registration count not incremented; request records registration 0; `proof_revocations` swapped (`h_read`); rejected reported as pending (`h_read`) |
 | `h_raw_*` (M1) | cap off-by-one (`>=` changed to `>`) (`h_raw_request`); add's `LogFull` dropped (`h_raw_add`: the counter overflows) |
-| `h_action_len` (M2) | length off-by-one; chars-vs-bytes |
-| `h_page_arith` (M2) | page clamp removed; page addition wraps |
-| `h_proto_*` (M2) | `LogFull` request dropped; `LogFull` approve dropped |
-| `h_store_laws_mem` (M2) | `MemStore` insert pushes duplicates |
-| **Must survive** (equivalent, F-14) | role check dropped / account check dropped in `live_agent_registration`. If either is killed, INV-8 or LEM-4 is wrong. |
+| `h_action_len` (M2) | length off-by-one (37); chars-vs-bytes (38) |
+| `h_page_arith` (M2) | page clamp (`.min(approval_count)`) removed (39); page addition wraps (40) |
+| `h_proto_*` (M2) | `LogFull` request dropped (41, `h_proto_request`); `LogFull` approve dropped (42, `h_proto_approve`) |
+| `h_store_laws_mem` (M2) | `MemStore` insert pushes duplicates (43) |
+| **Must survive** (equivalent, F-14) | role check dropped / account check dropped in `live_agent_registration`. If either is killed, INV-8 or LEM-4 is wrong. Checked with the harnesses that see raw states skipped (`h_raw_*`, `h_proto_*`, and the `facts` generator), since the equivalence holds only under INV-8. |
 
 ---
 

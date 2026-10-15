@@ -262,6 +262,21 @@ fn h_cut_reject() {
 // ---------------------------------------------------------------------------
 
 use crate::ghost_checks as g2;
+use crate::src::Shape;
+
+/// The `MemStore` harnesses' state shape. A `MemStore` built from a state
+/// of symbolic size is a `Vec` of symbolic length, which exhausted 13.5 GB
+/// (RESULTS.md deviation 1), so these fix `#P = #R = #L = #V = 3`. The
+/// contents stay symbolic: a key is present at any of the three positions
+/// or absent, an id names any request or none. The core has no loops
+/// (CUT-1), so its call counts do not depend on the sizes; the laws are
+/// per call, and `h_store_laws_{arr,sparse}` check them at every size.
+const MEM_SHAPE: Shape = Shape {
+    np: 3,
+    nr: 3,
+    nl: 3,
+    nv: 3,
+};
 
 /// RD-3, RD-6, ROB-4 (approvals): any `from`, `limit`, `count`. Unwind 102:
 /// a page has at most `MAX_PAGE_SIZE` = 100 entries.
@@ -309,38 +324,39 @@ fn h_proto_reject() {
     g2::proto_reject(&mut Sym(None, checks::PART_ALL, false));
 }
 
-// ROB-4: `Counting` over `MemStore`.
+// ROB-4: `Counting` over `MemStore`, state shape `MEM_SHAPE`.
 #[kani::proof]
 #[kani::unwind(5)]
 fn h_count_add() {
-    g2::count_add(&mut Sym(None, checks::PART_ALL, false));
+    g2::count_add(&mut Sym(Some(MEM_SHAPE), checks::PART_ALL, false));
 }
 
 #[kani::proof]
 #[kani::unwind(5)]
 fn h_count_revoke() {
-    g2::count_revoke(&mut Sym(None, checks::PART_ALL, false));
+    g2::count_revoke(&mut Sym(Some(MEM_SHAPE), checks::PART_ALL, false));
 }
 
 #[kani::proof]
 #[kani::unwind(5)]
 fn h_count_request() {
-    g2::count_request(&mut Sym(None, checks::PART_ALL, false));
+    g2::count_request(&mut Sym(Some(MEM_SHAPE), checks::PART_ALL, false));
 }
 
 #[kani::proof]
 #[kani::unwind(5)]
 fn h_count_approve() {
-    g2::count_approve(&mut Sym(None, checks::PART_ALL, false));
+    g2::count_approve(&mut Sym(Some(MEM_SHAPE), checks::PART_ALL, false));
 }
 
 #[kani::proof]
 #[kani::unwind(5)]
 fn h_count_reject() {
-    g2::count_reject(&mut Sym(None, checks::PART_ALL, false));
+    g2::count_reject(&mut Sym(Some(MEM_SHAPE), checks::PART_ALL, false));
 }
 
-// ST-3 (and ST-2 with counters equal to size): ArrStore, Sparse, MemStore.
+// ST-3 (and ST-2 with counters equal to size): ArrStore and Sparse (the
+// MemStore leg runs in plain mode; see `ghost_checks::refine`).
 // Unwind 9: `Obs` probes 8 registration ids.
 #[kani::proof]
 #[kani::unwind(9)]
@@ -376,7 +392,7 @@ fn h_refine_reject() {
 #[kani::proof]
 #[kani::unwind(9)]
 fn h_store_laws_mem() {
-    g2::store_laws_mem(&mut Sym(None, checks::PART_ALL, false));
+    g2::store_laws_mem(&mut Sym(Some(MEM_SHAPE), checks::PART_ALL, false));
 }
 
 #[kani::proof]
