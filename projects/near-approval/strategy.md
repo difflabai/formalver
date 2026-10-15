@@ -556,9 +556,17 @@ opaque newtypes `Acct(u8)` and `Key(u8)` that implement only `Clone`,
 | `src.rs` | **Dual mode.** Harness bodies are written against a `Src` trait. `Sym` uses `kani::any`/`assume`: **the proof**. `Rng` uses xorshift with hints toward `Inv` states: **not a proof**. Plain mode debugs specs in seconds and gates CI without Kani. `kani/kani-stub/` lets `RUSTFLAGS="--cfg kani --cfg kani_stub" cargo check` type-check `proofs.rs`. |
 
 M1 implements this design against the pinned API (results and run times in
-[`kani/RESULTS.md`](kani/RESULTS.md)). The ghost stores (`ghost.rs`: `Sparse`, `Window`,
-`Counting`) are M2 and not written yet. A plain-mode prototype from planning,
-against the pre-`5736251` API, was not committed.
+[`kani/RESULTS.md`](kani/RESULTS.md)). M2 adds the ghost stores in
+`ghost.rs` (`Sparse`, `Window`, `Counting`, plus `Obs`, the abstraction
+`α` read through the `Store` interface, and `expect`, the TX results with
+both counter `LogFull` guards) and their harness bodies in
+`ghost_checks.rs`. `Sparse` holds each `LookupMap` as a fixed-capacity
+association list and the counters as plain `u64`, so the shell's `+= 1`
+at `u64::MAX` panics as it does on-chain; the plain test
+`sparse_header_hash` fails when `contract/src/lib.rs` no longer has the
+sha256 in its header. Because M1 runs the core over `ArrStore` (RESULTS.md
+deviation 1), `h_store_laws_arr` and the `ArrStore` leg of `h_refine_*`
+discharge the ST-1/ST-3 obligations that deviation created.
 
 ### 6.2 Harnesses and covers
 

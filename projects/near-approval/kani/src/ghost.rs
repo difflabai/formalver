@@ -611,11 +611,39 @@ pub struct Obs {
     pub owner: Acct,
     pub p: [Option<Principal<Acct>>; NK as usize],
     pub nr: u64,
-    pub r: [Option<Req>; OR],
+    pub r: [Option<ObsReq>; OR],
     pub nl: u64,
     pub l: [Option<RequestId>; OR],
     pub g: u64,
     pub v: [Option<BlockTime>; OV],
+}
+
+/// A request with its action as a code of the closed harness alphabet
+/// (`spec::act_code`), so snapshots hold no `String` (CBMC cost, as
+/// `spec::SnapReq`). `act_code` panics on any other action.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ObsReq {
+    pub id: RequestId,
+    pub aa: Acct,
+    pub ak: Key,
+    pub ag: RegistrationId,
+    pub act: u8,
+    pub rt: BlockTime,
+    pub ap: Option<Approval<Acct, Key>>,
+    pub rj: Option<Rejection<Acct, Key>>,
+}
+
+pub fn obs_req(r: &Req) -> ObsReq {
+    ObsReq {
+        id: r.id,
+        aa: r.agent_account_id.clone(),
+        ak: r.agent_key.clone(),
+        ag: r.agent_registration_id,
+        act: crate::spec::act_code(&r.action),
+        rt: r.requested_at,
+        ap: r.approval.clone(),
+        rj: r.rejection.clone(),
+    }
 }
 
 pub fn obs<T: Store<Acct, Key>>(s: &T) -> Obs {
@@ -636,7 +664,7 @@ pub fn obs<T: Store<Acct, Key>>(s: &T) -> Obs {
     }
     let mut i = 0;
     while i < OR {
-        o.r[i] = s.request(i as u64);
+        o.r[i] = s.request(i as u64).as_ref().map(obs_req);
         o.l[i] = s.approved_request_id(i as u64);
         i += 1;
     }

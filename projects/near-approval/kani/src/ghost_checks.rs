@@ -469,12 +469,12 @@ fn check_law<T: Store<Acct, Key>>(s: &mut T, law: &Law) {
         }
         Law::PushRequest(r) => {
             s.push_request(r.clone());
-            want.r[pre.nr as usize] = Some(r.clone());
+            want.r[pre.nr as usize] = Some(obs_req(r));
             want.nr += 1;
         }
         Law::ReplaceRequest(r) => {
             s.replace_request(r.clone());
-            want.r[r.id as usize] = Some(r.clone());
+            want.r[r.id as usize] = Some(obs_req(r));
         }
         Law::PushApproval(i) => {
             s.push_approval(*i);
