@@ -482,6 +482,29 @@ pub enum Law {
     InsertRevocation(u64, BlockTime),
 }
 
+fn law_principal(src: &mut impl Src) -> Principal<Acct> {
+    Principal {
+        account_id: src.acct(),
+        role: gen::role(src),
+        registration_id: gen::reg_id(src, false),
+        active_from: src.u64(),
+        pending: src.u32(),
+    }
+}
+
+fn law_request(src: &mut impl Src, id: u64) -> Req {
+    ActionRequest {
+        id,
+        agent_account_id: src.acct(),
+        agent_key: src.key(),
+        agent_registration_id: gen::reg_id(src, false),
+        action: gen::alphabet_action(src),
+        requested_at: gen::state_time(src, false),
+        approval: None,
+        rejection: None,
+    }
+}
+
 /// A small well-formed store (distinct keys, dense ids, distinct revocation
 /// ids; contents otherwise arbitrary, no `Inv`) and one mutator call within
 /// its law's precondition.
@@ -492,25 +515,15 @@ fn law_case(src: &mut impl Src) -> Option<(S, Law)> {
     }
     let k = src.below(7);
     // `part` picks the laws: PART_REG the registry's two (insert and remove
-    // principal), PART_POST the other five. Under Kani `h_store_laws_mem`
-    // runs them as two harnesses (as one it ran out of memory at 15 GB);
-    // every other caller passes both bits.
+    // principal), PART_POST the other five. Under Kani the `Sparse` laws run
+    // as two harnesses; every other caller passes both bits.
     let part = src.part();
     let bit = if k < 2 { PART_REG } else { PART_POST };
     if !assume(part & bit != 0) {
         return None;
     }
     let law = match k {
-        0 => Law::InsertPrincipal(
-            src.key(),
-            Principal {
-                account_id: src.acct(),
-                role: gen::role(src),
-                registration_id: gen::reg_id(src, false),
-                active_from: src.u64(),
-                pending: src.u32(),
-            },
-        ),
+        0 => Law::InsertPrincipal(src.key(), law_principal(src)),
         1 => Law::RemovePrincipal(src.key()),
         k @ (2 | 3) => {
             let id = if k == 2 {
@@ -522,16 +535,7 @@ fn law_case(src: &mut impl Src) -> Option<(S, Law)> {
                 }
                 id
             };
-            let r = ActionRequest {
-                id,
-                agent_account_id: src.acct(),
-                agent_key: src.key(),
-                agent_registration_id: gen::reg_id(src, false),
-                action: gen::alphabet_action(src),
-                requested_at: gen::state_time(src, false),
-                approval: None,
-                rejection: None,
-            };
+            let r = law_request(src, id);
             if k == 2 {
                 Law::PushRequest(r)
             } else {
@@ -605,15 +609,124 @@ fn check_law<T: Store<Acct, Key>>(s: &mut T, law: &Law) {
 }
 
 /// `MemStore`: the laws, and INV-0 (no repeated key after any insert or
-/// remove from a store without one).
+/// remove from a store without one). Plain mode picks the law at random;
+/// under Kani each `h_store_laws_mem_law_*` harness runs one `mem_law_*`.
 pub fn store_laws_mem(src: &mut impl Src) {
-    let Some((a, law)) = law_case(src) else {
+    match src.below(7) {
+        0 => mem_law_insert(src),
+        1 => mem_law_remove(src),
+        2 => mem_law_push_request(src),
+        3 => mem_law_replace_request(src),
+        4 => mem_law_push_approval(src),
+        5 => mem_law_count(src),
+        _ => mem_law_revocation(src),
+    }
+}
+
+/// `check_law` for `MemStore`, straight-line: `law` makes the call and
+/// edits the expected `Obs`, or returns `false` when its arguments fall
+/// outside the law's precondition. Going through the `Law` enum (as
+/// `check_law` does) ran every `MemStore` harness out of memory, on the
+/// 64 GB CI runners too: CBMC kept every arm of both matches alive over the
+/// `Vec`-backed store (1.06 M program steps against 0.26 M this way).
+// PROP: ST-1 INV-0
+fn mem_law<R: Src>(
+    src: &mut R,
+    law: impl FnOnce(&mut R, &S, &mut MemStore<Acct, Key>, &Obs, &mut Obs) -> bool,
+) {
+    let a = gen::state(src, false);
+    if !assume(wf(&a)) {
         return;
-    };
+    }
     let mut m = to_mem(&a);
-    check_law(&mut m, &law);
-    // PROP: INV-0
+    let pre = obs(&m);
+    assert!(pre.sequences(), "ST-1 requests and log are sequences");
+    assert!(obs(&m) == pre, "ST-1 reads are pure");
+    let mut want = pre.clone();
+    if !law(src, &a, &mut m, &pre, &mut want) {
+        return;
+    }
+    let post = obs(&m);
+    assert!(post == want, "ST-1 the mutator's law");
+    assert!(post.sequences(), "ST-1 requests and log stay sequences");
     assert!(mem_keys_distinct(&m), "INV-0 MemStore keys distinct");
+}
+
+pub fn mem_law_insert(src: &mut impl Src) {
+    mem_law(src, |src, _, m, pre, want| {
+        let k = src.key();
+        let p = law_principal(src);
+        cover!(pre.p[k.0 as usize].is_some(), "laws: insert over an existing key");
+        m.insert_principal(k.clone(), p.clone());
+        want.p[k.0 as usize] = Some(p);
+        true
+    })
+}
+
+pub fn mem_law_remove(src: &mut impl Src) {
+    mem_law(src, |src, _, m, pre, want| {
+        let k = src.key();
+        let got = m.remove_principal(&k);
+        assert!(got == pre.p[k.0 as usize], "ST-1 remove returns P(k)");
+        cover!(got.is_none(), "laws: remove of an absent key"); // L-REMOVE-ABSENT
+        want.p[k.0 as usize] = None;
+        true
+    })
+}
+
+pub fn mem_law_push_request(src: &mut impl Src) {
+    mem_law(src, |src, a, m, pre, want| {
+        let r = law_request(src, a.nr() as u64);
+        m.push_request(r.clone());
+        want.r[pre.nr as usize] = Some(obs_req(&r));
+        want.nr += 1;
+        true
+    })
+}
+
+pub fn mem_law_replace_request(src: &mut impl Src) {
+    mem_law(src, |src, a, m, _, want| {
+        let id = src.below(4) as u64;
+        if !assume(id < a.nr() as u64) {
+            return false;
+        }
+        let r = law_request(src, id);
+        m.replace_request(r.clone());
+        want.r[id as usize] = Some(obs_req(&r));
+        true
+    })
+}
+
+pub fn mem_law_push_approval(src: &mut impl Src) {
+    mem_law(src, |src, _, m, pre, want| {
+        let i = src.u64();
+        m.push_approval(i);
+        want.l[pre.nl as usize] = Some(i);
+        want.nl += 1;
+        true
+    })
+}
+
+pub fn mem_law_count(src: &mut impl Src) {
+    mem_law(src, |_, _, m, _, want| {
+        m.increment_registration_count();
+        want.g += 1;
+        true
+    })
+}
+
+pub fn mem_law_revocation(src: &mut impl Src) {
+    mem_law(src, |src, a, m, _, want| {
+        let g = gen::reg_id(src, false);
+        // F-16: `insert_revocation` is only ever called with a fresh id.
+        if !assume(v_get(a, g).is_none()) {
+            return false;
+        }
+        let t = gen::state_time(src, false);
+        m.insert_revocation(g, t);
+        want.v[g as usize] = Some(t);
+        true
+    })
 }
 
 /// Most entries a `MemStore` built from an `ArrStore` holds after one insert.

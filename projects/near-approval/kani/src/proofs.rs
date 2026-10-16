@@ -278,10 +278,9 @@ const MEM_SHAPE: Shape = Shape {
     nv: 3,
 };
 
-/// `h_store_laws_mem_reg`: the registry laws touch only principals, so the
-/// other parts are one entry each (the frame); `MEM_SHAPE` ran out of memory
-/// at 15 GB. `h_store_laws_mem`: the sequence, counter and revocation laws,
-/// one principal. The `Sparse` halves use the same shapes (with a symbolic
+/// `h_store_laws_mem_law_{insert,remove}`: the registry laws touch only
+/// principals, so the other parts are one entry each (the frame); `MEM_SHAPE`
+/// ran out of memory at 15 GB. The other five laws: one principal. The `Sparse` halves use the same shapes (with a symbolic
 /// shape 20 and 23 min at 9.7 GB); `h_store_laws_arr` keeps every shape.
 const MEM_SHAPE_REG: Shape = Shape {
     np: 3,
@@ -428,22 +427,54 @@ fn h_refine_reject_post() {
     g2::refine_reject(&mut Sym(None, checks::PART_POST, false));
 }
 
-// ST-1, INV-0. Two harnesses by law (`ghost_checks::law_case`): the five
-// sequence, counter and revocation laws, and (`_reg`) insert and remove
-// principal, which carry the covers and INV-0's interesting cases.
+// ST-1, INV-0. One harness per law (`ghost_checks::mem_law`): through the
+// shared `Law` dispatch they ran out of memory on the 64 GB CI runners. Insert and remove
+// principal use `MEM_SHAPE_REG` and carry the covers and INV-0's
+// interesting cases; the others `MEM_SHAPE_SEQ`. run-kani.sh puts all seven
+// in the `h_store_laws_mem` cover family.
 #[kani::proof]
 #[kani::unwind(9)]
-fn h_store_laws_mem() {
-    g2::store_laws_mem(&mut Sym(Some(MEM_SHAPE_SEQ), checks::PART_POST, false));
+fn h_store_laws_mem_law_insert() {
+    g2::mem_law_insert(&mut Sym(Some(MEM_SHAPE_REG), checks::PART_ALL, false));
 }
 
 #[kani::proof]
 #[kani::unwind(9)]
-fn h_store_laws_mem_reg() {
-    g2::store_laws_mem(&mut Sym(Some(MEM_SHAPE_REG), checks::PART_REG, false));
+fn h_store_laws_mem_law_remove() {
+    g2::mem_law_remove(&mut Sym(Some(MEM_SHAPE_REG), checks::PART_ALL, false));
 }
 
-// Split like h_store_laws_mem: as one harness 29 min and 9.6 GB.
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_store_laws_mem_law_push_request() {
+    g2::mem_law_push_request(&mut Sym(Some(MEM_SHAPE_SEQ), checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_store_laws_mem_law_replace_request() {
+    g2::mem_law_replace_request(&mut Sym(Some(MEM_SHAPE_SEQ), checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_store_laws_mem_law_push_approval() {
+    g2::mem_law_push_approval(&mut Sym(Some(MEM_SHAPE_SEQ), checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_store_laws_mem_law_count() {
+    g2::mem_law_count(&mut Sym(Some(MEM_SHAPE_SEQ), checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_store_laws_mem_law_revocation() {
+    g2::mem_law_revocation(&mut Sym(Some(MEM_SHAPE_SEQ), checks::PART_ALL, false));
+}
+
+// Split by law: as one harness 29 min and 9.6 GB.
 #[kani::proof]
 #[kani::unwind(9)]
 fn h_store_laws_sparse() {

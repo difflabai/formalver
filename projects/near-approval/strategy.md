@@ -654,7 +654,7 @@ seeded against the upstream suite during planning (27/27 killed).
 | `h_action_len` (M2) | length off-by-one (37); chars-vs-bytes (38) |
 | `h_page_arith` (M2) | page clamp (`.min(approval_count)`) removed (39); page addition wraps (40) |
 | `h_proto_*` (M2) | `LogFull` request dropped (41, `h_proto_request`); `LogFull` approve dropped (42, `h_proto_approve`) |
-| `h_store_laws_mem` (M2) | `MemStore` insert pushes duplicates (43) |
+| `h_store_laws_mem_law_insert` (M2) | `MemStore` insert pushes duplicates (43) |
 | **Must survive** (equivalent, F-14) | role check dropped / account check dropped in `live_agent_registration`. If either is killed, INV-8 or LEM-4 is wrong. Checked with the harnesses that see raw states skipped (`h_raw_*`, `h_proto_*`, and the `facts` generator), since the equivalence holds only under INV-8. |
 
 ---

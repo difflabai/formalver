@@ -211,15 +211,14 @@ inflate it).
 | `h_refine_reject_tx`, `_post` | verified | 278, 1076 s | 4.2, 8.4 GB | ST-3, ST-2 |
 | `h_store_laws_arr` | verified, 2/2 covers | 699 s | 4.5 GB | ST-1, INV-0 |
 | `h_store_laws_sparse_reg`, `h_store_laws_sparse` | verified, 2/2 covers | 663, 765 s | 7.8, 8.6 GB | ST-1 |
-| `h_store_laws_mem_reg`, `h_store_laws_mem` | **out of memory locally** (13.3 and 13.6 GB, in SSA conversion: 0.95 M program steps), not a counterexample; left for the CI runners | - | - | ST-1, INV-0 |
+| `h_store_laws_mem_law_insert`, `_remove` | verified, 1/1 cover each | 174, 404 s | 2.2, 7.4 GB | ST-1, INV-0 (`MEM_SHAPE_REG`) |
+| `h_store_laws_mem_law_push_request`, `_replace_request`, `_push_approval`, `_count`, `_revocation` | verified | 227, 267, 210, 205, 294 s | 2.5, 3.3, 2.4, 2.4, 3.0 GB | ST-1, INV-0 (`MEM_SHAPE_SEQ`) |
 
 `h_refine_add/_revoke/_request` ran before `refine` took its `part`
 argument; they pass both bits, so their assertions are unchanged. The
 `MemStore` law harnesses pass in plain mode, and mutant 43 is killed there;
-`Vec` is what makes them expensive (the same laws over `ArrStore`'s and
-`Sparse`'s fixed arrays fit). If they also run out of memory in CI, the
-fallback is to state the `MemStore` frame by field equality (its reads
-are field lookups) instead of three full `Obs` snapshots.
+the `MemStore` harnesses run one law each through `mem_law` (see
+deviation 6).
 <!-- /M2-KANI-TABLE -->
 
 ### Deviations from section 6.2, and why
@@ -252,12 +251,17 @@ are field lookups) instead of three full `Obs` snapshots.
    (fallback 5); unwind 2051 so the chars-vs-bytes mutant fails on its
    assertion. Comparing the full 2 KB actions took more than 11 min of
    symex; this way 43 s.
-6. **`h_store_laws_mem` and `h_store_laws_sparse` are split by law**
-   (`_reg`: insert and remove principal; the base harness: the other five),
-   and all four halves use a fixed shape: `_reg` 3 principals and one request, log entry and revocation
-   (the frame); `h_store_laws_mem` one principal and 3 of each other.
-   As one harness `h_store_laws_mem` ran out of memory (13 GB), and so did
-   `h_store_laws_mem_reg` with 3 of everything (1.0 M program steps);
+6. **The `MemStore` law harnesses run one law each, straight-line**
+   (`h_store_laws_mem_law_*`, through `ghost_checks::mem_law`), and
+   `h_store_laws_sparse` is split in two (`_reg`: insert and remove
+   principal; the base harness: the other five). All use a fixed shape:
+   the registry laws 3 principals and one request, log entry and
+   revocation (the frame), the others one principal and 3 of each other.
+   Through the shared `Law` enum (`check_law`) the `MemStore` harnesses ran
+   out of memory, two laws each, on the 64 GB CI runners as well as locally
+   (1.06 M program steps for one law): CBMC kept every arm of the dispatch
+   alive over the `Vec`-backed store. Straight-line, one law is 0.26 M steps
+   and 2 to 7 GB;
    `h_store_laws_sparse` took 29 min at 9.6 GB, and with a symbolic shape
    its halves still took 20 and 23 min at 9.7 GB. `h_store_laws_arr` keeps every shape
    up to the `ArrStore` capacities, and the laws are per call, so a fixed
@@ -309,7 +313,7 @@ action length off by one and counted in chars (`h_action_len`), the page
 clamp removed and the page addition wrapping (`h_page_arith`), request's
 and approve's `LogFull` guard dropped (`h_proto_request`,
 `h_proto_approve`), `MemStore::insert_principal` appending a duplicate
-key (`h_store_laws_mem`). `run-mutants.sh near-approval` (plain mode, all
+key (`h_store_laws_mem_law_insert`). `run-mutants.sh near-approval` (plain mode, all
 43): 41 killed, the 2 equivalent ones (25, 26) survive. The survival check
 now also skips `h_proto*` and `facts`: both see raw (non-INV-8) states, and
 `facts::facts` already killed 25 and 26 on `7200b99` before M2. Not yet

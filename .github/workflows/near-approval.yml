@@ -276,8 +276,9 @@ jobs:
           - "h_store_laws_arr"
           - "h_store_laws_sparse"
           - "h_store_laws_sparse_reg"
-          - "h_store_laws_mem"
-          - "h_store_laws_mem_reg"
+          - "h_store_laws_mem_law_insert h_store_laws_mem_law_remove"
+          - "h_store_laws_mem_law_push_request h_store_laws_mem_law_replace_request"
+          - "h_store_laws_mem_law_push_approval h_store_laws_mem_law_count h_store_laws_mem_law_revocation"
     steps:
       - uses: actions/checkout@v4
         with:

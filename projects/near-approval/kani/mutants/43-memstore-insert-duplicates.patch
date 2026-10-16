@@ -1,4 +1,4 @@
-# killed-by: h_store_laws_mem
+# killed-by: h_store_laws_mem_law_insert
 --- a/core/src/lib.rs
 +++ b/core/src/lib.rs
 @@ -679,10 +679,7 @@

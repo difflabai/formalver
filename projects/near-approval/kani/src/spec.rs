@@ -27,7 +27,7 @@
 //! - `V` (revocations) is read as "first matching entry", like `P`. Under
 //!   INV-12 its ids are distinct, so it is a map.
 
-use crate::ids::{Acct, Key, ACTIONS, NK, OWNER};
+use crate::ids::{Acct, Key, ACTIONS, ACTION_BYTES, NK, OWNER};
 use crate::store::{CAP_P, CAP_R, CAP_V};
 use approval_core::{
     add_principal, approval, approve, reject, request_action, revoke_key, ActionRequest, Approval,
@@ -379,9 +379,14 @@ pub fn act_code(a: &str) -> u8 {
     if a.is_empty() {
         return 0;
     }
+    // Byte by byte rather than `a == ACTIONS[i]`: every action is two bytes,
+    // and `str` equality's `memcmp` unwinds to the harness bound at each of
+    // the dozens of call sites (it ran the MemStore law harnesses out of
+    // memory).
+    let b = a.as_bytes();
     let mut i = 0;
-    while i < ACTIONS.len() {
-        if a == ACTIONS[i] {
+    while i < ACTION_BYTES.len() {
+        if b.len() == 2 && b[0] == ACTION_BYTES[i][0] && b[1] == ACTION_BYTES[i][1] {
             return i as u8 + 1;
         }
         i += 1;

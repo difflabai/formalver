@@ -586,6 +586,12 @@ impl<T: Store<Acct, Key>> Store<Acct, Key> for Counting<T> {
 /// repeated, which `MemStore` reads as "first match", like `ArrStore`).
 pub fn to_mem(s: &crate::store::ArrStore) -> MemStore<Acct, Key> {
     let mut m = MemStore::new(s.owner.clone());
+    // Room for the store plus one push, so no harness reaches `Vec`'s
+    // reallocation path (CBMC copies the whole buffer symbolically there).
+    m.principals = Vec::with_capacity(crate::store::CAP_P + 1);
+    m.requests = Vec::with_capacity(crate::store::CAP_R + 1);
+    m.approval_log = Vec::with_capacity(crate::store::CAP_R + 1);
+    m.revocations = Vec::with_capacity(crate::store::CAP_V + 1);
     let mut i = 0;
     while i < crate::store::CAP_P {
         if i < s.np() {
