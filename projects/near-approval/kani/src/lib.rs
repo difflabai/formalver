@@ -9,6 +9,8 @@ pub mod src;
 pub mod checks;
 pub mod cutoff;
 pub mod gen;
+pub mod ghost;
+pub mod ghost_checks;
 pub mod spec;
 pub mod store;
 pub mod tla;

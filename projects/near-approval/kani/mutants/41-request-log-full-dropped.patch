@@ -1,0 +1,13 @@
+# killed-by: h_proto_request
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -449,9 +449,6 @@
+         return Err(ApprovalError::TooManyPending);
+     }
+     let id = store.request_count();
+-    if id == u64::MAX {
+-        return Err(ApprovalError::LogFull);
+-    }
+     let request = ActionRequest {
+         id,
+         agent_account_id: caller.signer.clone(),

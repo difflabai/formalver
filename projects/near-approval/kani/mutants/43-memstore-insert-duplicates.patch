@@ -1,0 +1,15 @@
+# killed-by: h_store_laws_mem
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -679,10 +679,7 @@
+     }
+ 
+     fn insert_principal(&mut self, key: K, principal: Principal<A>) {
+-        match self.principals.iter_mut().find(|(k, _)| *k == key) {
+-            Some(entry) => entry.1 = principal,
+-            None => self.principals.push((key, principal)),
+-        }
++        self.principals.push((key, principal));
+     }
+ 
+     fn remove_principal(&mut self, key: &K) -> Option<Principal<A>> {
