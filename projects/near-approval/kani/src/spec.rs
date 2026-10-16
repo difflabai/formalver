@@ -381,11 +381,10 @@ pub fn act_code(a: &str) -> u8 {
     }
     // Byte by byte rather than `a == ACTIONS[i]`: every action is two bytes,
     // and `str` equality's `memcmp` unwinds to the harness bound at each of
-    // the dozens of call sites (it ran the MemStore law harnesses out of
-    // memory).
+    // the dozens of call sites.
     let b = a.as_bytes();
     let mut i = 0;
-    while i < ACTION_BYTES.len() {
+    while i < ACTIONS.len() {
         if b.len() == 2 && b[0] == ACTION_BYTES[i][0] && b[1] == ACTION_BYTES[i][1] {
             return i as u8 + 1;
         }
