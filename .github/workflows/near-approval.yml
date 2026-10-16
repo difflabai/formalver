@@ -1,0 +1,566 @@
+# near-approval CI (strategy.md section 14): the jobs M1 has artifacts for.
+# trust-framework is private; CROSS_REPO_BUILD_KEY (a token or an SSH deploy
+# key with read access to it) checks out the submodule (OQ-7).
+name: near-approval
+
+on:
+  pull_request:
+    paths:
+      - "projects/near-approval/**"
+      - "tools/**"
+      - ".gitmodules"
+      - ".github/workflows/near-approval.yml"
+  push:
+    branches: [main]
+    paths:
+      - "projects/near-approval/**"
+      - "tools/**"
+      - ".gitmodules"
+      - ".github/workflows/near-approval.yml"
+  schedule:
+    - cron: "17 3 * * *" # nightly: kani
+    - cron: "41 4 * * 0" # weekly: mutants
+  workflow_dispatch:
+    inputs:
+      mutants:
+        description: "Also run the mutant job"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # Scheduled runs get their own group so a push or the other schedule
+  # does not cancel them.
+  group: near-approval-${{ github.ref }}-${{ github.event_name }}-${{ github.event.schedule }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+# GitHub-hosted runners are unavailable to the org (billing block), so every
+# job takes its label from the CI_RUNNER repository variable (the self-hosted
+# macOS arm64 runner) and falls back to its original hosted label. That host
+# keeps HOME between jobs and has no sudo: the steps below avoid
+# `rustup default`, ~/.gitconfig and ~/.ssh, and the hosted-only swap setup is
+# skipped there.
+#
+# On pull requests each job below pin runs only when the PR changes a path
+# it depends on (tools/scripts/ci-areas.sh); a skipped job reports as
+# skipped, which branch protection counts as passing. Pushes to main, the
+# schedules and manual dispatch run every job.
+jobs:
+  pin:
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    outputs:
+      plain: ${{ steps.areas.outputs.plain }}
+      loops: ${{ steps.areas.outputs.loops }}
+      kani: ${{ steps.areas.outputs.kani }}
+      tla: ${{ steps.areas.outputs.tla }}
+      lean: ${{ steps.areas.outputs.lean }}
+      prolog: ${{ steps.areas.outputs.prolog }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          # The PR merge commit and its first parent (the base tip), for the
+          # changed paths.
+          fetch-depth: 2
+      - name: Jobs this change needs
+        id: areas
+        run: |
+          tools/scripts/test-ci-areas.sh
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && git rev-parse -q --verify HEAD^2 >/dev/null; then
+            git diff --name-only HEAD^1 HEAD | CI_AREAS_EXPLAIN=1 tools/scripts/ci-areas.sh >"$RUNNER_TEMP/areas"
+          else
+            tools/scripts/ci-areas.sh --all </dev/null >"$RUNNER_TEMP/areas"
+          fi
+          cat "$RUNNER_TEMP/areas" >>"$GITHUB_OUTPUT"
+          { echo '### Jobs this change needs'; sed 's/^/- /' "$RUNNER_TEMP/areas"; } >>"$GITHUB_STEP_SUMMARY"
+      - name: Check out trust-framework at the pin
+        env:
+          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+        run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
+      - name: Python >= 3.11 (tomllib)
+        if: runner.os == 'macOS'
+        run: |
+          # macOS's /usr/bin/python3 is 3.9; the Mac runner has Homebrew's
+          # newer ones under versioned names only.
+          python3 -c 'import tomllib' 2>/dev/null && exit 0
+          for py in python3.13 python3.12 python3.11; do
+            if p=$(command -v "$py"); then
+              mkdir -p "$RUNNER_TEMP/python-bin"
+              ln -sf "$p" "$RUNNER_TEMP/python-bin/python3"
+              echo "$RUNNER_TEMP/python-bin" >> "$GITHUB_PATH"
+              exit 0
+            fi
+          done
+          echo "::error::no python3 >= 3.11 on PATH"; exit 1
+      - name: Gitlink and source hashes match status.toml
+        run: tools/scripts/check-pin.sh near-approval
+
+  plain:
+    needs: pin
+    if: needs.pin.outputs.plain == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out trust-framework at the pin
+        env:
+          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+        run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
+      - name: Toolchain from versions.env
+        run: |
+          . tools/versions.env
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          # For this job only: `rustup default` would outlive it on a
+          # self-hosted runner.
+          echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
+      - uses: actions/cache@v4
+        # Hosted runners only: a self-hosted runner's CARGO_HOME persists and
+        # is shared by every repository's jobs, so caching it would only copy
+        # other repositories' crates into this one's cache quota.
+        if: runner.environment == 'github-hosted'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            projects/near-approval/kani/target
+          key: plain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/versions.env', 'projects/near-approval/kani/Cargo.lock') }}
+      - name: Plain mode (random source; testing, not proof)
+        working-directory: projects/near-approval/kani
+        run: cargo test --release --locked
+      - name: Mutant runner self-test
+        run: tools/scripts/test-run-mutants.sh
+
+  loops:
+    # U-1: every loop of every Kani harness has a bound derived from a
+    # constant, at most its harness unwind (tools/scripts/kani-loops.py).
+    needs: pin
+    if: >-
+      needs.pin.outputs.loops == 'true' &&
+      (github.event_name != 'schedule' || github.event.schedule == '17 3 * * *')
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out trust-framework at the pin
+        env:
+          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+        run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
+      - name: Install Kani (and the CBMC it bundles)
+        run: |
+          . tools/versions.env
+          cargo install --locked kani-verifier --version "$KANI"
+          # `cargo kani setup` always re-downloads the bundle; on a persistent
+          # self-hosted HOME skip it once the bundle and its toolchain link
+          # (setup's last step) are in place.
+          kani_dir="${KANI_HOME:-$HOME/.kani}/kani-$KANI"
+          if [ ! -x "$kani_dir/bin/cbmc" ] || [ ! -d "$kani_dir/toolchain/bin" ]; then
+            cargo kani setup
+          fi
+      - name: Loop bounds (U-1, kani/unwind-rules.tsv)
+        run: |
+          python3 tools/scripts/kani-loops.py projects/near-approval/kani --codegen \
+            --core-file projects/near-approval/source-mirror/contracts/approval/core/src/lib.rs \
+            > "$RUNNER_TEMP/loops.tsv"
+          awk -F'\t' '{print $1"\t"$2"\t"$5"\t"$6}' "$RUNNER_TEMP/loops.tsv" | sort -u | head -400
+
+  kani:
+    needs: pin
+    # Every push to main, pull requests that change what it checks, and the
+    # nightly schedule.
+    if: >-
+      needs.pin.outputs.kani == 'true' &&
+      (github.event_name != 'schedule' || github.event.schedule == '17 3 * * *')
+    # CBMC peaks at 6.5 to 9.5 GB on the step harnesses; this repository's
+    # default runner has 2 CPUs and 7.9 GB. Set the KANI_RUNNER repository
+    # variable to a larger runner label (and KANI_SWAP_GB to 0) to avoid
+    # relying on swap. Without it, CI_RUNNER (the self-hosted Mac: 64 GB, no
+    # swap file needed) is next.
+    runs-on: ${{ vars.KANI_RUNNER || vars.CI_RUNNER || 'ubuntu-latest' }}
+    # A step part may need most of KANI_TIMEOUT (120 min) on swap.
+    timeout-minutes: 300
+    env:
+      KANI_SWAP_GB: ${{ vars.KANI_SWAP_GB || '16' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each step harness runs as five parts (tx, post, hist, inv, reg) and
+        # the slow families one harness per job; the covers job checks each
+        # family's covers across all jobs.
+        group:
+          - "h_init h_canary"
+          - "h_step_add_tx"
+          - "h_step_add_post"
+          - "h_step_add_hist"
+          - "h_step_add_inv"
+          - "h_step_add_reg"
+          - "h_step_revoke_tx"
+          - "h_step_revoke_post"
+          - "h_step_revoke_hist"
+          - "h_step_revoke_inv"
+          - "h_step_revoke_reg"
+          - "h_step_request_tx"
+          - "h_step_request_post"
+          - "h_step_request_hist"
+          - "h_step_request_inv"
+          - "h_step_request_reg"
+          - "h_step_request_empty_tx"
+          - "h_step_request_empty_post"
+          - "h_step_request_empty_hist"
+          - "h_step_request_empty_inv"
+          - "h_step_request_empty_reg"
+          - "h_step_approve_tx"
+          - "h_step_approve_post"
+          - "h_step_approve_hist"
+          - "h_step_approve_inv"
+          - "h_step_approve_reg"
+          - "h_step_reject_tx"
+          - "h_step_reject_post"
+          - "h_step_reject_hist"
+          - "h_step_reject_inv"
+          - "h_step_reject_reg"
+          - "h_raw_add h_raw_revoke h_raw_approve h_raw_reject"
+          - "h_raw_request h_raw_request_empty"
+          - "h_read"
+          - "h_read_page"
+          - "h_read_find"
+          - "h_bmc_from_init"
+          - "h_bmc_from_init_witness"
+          # TLA+ refinement (strategy.md section 17.2).
+          - "h_ref_add"
+          - "h_ref_revoke"
+          - "h_ref_request"
+          - "h_ref_request_empty"
+          - "h_ref_approve"
+          - "h_ref_reject"
+          - "h_ref_toolong"
+          # CUT-1: footprint of each operation (kani/CUTOFF.md).
+          - "h_cut_add h_cut_revoke h_cut_request"
+          - "h_cut_approve h_cut_reject"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out trust-framework at the pin
+        env:
+          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+        run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
+      - name: Install Kani (and the CBMC it bundles)
+        run: |
+          . tools/versions.env
+          cargo install --locked kani-verifier --version "$KANI"
+          # `cargo kani setup` always re-downloads the bundle; on a persistent
+          # self-hosted HOME skip it once the bundle and its toolchain link
+          # (setup's last step) are in place.
+          kani_dir="${KANI_HOME:-$HOME/.kani}/kani-$KANI"
+          if [ ! -x "$kani_dir/bin/cbmc" ] || [ ! -d "$kani_dir/toolchain/bin" ]; then
+            cargo kani setup
+          fi
+      - name: Check CBMC version
+        run: |
+          . tools/versions.env
+          # The pinned version's own CBMC: a persistent HOME may hold others.
+          cbmc_bin="${KANI_HOME:-$HOME/.kani}/kani-$KANI/bin/cbmc"
+          "$cbmc_bin" --version | grep -q "^$CBMC" || { echo "CBMC is not $CBMC"; "$cbmc_bin" --version; exit 1; }
+      - name: Runner size
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            mem=$(( $(sysctl -n hw.memsize) / 1048576 ))
+          else
+            mem=$(free -m | awk '/^Mem:/{print $2}')
+          fi
+          echo "::notice::runner has $(nproc) CPUs and $mem MB memory"
+      - name: Swap (CBMC peaks at 6.5 to 9.5 GB on the step harnesses)
+        # Hosted Linux only: it deletes SDKs and replaces the host's swap
+        # with sudo, which a self-hosted runner must not do (and macOS sizes
+        # its own swap).
+        if: env.KANI_SWAP_GB != '0' && runner.environment == 'github-hosted' && runner.os == 'Linux'
+        run: |
+          # Free preinstalled SDKs this job does not use, then size the swap
+          # file to leave 6 GB of disk for the build and logs.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          avail=$(df --output=avail -BG / | tail -1 | tr -dc 0-9)
+          gb=$(( KANI_SWAP_GB < avail - 6 ? KANI_SWAP_GB : avail - 6 ))
+          if [ "$gb" -lt 1 ]; then echo "::warning::no disk for swap (${avail} GB free)"; exit 0; fi
+          sudo swapoff -a || true
+          sudo fallocate -l "${gb}G" /kani.swap
+          sudo chmod 600 /kani.swap
+          sudo mkswap /kani.swap >/dev/null
+          sudo swapon /kani.swap
+          echo "::notice::swap ${gb} GB, disk free $(df --output=avail -BG / | tail -1)"
+      - name: Kani ${{ matrix.group }}
+        env:
+          KANI_TIMEOUT: "7200"
+          KANI_LOG_DIR: ${{ runner.temp }}/kani-logs
+          KANI_DEFER_COVERS: "1"
+        run: tools/scripts/run-kani.sh near-approval ${{ matrix.group }}
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kani-logs-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/kani-logs
+          retention-days: 14
+
+  tla:
+    needs: pin
+    if: needs.pin.outputs.tla == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out trust-framework at the pin
+        env:
+          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+        run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
+      - name: Toolchain from versions.env
+        run: |
+          . tools/versions.env
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          # For this job only: `rustup default` would outlive it on a
+          # self-hosted runner.
+          echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/cache@v4
+        # Hosted runners only, as in plain: a self-hosted CARGO_HOME is
+        # shared with other repositories. There the TLA+ tools persist in
+        # the runner's tool cache instead (TLA_CACHE below).
+        if: runner.environment == 'github-hosted'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            projects/near-approval/kani/target
+            tools/.cache
+          key: tla-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/versions.env', 'projects/near-approval/kani/Cargo.lock') }}
+      - name: TLC, Apalache, trace validation and spec mutants
+        env:
+          TLA_HEAP: ${{ runner.environment == 'github-hosted' && '5g' || '12g' }}
+          TLA_LOG_DIR: ${{ runner.temp }}/tla-logs
+          TLA_CACHE: ${{ runner.environment != 'github-hosted' && format('{0}/formalver-tla', runner.tool_cache) || '' }}
+        run: tools/scripts/run-tla.sh near-approval safety liveness apalache trace mutants
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tla-logs
+          path: ${{ runner.temp }}/tla-logs
+          retention-days: 14
+
+  lean:
+    # Lean layer (strategy.md section 18): LEAN-IND, LEAN-STEP, LEAN-TR,
+    # LEAN-GUARD and LEAN-WIT proved for states of every size, the axiom
+    # audit and canaries, REF-5L (real-core traces on the Lean machine),
+    # MC-4 (Lean graph = TLC graph) and the spec mutants. About 8 min.
+    needs: pin
+    if: needs.pin.outputs.lean == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out trust-framework at the pin
+        env:
+          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+        run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
+      - name: Toolchain from versions.env
+        run: |
+          . tools/versions.env
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          # For this job only: `rustup default` would outlive it on a
+          # self-hosted runner.
+          echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/cache@v4
+        # Hosted runners only, as in plain; self-hosted runners keep Lean and
+        # the TLA+ tools in the runner's tool cache (LEAN_CACHE, TLA_CACHE).
+        if: runner.environment == 'github-hosted'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            projects/near-approval/kani/target
+            tools/.cache
+          key: lean-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/versions.env', 'projects/near-approval/kani/Cargo.lock') }}
+      - name: Lean toolchain from versions.env
+        env:
+          LEAN_CACHE: ${{ runner.environment != 'github-hosted' && format('{0}/formalver-lean', runner.tool_cache) || '' }}
+        run: tools/scripts/get-lean.sh >> "$GITHUB_PATH"
+      - name: Proofs, audit, canaries, guard order, REF-5L, MC-4, mutants
+        env:
+          LEAN_LOG_DIR: ${{ runner.temp }}/lean-logs
+          TLA_HEAP: ${{ runner.environment == 'github-hosted' && '5g' || '12g' }}
+          TLA_CACHE: ${{ runner.environment != 'github-hosted' && format('{0}/formalver-tla', runner.tool_cache) || '' }}
+        run: tools/scripts/run-lean.sh near-approval
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lean-logs
+          path: ${{ runner.temp }}/lean-logs
+          retention-days: 14
+
+  prolog:
+    # M4 (strategy.md section 8): requirement checks C-1..C-10 and C-2t,
+    # MC-1/MC-1s, the generated fact files, and MC-2 trace replay in both
+    # directions. MC-3 (the full graph comparison, about 30 min) runs
+    # nightly and on manual dispatch.
+    needs: pin
+    if: needs.pin.outputs.prolog == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Scryer install root
+        # The runner context is not available in job-level env.
+        run: echo "SCRYER_ROOT=$RUNNER_TOOL_CACHE/formalver-scryer" >> "$GITHUB_ENV"
+      - name: Check out trust-framework at the pin
+        env:
+          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+        run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
+      - name: Toolchain from versions.env
+        run: |
+          . tools/versions.env
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          # For this job only: `rustup default` would outlive it on a
+          # self-hosted runner.
+          echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
+      - uses: actions/cache@v4
+        if: runner.environment == 'github-hosted'
+        with:
+          path: ${{ env.SCRYER_ROOT }}
+          key: scryer-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/versions.env') }}
+      - name: Scryer Prolog from versions.env
+        # Installed under the tool cache, not the shared CARGO_HOME, so a
+        # self-hosted runner keeps one copy per version for this repository.
+        run: |
+          . tools/versions.env
+          root="$SCRYER_ROOT/$SCRYER"
+          if ! "$root/bin/scryer-prolog" --version 2>/dev/null | grep -q "$SCRYER"; then
+            cargo install --locked scryer-prolog --version "$SCRYER" --root "$root"
+          fi
+          echo "$root/bin" >> "$GITHUB_PATH"
+      - name: Generated facts are up to date
+        run: |
+          python3 tools/scripts/tla-facts.py projects/near-approval --check
+          (cd projects/near-approval/kani && cargo test --release --locked facts)
+      - name: Requirement checks and MC-1 (run-prolog.sh)
+        run: tools/scripts/run-prolog.sh near-approval
+      - name: MC-2 traces, core to step/4 and step/4 to core
+        working-directory: projects/near-approval/kani
+        run: |
+          cargo test --release --locked mc2_core_traces
+          (cd ../prolog/verification &&
+            scryer-prolog mc2.pl -g "(replay('$PWD/../../kani/target/mc2/core.txt') -> halt(0) ; halt(1))" </dev/null &&
+            scryer-prolog mc2.pl -g "(generate('$PWD/../../kani/target/mc2/prolog.txt', 60) -> halt(0) ; halt(1))" </dev/null)
+          cargo test --release --locked mc2_prolog_traces -- --nocapture
+      - uses: actions/setup-java@v4
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: MC-3 graph equivalence, TLC and step/4
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          TLA_CACHE: ${{ runner.environment != 'github-hosted' && format('{0}/formalver-tla', runner.tool_cache) || '' }}
+          MC3_DIR: ${{ runner.temp }}/mc3
+        run: tools/scripts/run-mc3.sh near-approval
+
+  covers:
+    # Every cover SATISFIED in at least one harness of its family, across the
+    # kani jobs (each uploads its covers.tsv with its logs).
+    needs: kani
+    if: ${{ !cancelled() && needs.kani.result != 'skipped' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: kani-logs-*
+          path: ${{ runner.temp }}/kani-logs
+      - name: Covers per family
+        run: tools/scripts/check-covers.sh ${{ runner.temp }}/kani-logs/*/covers.tsv
+
+  mutants:
+    needs: pin
+    if: github.event.schedule == '41 4 * * 0' || inputs.mutants
+    runs-on: ${{ vars.KANI_RUNNER || vars.CI_RUNNER || 'ubuntu-latest' }}
+    # Up to 2 harnesses (6 for the must-survive mutants) of KANI_TIMEOUT
+    # (60 min) each, plus builds.
+    timeout-minutes: 360
+    env:
+      KANI_SWAP_GB: ${{ vars.KANI_SWAP_GB || '16' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        mutant: ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13",
+                 "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26",
+                 "27", "28", "29", "30", "31", "32", "33", "34", "35", "36"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out trust-framework at the pin
+        env:
+          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+        run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
+      - name: Toolchain from versions.env
+        run: |
+          . tools/versions.env
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          # For this job only: `rustup default` would outlive it on a
+          # self-hosted runner.
+          echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
+      - name: Install Kani (and the CBMC it bundles)
+        run: |
+          . tools/versions.env
+          cargo install --locked kani-verifier --version "$KANI"
+          # `cargo kani setup` always re-downloads the bundle; on a persistent
+          # self-hosted HOME skip it once the bundle and its toolchain link
+          # (setup's last step) are in place.
+          kani_dir="${KANI_HOME:-$HOME/.kani}/kani-$KANI"
+          if [ ! -x "$kani_dir/bin/cbmc" ] || [ ! -d "$kani_dir/toolchain/bin" ]; then
+            cargo kani setup
+          fi
+      - name: Swap (CBMC peaks at 6.5 to 9.5 GB on the step harnesses)
+        # Hosted Linux only: it deletes SDKs and replaces the host's swap
+        # with sudo, which a self-hosted runner must not do (and macOS sizes
+        # its own swap).
+        if: env.KANI_SWAP_GB != '0' && runner.environment == 'github-hosted' && runner.os == 'Linux'
+        run: |
+          # Free preinstalled SDKs this job does not use, then size the swap
+          # file to leave 6 GB of disk for the build and logs.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          avail=$(df --output=avail -BG / | tail -1 | tr -dc 0-9)
+          gb=$(( KANI_SWAP_GB < avail - 6 ? KANI_SWAP_GB : avail - 6 ))
+          if [ "$gb" -lt 1 ]; then echo "::warning::no disk for swap (${avail} GB free)"; exit 0; fi
+          sudo swapoff -a || true
+          sudo fallocate -l "${gb}G" /kani.swap
+          sudo chmod 600 /kani.swap
+          sudo mkswap /kani.swap >/dev/null
+          sudo swapon /kani.swap
+          echo "::notice::swap ${gb} GB, disk free $(df --output=avail -BG / | tail -1)"
+      - name: Mutant ${{ matrix.mutant }} (plain mode and Kani)
+        env:
+          KANI_TIMEOUT: "3600"
+        run: tools/scripts/run-mutants.sh near-approval --kani '${{ matrix.mutant }}-*'

@@ -1,0 +1,11 @@
+--- a/ApprovalCore.tla
++++ b/ApprovalCore.tla
+@@ -233,7 +233,7 @@
+     /\ RejectErr(pred, signer, k, i) = "Ok"
+     /\ requests' = [requests EXCEPT ![i + 1] =
+                     [@ EXCEPT !.rj = TRUE, !.racct = signer, !.rkey = k,
+-                              !.rrid = principals[k].rid]]
++                              !.rrid = Req(i).rid]]
+     /\ Decide(signer, k, i)
+     /\ UNCHANGED <<log, regs, revoked>>
+ 

@@ -1,0 +1,31 @@
+--- a/ApprovalLean/Lemmas.lean
++++ b/ApprovalLean/Lemmas.lean
+@@ -266,7 +266,7 @@
+ variable (cfg : Cfg A) (s : State A K P)
+ 
+ @[simp] theorem add_principals (c k a r) : (effect cfg s (.add c k a r)).principals =
+-    (k, { reg := true, acct := a, role := r, rid := s.regs, activeFrom := s.nr, pending := 0 })
++    (k, { reg := true, acct := a, role := r, rid := s.regs, activeFrom := 0, pending := 0 })
+       :: perase k s.principals := rfl
+ @[simp] theorem add_requests (c k a r) : (effect cfg s (.add c k a r)).requests = s.requests := rfl
+ @[simp] theorem add_log (c k a r) : (effect cfg s (.add c k a r)).log = s.log := rfl
+@@ -287,7 +287,7 @@
+ 
+ theorem prin_add (cfg : Cfg A) (s : State A K P) (c k a r k') :
+     prin cfg (effect cfg s (.add c k a r)) k' =
+-      if k' = k then { reg := true, acct := a, role := r, rid := s.regs, activeFrom := s.nr,
++      if k' = k then { reg := true, acct := a, role := r, rid := s.regs, activeFrom := 0,
+                        pending := 0 }
+       else prin cfg s k' := by
+   simp only [prin, add_principals, plookup_cons, plookup_perase]
+--- a/ApprovalLean/Machine.lean
++++ b/ApprovalLean/Machine.lean
+@@ -276,7 +276,7 @@
+     -- entry goes in front.
+     { s with
+       principals := (k, { reg := true, acct := a, role := r, rid := s.regs,
+-                          activeFrom := s.nr, pending := 0 }) :: perase k s.principals,
++                          activeFrom := 0, pending := 0 }) :: perase k s.principals,
+       regs := s.regs + 1 }
+   | .revoke _ k =>
+     -- `RevokeKey`

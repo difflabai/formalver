@@ -1,0 +1,12 @@
+# killed-by: h_read
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -593,7 +593,7 @@
+ {
+     if request.approval.is_some() {
+         RequestStatus::Approved
+-    } else if request.rejection.is_some() {
++    } else if false {
+         RequestStatus::Rejected
+     } else if live_agent_registration(store, request).is_some() {
+         RequestStatus::Pending

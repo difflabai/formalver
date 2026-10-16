@@ -1,0 +1,12 @@
+# killed-by: h_step_reject_tx h_step_reject_post
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -541,7 +541,7 @@
+     request.rejection = Some(Rejection {
+         approver_account_id: caller.signer.clone(),
+         approver_key: caller.signer_key.clone(),
+-        approver_registration_id: approver.registration_id,
++        approver_registration_id: request.agent_registration_id,
+         rejected_at: now,
+     });
+     agent.pending = agent.pending.saturating_sub(1);

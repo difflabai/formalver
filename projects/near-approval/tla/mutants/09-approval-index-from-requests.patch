@@ -1,0 +1,11 @@
+--- a/ApprovalCore.tla
++++ b/ApprovalCore.tla
+@@ -223,7 +223,7 @@
+ Approve(pred, signer, k, i, x) ==
+     /\ ApproveErr(pred, signer, k, i, x) = "Ok"
+     /\ requests' = [requests EXCEPT ![i + 1] =
+-                    [@ EXCEPT !.appr = TRUE, !.aidx = NL, !.aacct = signer, !.akey = k,
++                    [@ EXCEPT !.appr = TRUE, !.aidx = NR, !.aacct = signer, !.akey = k,
+                               !.arid = principals[k].rid]]
+     /\ log' = Append(log, i)
+     /\ Decide(signer, k, i)

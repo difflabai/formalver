@@ -1,0 +1,11 @@
+--- a/ApprovalLean/Machine.lean
++++ b/ApprovalLean/Machine.lean
+@@ -288,7 +288,7 @@
+     { s with
+       principals := pmodify k (fun p => { p with pending := p.pending + 1 }) s.principals,
+       requests := s.requests ++
+-        [{ acct := signer, key := k, rid := (prin cfg s k).rid, act := x,
++        [{ acct := signer, key := k, rid := 0, act := x,
+            appr := false, aidx := 0, aacct := signer, akey := k, arid := 0,
+            rj := false, racct := signer, rkey := k, rrid := 0 }],
+       ghost := s.ghost ++ [{ cont := false, decOk := false }] }

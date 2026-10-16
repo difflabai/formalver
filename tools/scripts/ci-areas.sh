@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Which near-approval CI jobs a change needs. Reads changed paths (one per
+# line, repo-relative, as `git diff --name-only` prints them) on stdin and
+# prints `<job>=true|false` for each gated job, for $GITHUB_OUTPUT.
+#
+# The rules list what each path can affect; a path no rule names runs every
+# job, so a new file or directory is checked until someone narrows it here.
+# The pin job is not gated: it always runs (status.toml, the gitlink).
+#
+# usage: git diff --name-only BASE HEAD | tools/scripts/ci-areas.sh
+#        tools/scripts/ci-areas.sh --all     (every job; stdin unread)
+#        CI_AREAS_EXPLAIN=1 ...              (also each path's jobs on stderr)
+set -euo pipefail
+
+jobs="plain loops kani tla lean prolog"
+on=" "
+p=projects/near-approval
+s=tools/scripts
+
+if [ "${1:-}" = --all ]; then
+  on=" $jobs "
+else
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    case "$f" in
+      # Docs: no script, test or proof reads a Markdown file.
+      *.md) add="" ;;
+      # Checked by the pin job alone.
+      $p/status.toml | $s/check-pin.sh) add="" ;;
+      # Other projects and the weekly upstream watch.
+      $s/run-verus.sh | $s/upstream-watch.sh | tools/upstream-watch.toml) add="" ;;
+      # Mutant definitions: the weekly mutants job, and plain's self-test.
+      $p/kani/mutants/* | $s/run-mutants.sh | $s/test-run-mutants.sh) add="plain" ;;
+      # U-1 loop bounds.
+      $p/kani/unwind-rules.tsv | $s/kani-loops.py) add="loops" ;;
+      $s/run-kani.sh | $s/check-covers.sh) add="kani" ;;
+      # ApprovalCore.tla feeds tla_facts.pl (prolog), and Lean's MC-4
+      # compares against the TLC graph.
+      $p/tla/*) add="tla lean prolog" ;;
+      $s/run-tla.sh) add="tla" ;;
+      $s/get-tla-tools.sh) add="tla lean" ;;
+      $p/lean/* | $s/run-lean.sh | $s/get-lean.sh) add="lean" ;;
+      # plain's `facts` test reads code_facts.pl; run-lean.sh reads
+      # tla_facts.pl.
+      $p/prolog/extracted/*) add="prolog plain lean" ;;
+      $p/prolog/* | $s/run-prolog.sh | $s/run-mc3.sh | $s/tla-facts.py) add="prolog" ;;
+      $s/mc3.py) add="prolog lean" ;;
+      # Everything else, including the kani crate (every job builds or runs
+      # it), the trust-framework gitlink, versions.env, ci-submodule.sh,
+      # this script and the workflow itself.
+      *) add="$jobs" ;;
+    esac
+    if [ -n "${CI_AREAS_EXPLAIN:-}" ]; then
+      echo "$f: ${add:-(none)}" >&2
+    fi
+    for j in $add; do
+      case "$on" in *" $j "*) ;; *) on="$on$j " ;; esac
+    done
+  done
+fi
+
+for j in $jobs; do
+  case "$on" in *" $j "*) echo "$j=true" ;; *) echo "$j=false" ;; esac
+done

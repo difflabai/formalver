@@ -1,0 +1,258 @@
+//! `#[kani::proof]` wrappers: each runs a `checks` body with symbolic values.
+//! Bounds are in section 6.3 of strategy.md; covers are listed in section 6.2.
+
+use crate::checks;
+use crate::src::Sym;
+
+#[kani::proof]
+fn h_init() {
+    checks::init(&mut Sym(None, checks::PART_ALL, false));
+}
+
+/// A step harness in five parts (section 6.3 fallback 1: split further):
+/// `_tx` exact result and atomic failure, `_post` exact post-state, `_hist`
+/// history and potential, `_inv`
+/// the `5736251` invariants, `_reg` the registration and decision
+/// invariants. Each part is its own CBMC run; a family's covers are checked
+/// across its parts.
+macro_rules! step_parts {
+    ($body:path, $empty:expr, $tx:ident, $post:ident, $hist:ident, $inv:ident, $reg:ident) => {
+        #[kani::proof]
+        #[kani::unwind(5)]
+        fn $tx() {
+            $body(&mut Sym(None, checks::PART_TX, $empty));
+        }
+        #[kani::proof]
+        #[kani::unwind(5)]
+        fn $post() {
+            $body(&mut Sym(None, checks::PART_POST, $empty));
+        }
+        #[kani::proof]
+        #[kani::unwind(5)]
+        fn $hist() {
+            $body(&mut Sym(None, checks::PART_HIST, $empty));
+        }
+        #[kani::proof]
+        #[kani::unwind(5)]
+        fn $inv() {
+            $body(&mut Sym(None, checks::PART_INV, $empty));
+        }
+        #[kani::proof]
+        #[kani::unwind(5)]
+        fn $reg() {
+            $body(&mut Sym(None, checks::PART_REG, $empty));
+        }
+    };
+}
+
+step_parts!(
+    checks::step_add,
+    false,
+    h_step_add_tx,
+    h_step_add_post,
+    h_step_add_hist,
+    h_step_add_inv,
+    h_step_add_reg
+);
+step_parts!(
+    checks::step_revoke,
+    false,
+    h_step_revoke_tx,
+    h_step_revoke_post,
+    h_step_revoke_hist,
+    h_step_revoke_inv,
+    h_step_revoke_reg
+);
+step_parts!(
+    checks::step_request,
+    false,
+    h_step_request_tx,
+    h_step_request_post,
+    h_step_request_hist,
+    h_step_request_inv,
+    h_step_request_reg
+);
+// `""` action instances (lengths stay concrete, see `Src::empty_action`).
+step_parts!(
+    checks::step_request,
+    true,
+    h_step_request_empty_tx,
+    h_step_request_empty_post,
+    h_step_request_empty_hist,
+    h_step_request_empty_inv,
+    h_step_request_empty_reg
+);
+step_parts!(
+    checks::step_approve,
+    false,
+    h_step_approve_tx,
+    h_step_approve_post,
+    h_step_approve_hist,
+    h_step_approve_inv,
+    h_step_approve_reg
+);
+step_parts!(
+    checks::step_reject,
+    false,
+    h_step_reject_tx,
+    h_step_reject_post,
+    h_step_reject_hist,
+    h_step_reject_inv,
+    h_step_reject_reg
+);
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_raw_add() {
+    checks::raw_add(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_raw_revoke() {
+    checks::raw_revoke(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_raw_request() {
+    checks::raw_request(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_raw_request_empty() {
+    checks::raw_request(&mut Sym(None, checks::PART_ALL, true));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_raw_approve() {
+    checks::raw_approve(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_raw_reject() {
+    checks::raw_reject(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_read() {
+    checks::read(&mut Sym(None, checks::READ_POINT, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_read_page() {
+    checks::read(&mut Sym(None, checks::READ_PAGE, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_read_find() {
+    checks::read(&mut Sym(None, checks::READ_FIND, false));
+}
+
+#[kani::proof]
+#[kani::unwind(8)]
+fn h_bmc_from_init() {
+    // Ghost only: TX, HIST and INV are proven for one step from any Inv
+    // state by h_step_* (and Init is Inv by h_init), so re-checking them
+    // at every depth here adds cost and no coverage.
+    checks::bmc_from_init(&mut Sym(None, 0, false));
+}
+
+/// The TR-3 witness, one step longer than `h_bmc_from_init`.
+#[kani::proof]
+#[kani::unwind(8)]
+fn h_bmc_from_init_witness() {
+    checks::witness_revival(&mut Sym(None, 0, false));
+}
+
+/// Must report FAILED (run-kani.sh inverts it).
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_canary() {
+    checks::canary(&mut Sym(None, checks::PART_ALL, false));
+}
+
+// ---------------------------------------------------------------------------
+// h_ref_*: one step of the core refines the TLA+ spec (REF-1..4, tla.rs).
+// Same states and operations as h_step_*, only the refinement checks.
+// Unwind 6: the abstract state's arrays hold CR + 1 = 5 entries.
+// ---------------------------------------------------------------------------
+
+#[kani::proof]
+#[kani::unwind(6)]
+fn h_ref_add() {
+    checks::step_add(&mut Sym(None, checks::PART_REF, false));
+}
+
+#[kani::proof]
+#[kani::unwind(6)]
+fn h_ref_revoke() {
+    checks::step_revoke(&mut Sym(None, checks::PART_REF, false));
+}
+
+#[kani::proof]
+#[kani::unwind(6)]
+fn h_ref_request() {
+    checks::step_request(&mut Sym(None, checks::PART_REF, false));
+}
+
+#[kani::proof]
+#[kani::unwind(6)]
+fn h_ref_request_empty() {
+    checks::step_request(&mut Sym(None, checks::PART_REF, true));
+}
+
+#[kani::proof]
+#[kani::unwind(6)]
+fn h_ref_approve() {
+    checks::step_approve(&mut Sym(None, checks::PART_REF, false));
+}
+
+#[kani::proof]
+#[kani::unwind(6)]
+fn h_ref_reject() {
+    checks::step_reject(&mut Sym(None, checks::PART_REF, false));
+}
+
+#[kani::proof]
+#[kani::unwind(6)]
+fn h_ref_toolong() {
+    checks::ref_toolong(&mut Sym(None, checks::PART_REF, false));
+}
+
+// CUT-1: footprint of each operation, from a raw state (CUTOFF.md).
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_cut_add() {
+    crate::cutoff::cut_add(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_cut_revoke() {
+    crate::cutoff::cut_revoke(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_cut_request() {
+    crate::cutoff::cut_request(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_cut_approve() {
+    crate::cutoff::cut_approve(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_cut_reject() {
+    crate::cutoff::cut_reject(&mut Sym(None, checks::PART_ALL, false));
+}

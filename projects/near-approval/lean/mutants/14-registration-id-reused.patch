@@ -1,0 +1,22 @@
+--- a/ApprovalLean/Lemmas.lean
++++ b/ApprovalLean/Lemmas.lean
+@@ -270,7 +270,7 @@
+       :: perase k s.principals := rfl
+ @[simp] theorem add_requests (c k a r) : (effect cfg s (.add c k a r)).requests = s.requests := rfl
+ @[simp] theorem add_log (c k a r) : (effect cfg s (.add c k a r)).log = s.log := rfl
+-@[simp] theorem add_regs (c k a r) : (effect cfg s (.add c k a r)).regs = s.regs + 1 := rfl
++@[simp] theorem add_regs (c k a r) : (effect cfg s (.add c k a r)).regs = s.regs := rfl
+ @[simp] theorem add_revoked (c k a r) : (effect cfg s (.add c k a r)).revoked = s.revoked := rfl
+ @[simp] theorem add_ghost (c k a r) : (effect cfg s (.add c k a r)).ghost = s.ghost := rfl
+ 
+--- a/ApprovalLean/Machine.lean
++++ b/ApprovalLean/Machine.lean
+@@ -277,7 +277,7 @@
+     { s with
+       principals := (k, { reg := true, acct := a, role := r, rid := s.regs,
+                           activeFrom := s.nr, pending := 0 }) :: perase k s.principals,
+-      regs := s.regs + 1 }
++      regs := s.regs }
+   | .revoke _ k =>
+     -- `RevokeKey`
+     { s with

@@ -1,0 +1,13 @@
+# killed-by: h_step_reject_tx h_step_reject_post
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -535,9 +535,6 @@
+ {
+     let approver = authenticate(store, caller, Role::Approver)?;
+     let (mut request, mut agent) = decidable_request(store, request_id)?;
+-    if caller.signer == request.agent_account_id {
+-        return Err(ApprovalError::SelfApproval);
+-    }
+     request.rejection = Some(Rejection {
+         approver_account_id: caller.signer.clone(),
+         approver_key: caller.signer_key.clone(),

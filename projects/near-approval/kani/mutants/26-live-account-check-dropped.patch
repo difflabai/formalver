@@ -1,0 +1,11 @@
+# must-survive: equivalent mutant (F-14)
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -418,7 +418,6 @@
+ {
+     store.principal(&request.agent_key).filter(|p| {
+         p.role == Role::Agent
+-            && p.account_id == request.agent_account_id
+             && p.active_from <= request.id
+     })
+ }

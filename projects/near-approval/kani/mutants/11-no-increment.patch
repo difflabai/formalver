@@ -1,0 +1,11 @@
+# killed-by: h_step_request_tx h_step_request_post
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -462,7 +462,6 @@
+         approval: None,
+         rejection: None,
+     };
+-    principal.pending += 1;
+     store.insert_principal(caller.signer_key.clone(), principal);
+     store.push_request(request.clone());
+     Ok(request)

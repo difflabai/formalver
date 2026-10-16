@@ -1,0 +1,11 @@
+--- a/ApprovalLean/Machine.lean
++++ b/ApprovalLean/Machine.lean
+@@ -192,7 +192,7 @@
+   | none => .requestNotFound
+   | some r =>
+     if r.appr then .alreadyApproved
+-    else if r.rj then .alreadyRejected
++    else if False then .alreadyRejected
+     else if !liveR cfg s i r then .agentRevoked
+     else .ok
+ 

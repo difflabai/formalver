@@ -1,0 +1,12 @@
+# killed-by: h_step_approve_tx h_step_approve_post
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -496,7 +496,7 @@
+     if caller.signer == request.agent_account_id {
+         return Err(ApprovalError::SelfApproval);
+     }
+-    let approval_index = store.approval_count();
++    let approval_index = store.request_count();
+     if approval_index == u64::MAX {
+         return Err(ApprovalError::LogFull);
+     }

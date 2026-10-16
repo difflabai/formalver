@@ -26,6 +26,12 @@ if ! command -v scryer-prolog &> /dev/null; then
     exit 1
 fi
 
+# run_one <file>: run_tests must succeed. A failure, an exception or a
+# goal that falls through to the toplevel (stdin is /dev/null) exits non-zero.
+run_one() {
+    scryer-prolog "$1" -g "(catch(run_tests, E, (write(E), nl, halt(2))) -> halt(0) ; halt(1))" </dev/null
+}
+
 echo "=== Running Prolog verification for $PROJECT ==="
 
 if [ -n "$TEST_FILE" ]; then
@@ -38,17 +44,20 @@ if [ -n "$TEST_FILE" ]; then
     echo "Test: $TEST_PATH"
     echo ""
     cd "$PROLOG_DIR/tests"
-    scryer-prolog "$TEST_FILE" -g "run_tests, halt."
-else
-    # Run all test files
-    for test in "$PROLOG_DIR/tests/"*.pl; do
-        if [ -f "$test" ]; then
-            echo "--- $(basename "$test") ---"
-            cd "$PROLOG_DIR/tests"
-            scryer-prolog "$(basename "$test")" -g "run_tests, halt." || true
-            echo ""
-        fi
-    done
+    run_one "$TEST_FILE"
+    exit $?
 fi
 
+# Run all test files; exit non-zero if any fails.
+status=0
+for test in "$PROLOG_DIR/tests/"*.pl; do
+    if [ -f "$test" ]; then
+        echo "--- $(basename "$test") ---"
+        cd "$PROLOG_DIR/tests"
+        run_one "$(basename "$test")" || status=1
+        echo ""
+    fi
+done
+
 echo "=== Prolog verification complete ==="
+exit $status

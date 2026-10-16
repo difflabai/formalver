@@ -1,0 +1,4 @@
+# step/4 reference semantics frozen before any comparison with the code (ASM-SPEC).
+# Written from requirements text only (strategy.md, upstream README); no Rust, Kani or TLA+ source read.
+date: 2026-10-11
+sha256: 01c257efc3558a1b886a22c119c9a11efc4af822fb2323752d2cb0abab3b0bbe  projects/near-approval/prolog/model/approval_machine.pl

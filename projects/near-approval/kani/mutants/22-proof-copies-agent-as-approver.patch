@@ -1,0 +1,12 @@
+# killed-by: h_step_approve_tx h_step_approve_post
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -502,7 +502,7 @@
+     }
+     let approval = Approval {
+         approval_index,
+-        approver_account_id: caller.signer.clone(),
++        approver_account_id: request.agent_account_id.clone(),
+         approver_key: caller.signer_key.clone(),
+         approver_registration_id: approver.registration_id,
+         approved_at: now,

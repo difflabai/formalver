@@ -1,0 +1,34 @@
+--- a/ApprovalLean/Lemmas.lean
++++ b/ApprovalLean/Lemmas.lean
+@@ -275,7 +275,7 @@
+ @[simp] theorem add_ghost (c k a r) : (effect cfg s (.add c k a r)).ghost = s.ghost := rfl
+ 
+ @[simp] theorem revoke_principals (c k) : (effect cfg s (.revoke c k)).principals =
+-    perase k s.principals := rfl
++    s.principals := rfl
+ @[simp] theorem revoke_requests (c k) : (effect cfg s (.revoke c k)).requests = s.requests := rfl
+ @[simp] theorem revoke_log (c k) : (effect cfg s (.revoke c k)).log = s.log := rfl
+ @[simp] theorem revoke_regs (c k) : (effect cfg s (.revoke c k)).regs = s.regs := rfl
+@@ -296,9 +296,8 @@
+   · simp [h, Ne.symm h]
+ 
+ theorem prin_revoke (cfg : Cfg A) (s : State A K P) (c k k') :
+-    prin cfg (effect cfg s (.revoke c k)) k' = if k' = k then noPrincipal cfg else prin cfg s k' := by
+-  simp only [prin, revoke_principals, plookup_perase]
+-  by_cases h : k' = k <;> simp [h]
++    prin cfg (effect cfg s (.revoke c k)) k' = prin cfg s k' := by
++  simp only [prin, revoke_principals]
+ 
+ theorem mem_setInsert (g x : Nat) (l : List Nat) : x ∈ setInsert g l ↔ x = g ∨ x ∈ l := by
+   unfold setInsert; split <;> simp_all <;> grind
+--- a/ApprovalLean/Machine.lean
++++ b/ApprovalLean/Machine.lean
+@@ -281,7 +281,7 @@
+   | .revoke _ k =>
+     -- `RevokeKey`
+     { s with
+-      principals := perase k s.principals,
++      principals := s.principals,
+       revoked := setInsert (prin cfg s k).rid s.revoked }
+   | .request _ signer k x =>
+     -- `RequestAction`

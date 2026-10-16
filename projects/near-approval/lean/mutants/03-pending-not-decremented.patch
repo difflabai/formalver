@@ -1,0 +1,11 @@
+--- a/ApprovalLean/Machine.lean
++++ b/ApprovalLean/Machine.lean
+@@ -260,7 +260,7 @@
+     List (K × Principal A) :=
+   -- `[principals EXCEPT ![Req(i).key].pending = IF @ > 0 THEN @ - 1 ELSE 0]`;
+   -- the key is registered whenever a decision succeeds (`Live(i)`).
+-  pmodify r.key (fun p => { p with pending := p.pending - 1 }) s.principals
++  pmodify r.key (fun p => { p with pending := p.pending }) s.principals
+ 
+ def decideGhost (cfg : Cfg A) (s : State A K P) (signer : A) (k : K) (i : Nat)
+     (r : Request A K P) : List Ghost :=

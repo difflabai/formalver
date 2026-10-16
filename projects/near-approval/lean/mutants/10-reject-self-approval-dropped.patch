@@ -1,0 +1,11 @@
+--- a/ApprovalLean/Machine.lean
++++ b/ApprovalLean/Machine.lean
+@@ -219,7 +219,7 @@
+   else match s.req i with
+     | none => .requestNotFound -- unreachable: d = ok
+     | some r =>
+-      if signer = r.acct then .selfApproval
++      if False then .selfApproval
+       else .ok
+ 
+ /-! ## Actions -/

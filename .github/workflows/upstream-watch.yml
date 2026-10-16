@@ -1,0 +1,66 @@
+# Weekly check of upstreams that near-approval's assumptions cite or that
+# near-proofs/ submits to (tools/upstream-watch.toml). Opens or updates one
+# issue when a watched path changed since its `seen` commit.
+name: upstream-watch
+
+on:
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+# Up to 6 self-hosted runner instances share one Mac, so a schedule and a
+# dispatch can now run at once; both could miss the open issue and create
+# two. Queue them instead.
+concurrency:
+  group: upstream-watch
+  cancel-in-progress: false
+
+jobs:
+  upstream-watch:
+    # GitHub-hosted runners are unavailable to the org (billing block); the
+    # CI_RUNNER repository variable selects the self-hosted macOS runner.
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Python >= 3.11 (tomllib)
+        if: runner.os == 'macOS'
+        run: |
+          # macOS's /usr/bin/python3 is 3.9; the Mac runner has Homebrew's
+          # newer ones under versioned names only.
+          python3 -c 'import tomllib' 2>/dev/null && exit 0
+          for py in python3.13 python3.12 python3.11; do
+            if p=$(command -v "$py"); then
+              mkdir -p "$RUNNER_TEMP/python-bin"
+              ln -sf "$p" "$RUNNER_TEMP/python-bin/python3"
+              echo "$RUNNER_TEMP/python-bin" >> "$GITHUB_PATH"
+              exit 0
+            fi
+          done
+          echo "::error::no python3 >= 3.11 on PATH"; exit 1
+      - name: Compare watched upstream paths
+        id: watch
+        run: |
+          set +e
+          tools/scripts/upstream-watch.sh > "$RUNNER_TEMP/report.md"
+          rc=$?
+          cat "$RUNNER_TEMP/report.md"
+          [ $rc -le 1 ] || exit $rc
+          echo "changed=$rc" >> "$GITHUB_OUTPUT"
+      - name: Open or update the issue
+        if: steps.watch.outputs.changed == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Upstream changed: review near-approval sources and near-proofs"
+          n=$(gh issue list --state open --search "in:title \"$title\"" --json number -q '.[0].number')
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --body-file "$RUNNER_TEMP/report.md"
+          else
+            gh issue create --title "$title" --body-file "$RUNNER_TEMP/report.md"
+          fi

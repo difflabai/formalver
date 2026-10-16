@@ -1,0 +1,13 @@
+# killed-by: h_step_request_empty_tx h_step_request_empty_post
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -439,9 +439,6 @@
+     S: Store<A, K>,
+ {
+     let mut principal = authenticate(store, caller, Role::Agent)?;
+-    if action.is_empty() {
+-        return Err(ApprovalError::EmptyAction);
+-    }
+     if action.len() > MAX_ACTION_LEN {
+         return Err(ApprovalError::ActionTooLong);
+     }

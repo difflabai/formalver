@@ -1,0 +1,13 @@
+# killed-by: h_raw_add
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -329,9 +329,6 @@
+         return Err(ApprovalError::KeyAlreadyRegistered);
+     }
+     let registration_id = store.registration_count();
+-    if registration_id == u64::MAX {
+-        return Err(ApprovalError::LogFull);
+-    }
+     let principal = Principal {
+         account_id,
+         role,

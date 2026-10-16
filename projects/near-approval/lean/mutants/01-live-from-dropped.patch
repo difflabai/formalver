@@ -1,0 +1,11 @@
+--- a/ApprovalLean/Machine.lean
++++ b/ApprovalLean/Machine.lean
+@@ -178,7 +178,7 @@
+ /-- `Live(i)` for request `i` with record `r`. -/
+ def liveR (cfg : Cfg A) (s : State A K P) (i : Nat) (r : Request A K P) : Bool :=
+   let p := prin cfg s r.key
+-  p.reg && p.role == .agent && p.acct == r.acct && decide (p.activeFrom ≤ i)
++  p.reg && p.role == .agent && p.acct == r.acct
+ 
+ /-- `Live(i)`; false outside `Ids` (TLA+ never asks there). -/
+ def live (cfg : Cfg A) (s : State A K P) (i : Nat) : Bool :=
