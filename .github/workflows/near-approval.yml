@@ -260,6 +260,24 @@ jobs:
           # CUT-1: footprint of each operation (kani/CUTOFF.md).
           - "h_cut_add h_cut_revoke h_cut_request"
           - "h_cut_approve h_cut_reject"
+          # M2 ghost stores (strategy.md section 6): store laws, protocol,
+          # counting and refinement over Sparse, Window and Counting.
+          - "h_page_arith h_page_arith_empty h_action_len"
+          - "h_proto_add h_proto_revoke h_proto_request h_proto_request_empty"
+          - "h_proto_approve h_proto_reject"
+          - "h_count_add h_count_revoke h_count_request h_count_approve h_count_reject"
+          - "h_refine_add"
+          - "h_refine_revoke"
+          - "h_refine_request"
+          - "h_refine_approve_tx"
+          - "h_refine_approve_post"
+          - "h_refine_reject_tx"
+          - "h_refine_reject_post"
+          - "h_store_laws_arr"
+          - "h_store_laws_sparse"
+          - "h_store_laws_sparse_reg"
+          - "h_store_laws_mem"
+          - "h_store_laws_mem_reg"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -690,7 +708,8 @@ jobs:
       matrix:
         mutant: ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13",
                  "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26",
-                 "27", "28", "29", "30", "31", "32", "33", "34", "35", "36"]
+                 "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
+                 "40", "41", "42", "43"]
     steps:
       - uses: actions/checkout@v4
         with:
