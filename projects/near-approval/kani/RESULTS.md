@@ -194,6 +194,32 @@ other jobs (peak = largest CBMC resident set seen; another job's CBMC may
 inflate it).
 
 <!-- M2-KANI-TABLE -->
+| Harness | Local result | Time | Peak | Properties |
+|---|---|---:|---:|---|
+| `h_page_arith` | verified | 24 s | 0.3 GB | RD-3, RD-6, ROB-4 (`Window<true>`, `limit ≤ 2`) |
+| `h_page_arith_empty` | verified | 206 s | 2.3 GB | RD-3, RD-6, ROB-4 (`Window<false>`, any limit); family covers 3/3 |
+| `h_action_len` | verified, 3/3 covers | 34 s | 0.7 GB | ROB-3, TR-5 |
+| `h_proto_add` | verified, 4/4 covers | 84 s | 1.4 GB | ST-2 |
+| `h_proto_revoke` | verified, 4/4 covers | 92 s | 1.5 GB | ST-2 (F-6 absent key) |
+| `h_proto_request` | verified, 2/2 covers | 119 s | 2.0 GB | ST-2, ROB-2, TR-5 (request `LogFull`) |
+| `h_proto_request_empty` | verified | 89 s | 1.9 GB | `""` instance |
+| `h_proto_approve` | verified, 2/2 covers | 456 s | 5.6 GB | ST-2, ROB-2, TR-5 (approve `LogFull`) |
+| `h_proto_reject` | verified, 1/1 cover | 202 s | 2.6 GB | ST-2 |
+| `h_count_add`, `_revoke`, `_request`, `_approve`, `_reject` | verified | 40, 46, 49, 222, 115 s | 0.5-4.9 GB | ROB-4, TX-0 |
+| `h_refine_add`, `_revoke`, `_request` | verified | 841, 1078, 1177 s | 6.6, 6.7, 8.7 GB | ST-3, ST-2 |
+| `h_refine_approve_tx`, `_post` | verified | 588, 1398 s | 9.0, 11.2 GB | ST-3, ST-2 |
+| `h_refine_reject_tx`, `_post` | verified | 278, 1076 s | 4.2, 8.4 GB | ST-3, ST-2 |
+| `h_store_laws_arr` | verified, 2/2 covers | 699 s | 4.5 GB | ST-1, INV-0 |
+| `h_store_laws_sparse_reg`, `h_store_laws_sparse` | verified, 2/2 covers | 663, 765 s | 7.8, 8.6 GB | ST-1 |
+| `h_store_laws_mem_reg`, `h_store_laws_mem` | **out of memory locally** (13.3 and 13.6 GB, in SSA conversion: 0.95 M program steps), not a counterexample; left for the CI runners | - | - | ST-1, INV-0 |
+
+`h_refine_add/_revoke/_request` ran before `refine` took its `part`
+argument; they pass both bits, so their assertions are unchanged. The
+`MemStore` law harnesses pass in plain mode, and mutant 43 is killed there;
+`Vec` is what makes them expensive (the same laws over `ArrStore`'s and
+`Sparse`'s fixed arrays fit). If they also run out of memory in CI, the
+fallback is to state the `MemStore` frame by field equality (its reads
+are field lookups) instead of three full `Obs` snapshots.
 <!-- /M2-KANI-TABLE -->
 
 ### Deviations from section 6.2, and why
