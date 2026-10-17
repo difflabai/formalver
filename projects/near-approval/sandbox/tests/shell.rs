@@ -262,12 +262,17 @@ async fn res3_full_page_of_max_proofs() {
         "RES-3",
         json!({
             "proofs": 100,
-            "return_bytes": raw.len(),
             "return_limit_bytes": 4 * 1024 * 1024,
-            "gas_burnt_tgas": (gas.as_gas() as f64 / 1e12 * 10.0).round() / 10.0,
             "gas_limit_tgas": 300,
             "view_succeeded": true,
-            "RES-2 max receipt log bytes": { "approval_requested": req_log, "action_approved": appr_log, "limit": MAX_TOTAL_LOG_LEN },
+            "under_limits": { "return_bytes": true, "gas": true, "receipt_logs": true },
+            // Proofs carry the block height, so these move by a few bytes
+            // per run; the asserts above bound them.
+            "measured": {
+                "return_bytes": raw.len(),
+                "gas_burnt_tgas": (gas.as_gas() as f64 / 1e12 * 10.0).round() / 10.0,
+                "RES-2 max receipt log bytes": { "approval_requested": req_log, "action_approved": appr_log, "limit": MAX_TOTAL_LOG_LEN },
+            },
         }),
     );
 }

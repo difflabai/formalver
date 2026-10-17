@@ -83,7 +83,10 @@ pub fn code_hash_b58(code: &[u8]) -> String {
 /// `SANDBOX_RECORD=1` it rewrites the committed file instead: the explicit
 /// update mode after a reviewed runtime change. Keep values free of block
 /// heights and other run-specific data, so they differ only if the
-/// behaviour changed.
+/// behaviour changed. Sizes and gas that depend on such data (a proof
+/// carries the block height, whose digit count varies by run) go under the
+/// top-level `"measured"` key: written in record mode for reference, left out
+/// of the comparison, and bounded by the test's own asserts instead.
 pub fn record(id: &str, value: Value) {
     let dir = sandbox_dir().join("results");
     std::fs::create_dir_all(&dir).unwrap();
@@ -100,7 +103,14 @@ pub fn record(id: &str, value: Value) {
         return;
     }
     let committed = std::fs::read_to_string(&path).unwrap_or_default();
-    if committed != text {
+    let stable = |mut v: Value| {
+        if let Value::Object(m) = &mut v {
+            m.remove("measured");
+        }
+        v
+    };
+    let same = serde_json::from_str::<Value>(&committed).is_ok_and(|c| stable(c) == stable(v.clone()));
+    if !same {
         std::fs::write(dir.join(format!("{id}.observed.json")), &text).unwrap();
         panic!(
             "{id}: observed outcome differs from results/{id}.json \

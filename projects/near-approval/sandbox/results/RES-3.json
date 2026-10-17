@@ -1,15 +1,22 @@
 {
-  "RES-2 max receipt log bytes": {
-    "action_approved": 13088,
-    "approval_requested": 12728,
-    "limit": 16384
-  },
-  "gas_burnt_tgas": 88.3,
   "gas_limit_tgas": 300,
+  "measured": {
+    "RES-2 max receipt log bytes": {
+      "action_approved": 13088,
+      "approval_requested": 12728,
+      "limit": 16384
+    },
+    "gas_burnt_tgas": 88.3,
+    "return_bytes": 1299659
+  },
   "near_sandbox": "2.13.4 (near-sandbox 0.3.16 default)",
   "proofs": 100,
-  "return_bytes": 1299659,
   "return_limit_bytes": 4194304,
+  "under_limits": {
+    "gas": true,
+    "receipt_logs": true,
+    "return_bytes": true
+  },
   "view_succeeded": true,
   "wasm_kind": "reproducible"
 }
