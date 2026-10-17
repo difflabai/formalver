@@ -44,8 +44,8 @@ proofs above pass in CI; `status.toml` will say so once that sign-off lands.
 
 **Next, in blocking order.** Spec
 reviewer sign-off plus the `status-lint` job; M2; M3 (fixes the F-15 drift,
-unblocks C-6); M6; M7. Decisions still open: who reviews the spec, Lean L2
-(mechanise `CUTOFF.md`), the Verus path A spike, the testnet deployment for
+unblocks C-6); M6; M7. Lean L2 is done by the oracle route (§18.6).
+Decisions still open: who reviews the spec, the Verus path A spike, the testnet deployment for
 M7, OQ-4, OQ-5, OQ-8, and what (if anything) to submit to near-proof-arena.
 
 *Planning history.* The plan was written before any tool could be installed;
@@ -218,7 +218,7 @@ scope exclusions that keep a machine-checked model of it out of reach; see
 | ASM-META | NEP-366: the inner receipt has signer = relayer, so relayed calls fail `IndirectCall`. The same holds for NEP-518 eth-implicit accounts. | med | RT-METATX |
 | ASM-FCKEY | Function-call keys restrict receiver and methods, can't attach a deposit, and have an allowance. Function-call keys can't add keys. | high | RT-FCKEY |
 | ASM-COMPILE | rustc/LLVM/wasm-opt preserve core semantics from host to wasm32. The release profile keeps `overflow-checks = true`. The only on-chain `usize` use is `action.len() > MAX_ACTION_LEN`; every value is far below 2³², so host and wasm32 agree (`MemStore` is off-chain). `cfg(feature = "borsh")` gates only `use` and `derive` items, so Kani (borsh off) and the wasm (borsh on) compile the same logic. | n/a | RT-CODEHASH, RT-TRACE, `check-pin.sh` grep |
-| ASM-MODEL | *Until M5 (code-level Verus):* a core step on a state larger than the Kani bound behaves like one within it (the §6.3 small-scope argument). | med | Plain-mode random traces of ≤200 steps, MC-2. Code side discharged by ST-8 (K-ORACLE); spec side (expect/protocol = Next at every size) pending L2. Removed by M5 path A. |
+| ASM-MODEL | *Until M5 (code-level Verus):* a core step on a state larger than the Kani bound behaves like one within it (the §6.3 small-scope argument). | med | Plain-mode random traces of ≤200 steps, MC-2. Discharged at every store size by the L2 chain (§18.6): ST-8 (code = `expect`/`protocol`), LINK (`expect`/`protocol` = Lean `cstep` on every footprint view of a bounded domain), LEAN-DELTA (`cstep` = the model's step). What stays trusted is ASM-IDENT and LINK's domain argument. Removed by M5 path A. |
 | ASM-SPEC | The specs (`spec.rs`, Verus, Prolog) state the intended behaviour. | n/a | Independent authorship, signed off by a **named human who did not write `approval-core`** (`[review] spec_reviewer`), required before any K/V property is `verified*`. Also traceability (C-7), mutants and three-way trace replay. |
 | ASM-TOOLS | Kani (CBMC, unwinding assertions on), Verus with Z3, and scryer-prolog are sound at the pinned versions. | n/a | `tools/versions.env`, the canary lemma must fail, mutants must be caught |
 | ASM-OWNER | The owner registers keys honestly. It could otherwise register two accounts it controls and approve anything. | policy | DEP-1 (multisig/DAO), VER-4 |
@@ -1060,7 +1060,7 @@ the review; M7 adds 2 and needs a testnet decision.
 | `mutants` | weekly | a core or shell mutant survives; an equivalent mutant is killed |
 | `tla` | PR, push | any §17.3 check failing; a witness or the unfair liveness run passing; a spec mutant surviving |
 | `prolog` | PR, push | any failure; drift in `conformance/traces`; MC-1/MC-1s state count below the floor |
-| `lean` | PR, push | a `sorry` or forbidden construct; an axiom beyond `propext`, `Classical.choice`, `Quot.sound`; a canary compiling; guard order ≠ `tla_facts.pl`; a REF-5L or MC-4 difference; a Lean spec mutant surviving |
+| `lean` | PR, push | a `sorry` or forbidden construct; an axiom beyond `propext`, `Classical.choice`, `Quot.sound`; a canary compiling; guard order ≠ `tla_facts.pl`; a REF-5L, MC-4 or LINK difference; a Lean spec mutant surviving |
 | `verus` | PR, push (from M5) | any error; count below the floor; canary verifies; a spec mutant verifies; hygiene |
 | `near-unit` | PR, push | any failure; lockfile version mismatch; export or import diff (non-reproducible build) |
 | `sandbox` | nightly; submodule bump; manual (from M6) | any failure; export or import diff (reproducible build); threshold exceeded |
@@ -1281,7 +1281,8 @@ real core ⊑ tla.rs ≡ ApprovalCore.tla ≡ Lean machine ⊨ Inv, StepProps, T
 | `ApprovalLean/Trace.lean` | LEAN-TR: `reach_run`, `tr1_provenance`, `tr2_decision_final`, `tr3_void_terminal`, `hist1_run`, `hist3_run`, `hist10_run` |
 | `ApprovalLean/Guard.lean` | LEAN-GUARD: `guardOrder` (TLA+'s `GuardOrder`), `err_eq_firstFail`, `guards_order`, `err_mem_guardOrder`, `err_ne_logFull` |
 | `ApprovalLean/Witness.lean` | LEAN-WIT: reachable approved, rejected, void, revived-still-void and pending-cap states (TR-5), by evaluation |
-| `ApprovalLean/Text.lean`, `Main.lean` | the `approval-lean` executable: `replay` (REF-5L), `graph` (MC-4), `guards` |
+| `ApprovalLean/Delta.lean` | LEAN-DELTA (§18.6): `cstep`, `expect`/`protocol` transcribed over `Store`'s getters; `delta_refines` |
+| `ApprovalLean/Text.lean`, `DeltaText.lean`, `Main.lean` | the `approval-lean` executable: `replay` (REF-5L), `graph` (MC-4), `guards`, `link` (LINK) |
 | `Audit.lean`, `canary/`, `mutants/` | the hygiene gate (18.4) |
 
 **Representation**, each difference fixed by the abstraction the replay and
@@ -1320,13 +1321,13 @@ every error fires, and REF-5L runs the real core's own traces.
 | LEAN-TR | over `run cfg s ops` for any `ops` from a reachable `s`: TR-2 (`tr2_decision_final`), TR-3 (`tr3_void_terminal`), TR-1 (`tr1_provenance`), HIST-1/3/10 transitively | TLC's finite depth |
 | LEAN-GUARD | `err cfg s op = (firstFail (guards cfg s op)).getD .ok` and `(guards cfg s op).map Prod.fst = guardOrder op.kind` | C-2t, REF-1 |
 | LEAN-WIT | witnesses for approved, rejected, void, revival and the pending cap | TLA-WIT |
+| LEAN-DELTA | `delta_refines`: on every concrete store of every size with ids at their positions and counters below `u64::MAX`, `cstep`'s error is `err` and its calls land on `step` (§18.6) | none (REF-1..3 within the Kani bound) |
 
 Net effect on assumptions: **ASM-TLA-SCOPE is needed only for liveness
 (TLA-LIVE-1)**; the safety half is retired, given ASM-LEAN-TLA. ASM-MODEL
-(the Kani bound on the code) is unchanged: Lean proves facts about the
-model, and REF-1..3 relate the model to the code within the Kani bounds,
-extended by CUTOFF.md. Mechanising that cutoff argument is the optional L2
-step of the Lean proposal, not part of M1.6.
+(the Kani bound on the code) is discharged by §18.6 rather than by
+mechanising CUTOFF.md, which stays as the explanation of why small identity
+domains suffice.
 
 ### 18.4 Hygiene gate
 
@@ -1349,10 +1350,37 @@ step of the Lean proposal, not part of M1.6.
 
 ### 18.5 Running and CI
 
-`tools/scripts/run-lean.sh near-approval [build|audit|canary|guards|replay|graph|mutants]`,
+`tools/scripts/run-lean.sh near-approval [build|audit|canary|guards|replay|graph|link|mutants]`,
 default all. `tools/scripts/get-lean.sh` fetches the Lean
 release zip pinned in `tools/versions.env` (sha256-checked, no elan) and
 checks it against `lean/lean-toolchain`. Core library only, no Mathlib.
 CI job `lean` runs all of it on every PR: a clean build takes about 15 s,
 the mutants about 3 min and MC-4 about 4 min (TLC's two runs and
-`mc3.py`; the Lean export itself takes under a second).
+`mc3.py`; the Lean export itself takes under a second). LINK takes about
+10 s (736,500 views written by the kani crate's `link_cases`, then checked
+by `approval-lean link`).
+
+### 18.6 L2: the code steps like the model at every size
+
+Chosen over mechanising CUTOFF.md (l2-oracle-proposal.md, 2026-10-17). The
+state bound of ASM-MODEL is closed by three links, none of which bounds the
+store:
+
+```text
+core step  =  expect/protocol  =  Lean cstep  ⊑  model step    (every store size)
+          ST-8              LINK             LEAN-DELTA
+```
+
+| ID | What | How |
+|---|---|---|
+| ST-8 | The core's result and `Store` calls are `ghost::expect` and `ghost::protocol` on any store | Kani (§ ST-8): a `Sparse` holding the step's footprint at any keys and positions, all fields and counters free. A real store of any size restricted to that footprint is such a `Sparse`. |
+| LINK | `expect`/`protocol` equal the Lean transcription `cstep` | `kani/src/link.rs` enumerates every footprint view of a bounded domain (accounts `o`, `a1`, `a2`; keys `k0`, `k1`, `k2`; `active_from` at or above the id; `pending` at the boundaries; ids and counters small, `u64::MAX - 1` and `u64::MAX`; every request decision state), runs `expect`, `protocol` and the real core on a `Sparse` holding exactly that view, and writes 736,500 lines; `approval-lean link` recomputes each with `cstep` and must agree on the error and every call. The domain covers every equality pattern the code can observe among the identities it compares and every relation of the counters with the constants they are compared to, so under ASM-IDENT it is exhaustive for the view; this is the one argument in the chain that is not mechanised. |
+| LEAN-DELTA | `cstep` refines the model's `step` | `Delta.lean`, `delta_refines`: for every `CStore` of any size whose request ids equal their positions (INV-1) and whose counters are below `u64::MAX` (A6), `cstep`'s error equals `err` on `α s`, and applying its calls gives `step`'s state, up to map equality of principals and set equality of revocations. Axiom audit as 18.4. |
+
+`cstep` reads the store only through `Rd`, the getters `Store` offers
+(`principal`, `request`, the three counters, the owner), so LINK can feed
+it the same view the Rust side gets. Block times are not modelled (A7); the
+revocation time and the request and decision times are checked by RT-TIME.
+With L1 (LEAN-IND, LEAN-STEP, LEAN-TR), the safety properties then hold for
+the code at every state size, given ASM-IDENT, ASM-LEAN-TLA and the
+tool assumptions.

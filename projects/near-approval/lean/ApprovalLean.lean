@@ -8,3 +8,4 @@ import ApprovalLean.Trace
 import ApprovalLean.Guard
 import ApprovalLean.Text
 import ApprovalLean.Witness
+import ApprovalLean.Delta

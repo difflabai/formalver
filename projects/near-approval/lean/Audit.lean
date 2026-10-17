@@ -34,3 +34,5 @@ import ApprovalLean
 #print axioms Approval.Witness.witness_revival
 #print axioms Approval.Witness.witness_cap
 #print axioms Approval.Witness.witness_cap_refused
+-- LEAN-DELTA
+#print axioms Approval.delta_refines

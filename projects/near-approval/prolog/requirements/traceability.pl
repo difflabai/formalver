@@ -72,6 +72,8 @@ trace_row('D7',  ['LEAN-IND', 'LEAN-STEP', 'LEAN-TR']).
 trace_row('D8',  ['LEAN-IND', 'LEAN-STEP']).
 trace_row('D9',  ['LEAN-IND']).
 trace_row('D15', ['LEAN-GUARD', 'LEAN-WIT', 'REF-5L', 'MC-4']).
+% Strategy 18.6 (L2): the code steps like the model at every store size.
+trace_row('D12', ['LEAN-DELTA', 'LINK']).
 
 %%% IDs in this file that status.toml does not have yet (decision 'C-9-new-ids').
 status_pending_id(_) :- fail.
@@ -175,6 +177,8 @@ property('LEAN-TR', lean, "Lean: over every run from a reachable state, decision
 property('LEAN-GUARD', lean, "Lean: each error operator returns the first failing guard of a list whose codes are TLA+'s GuardOrder; LogFull never returned").
 property('LEAN-WIT', lean, "Non-vacuity: approved, rejected, void, revived-still-void and pending-cap states reachable in the Lean machine").
 property('REF-5L', plain, "The real core's MC-2 traces replayed on the Lean machine: every result and post-store equal").
+property('LEAN-DELTA', lean, "Lean: on every concrete store of every size with ids at their positions and counters below u64::MAX, the transcribed expect/protocol step refines the model's step").
+property('LINK', lean, "Rust expect/protocol equal the Lean cstep on every footprint view of a bounded domain covering every observable identity pattern and counter boundary").
 property('MC-4', lean, "Graph equivalence: the Lean machine and TLC export the full labelled reachable graph of the MC_Graph universe; stores, rejected calls and edges are equal").
 property('REF-5', plain, "Trace validation: 60 x 80-call core traces equal tla.rs on every step, and TLC accepts each as a behaviour of ApprovalCore.tla (>= 5 revival attempts, >= 20 rejections and revocations)").
 % [modules.contract_store]

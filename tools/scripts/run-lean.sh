@@ -14,6 +14,9 @@
 #            Lean machine, every result and post-store equal
 #   graph    MC-4: the Lean machine's reachable graph of the MC_Graph
 #            universe equals TLC's (tools/scripts/mc3.py)
+#   link     LINK: on every footprint view of kani/src/link.rs's domain, the
+#            Lean cstep (Delta.lean) gives the Rust ghost::expect error and
+#            ghost::protocol calls
 #   mutants  every lean/mutants/*.patch must be killed by build (a proof
 #            breaks), replay or guards
 #
@@ -27,7 +30,7 @@ set -uo pipefail
 
 project=${1:?usage: run-lean.sh <project> [check...]}
 shift
-[ $# -gt 0 ] || set -- build audit canary guards replay graph mutants
+[ $# -gt 0 ] || set -- build audit canary guards replay graph link mutants
 root=$(cd "$(dirname "$0")/../.." && pwd)
 proj="$root/projects/$project"
 lean="$proj/lean"
@@ -149,6 +152,14 @@ check_graph() {
   report graph $? "$(grep -E 'graphs equal|disagree' "$log" | head -1)" "$log"
 }
 
+check_link() {
+  local log="$logs/link.log"
+  (cd "$proj/kani" && cargo test --release --locked --lib link::link_cases) >"$logs/link-gen.log" 2>&1 ||
+    { report link 1 "could not generate LINK views" "$logs/link-gen.log"; return; }
+  (cd "$lean" && lake exe approval-lean link "$proj/kani/target/link/cases.txt") >"$log" 2>&1
+  report link $? "$(tail -1 "$log")" "$log"
+}
+
 check_mutants() {
   local m name tmp verdict log survived=0
   [ -f "$proj/kani/target/mc2/core.txt" ] || core_traces ||
@@ -184,7 +195,7 @@ check_mutants() {
 
 for c in "$@"; do
   case $c in
-    build | audit | canary | guards | replay | graph | mutants) "check_$c" ;;
+    build | audit | canary | guards | replay | graph | link | mutants) "check_$c" ;;
     *) echo "unknown check $c" >&2; exit 2 ;;
   esac
 done
