@@ -51,7 +51,7 @@ target code ──► extract ──► facts (Prolog) ──► rules/queries �
          cargo metadata, later others)
 ```
 
-1. **Extract** — language front-ends produce facts, following the precedent of near-approval's generated `prolog/extracted/{code,tla}_facts.pl` (checked in; regeneration must show no diff; near-approval's M3 plans an `api_facts.pl` the same way): `module/1`, `calls/2`, `uses_dep/2`, `has_effect/2`, `unsafe_block/1`, `nondeterministic/2`, `loop/2`, `recursion/1`, `handles_untrusted/1`, etc. Rust first (matches the workspace); front-ends are pluggable.
+1. **Extract** — language front-ends produce facts, following the precedent of near-approval's generated `prolog/extracted/{code,tla,api}_facts.pl` (checked in; regeneration must show no diff; `api_facts.pl` comes from the built wasm via `tools/scripts/wasm-surface.sh`, added at M3): `module/1`, `calls/2`, `uses_dep/2`, `has_effect/2`, `unsafe_block/1`, `nondeterministic/2`, `loop/2`, `recursion/1`, `handles_untrusted/1`, etc. Rust first (matches the workspace); front-ends are pluggable.
 2. **Model** — Prolog (scryer-prolog, as elsewhere in the workspace) holds the facts and the rules for propagation (e.g. nondeterminism and effects propagate up the call graph) and classification.
 3. **Strategize** — queries produce a ranked, justified plan per section: tiers and milestones with acceptance criteria and effort, in the shape `near-approval/strategy.md` uses.
 4. **Report** — emit markdown + TOML for human review and downstream tools.
