@@ -1,0 +1,9 @@
+{
+  "height_strictly_increasing": true,
+  "near_sandbox": "2.13.4 (near-sandbox 0.3.16 default)",
+  "receipts_on_C": 80,
+  "skipped_blocks": 80,
+  "stored_time_is_receipt_block": true,
+  "timestamp_non_decreasing": true,
+  "wasm_kind": "reproducible"
+}

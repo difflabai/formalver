@@ -42,8 +42,8 @@ trace_row('D9',  ['INV-2', 'INV-9', 'ROB-3', 'TR-6', 'RES-1', 'RES-2']).
 trace_row('D10', ['TX-5', 'TR-1']).
 % D11 amended (decision D17): "no upgrade, expiry or threshold".
 trace_row('D11', ['SH-11', 'SH-12', 'C-1', 'C-6']).
-trace_row('D12', ['TX-0', 'ROB-1', 'ROB-2', 'ROB-4', 'ST-1', 'ST-2', 'ST-3', 'ST-4', 'ST-5', 'ST-6', 'SH-2', 'SH-3', 'RD-6', 'LEM-3']).
-trace_row('D13', ['INV-10', 'TR-4']).
+trace_row('D12', ['TX-0', 'ROB-1', 'ROB-2', 'ROB-4', 'ST-1', 'ST-2', 'ST-3', 'ST-4', 'ST-5', 'ST-6', 'ST-7', 'SH-2', 'SH-3', 'RD-6', 'LEM-3']).
+trace_row('D13', ['INV-10', 'TR-4', 'RT-TIME']).
 trace_row('D14', ['RT-CODEHASH', 'RT-RESET', 'RT-TRACE', 'DEP-1', 'VER-2', 'VER-3', 'VER-6']).
 trace_row('D15', ['TR-5', 'MC-1', 'MC-2', 'C-2', 'C-3', 'C-5', 'C-6', 'C-7', 'C-8', 'C-9', 'C-10']).
 trace_row('D16', ['VER-1', 'VER-4', 'VER-5', 'VER-7', 'VER-8']).
@@ -180,6 +180,7 @@ property('REF-5', plain, "Trace validation: 60 x 80-call core traces equal tla.r
 property('ST-4', difftest, "Real ApprovalContract store refines MemStore over 10k x 50 random ops, persisted and reloaded every step").
 property('ST-5', unit, "Storage prefixes p/r/a/v pairwise distinct, prefix-free and distinct from STATE; after every random step the keys are exactly STATE and prefix ++ borsh(key) for the entries alpha lists").
 property('ST-6', unit, "Golden Borsh bytes for STATE and one entry of each map (ed25519 and secp256k1 principals; pending, approved, rejected requests; log; revocation); layout changes flagged storage-breaking").
+property('ST-7', unit, "Identity equality: == on near-sdk AccountId and PublicKey equals Borsh-byte equality, is reflexive and symmetric, and survives clone and a Borsh round trip (edge identities and 200k random pairs); the checked half of ASM-IDENT").
 % [modules.contract_shell]
 property('SH-1', unit, "Env mapping (caller, now); add_agent/add_approver pass the right role; owner methods pass the predecessor").
 property('SH-2', difftest, "Exactly one core transition per change call and no other writes").
@@ -206,6 +207,7 @@ property('RT-REVERT', sandbox, "Forced failures (LackBalanceForState, gas-starve
 property('RT-BATCH', sandbox, "Batched [request_action(a), request_action('')] signed by a full-access registered agent key fails at action 1 and leaves counters unchanged; record whether the first event appears").
 property('RT-RESET', sandbox, "Delete + recreate C resets counters; VER-3 detects it (VER-6 only heuristically)").
 property('RT-SPOOF', sandbox, "Forged EVENT_JSON from a spoofer contract rejected by the VER-1 executor_id rule").
+property('RT-TIME', sandbox, "Stored request/approval/rejection times equal the block their receipt ran in; heights strictly increase and timestamps never decrease across receipts on C").
 property('RT-CODEHASH', sandbox, "Wasm under test is the reproducible build; record sha256 (hex) and NEAR code_hash (base58)").
 property('RT-TRACE', sandbox, "Prolog traces + 200 random sequences replayed on the reproducible wasm equal spec.rs: results, exact messages, logs, views").
 % [modules.deployment]

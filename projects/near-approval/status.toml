@@ -131,15 +131,18 @@ level = "high"
 checked_by = ["SH-12"]
 source = ["https://nomicon.io/RuntimeSpec/ApplyingChunk.html", "https://nomicon.io/RuntimeSpec/Runtime.html", "https://nomicon.io/RuntimeSpec/Components/BindingsSpec/PromisesAPI.html"]
 arena_excludes = ["function_calls_and_wasm", "delayed_receipt_queue"]
-status = "unverified"
+observed = "SH-12: the wasm imports exactly the 17 env functions in wasm-surface.expected, none of them promise_*, deploy, delete, add-key, global-contract or transfer, so no receipt of C can call out or back in; store_diff.rs: every successful call is exactly one core transition (SH-2). One-receipt-at-a-time execution per account is the runtime's (Nomicon ApplyingChunk), not checked here"
+status = "in-progress"
 
 [assumptions.ASM-TIME]
 statement = "block_height and block_timestamp never decrease across receipts on one account"
 level = "med"
-checked_by = []
+checked_by = ["RT-TIME"]
 source = ["https://nomicon.io/RuntimeSpec/Components/BindingsSpec/ContextAPI.html", "https://nomicon.io/ChainSpec/BlockProcessing.html"]
 arena_excludes = ["block_finality"]
-status = "unverified"
+observed = "RT-TIME: 80 receipts on C (40 requests, 20 approvals, 20 rejections, 80 skipped blocks interleaved): every stored requested_at/approved_at/rejected_at equals the block its receipt ran in, heights strictly increase and timestamps never decrease in execution order. A sample on one sandbox node, not a proof of the chain rule"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg"
+status = "in-progress"
 
 [assumptions.ASM-FINAL]
 statement = "State at finality 'final' is never reverted"
@@ -173,14 +176,16 @@ statement = "store::LookupMap is a map keyed prefix ++ borsh(key); writes flushe
 level = "med"
 checked_by = ["ST-4", "ST-5", "ST-6"]
 source = ["https://docs.rs/near-sdk/5.29.1/near_sdk/store/struct.LookupMap.html", "https://nomicon.io/RuntimeSpec/Components/BindingsSpec/TrieAPI.html"]
-status = "unverified"
+observed = "ST-4: the real contract store, persisted and reloaded before every step, refines MemStore over 10k x 50 random operations; ST-5: after every step the raw keys are exactly STATE and prefix ++ borsh(key) for the entries alpha lists; ST-6: golden Borsh bytes for every record kind (near-sdk 5.29.1 mocked runtime; flush-on-drop exercised by the reload every step)"
+status = "in-progress"
 
 [assumptions.ASM-IDENT]
 statement = "PartialEq on AccountId/PublicKey is an equivalence matching Borsh-byte equality; the core uses A/K only via Clone and PartialEq (parametricity justifies small identities); harnesses use opaque newtypes so a new trait bound breaks the build"
 level = "high"
-checked_by = []
+checked_by = ["ST-7"]
 source = ["https://docs.rs/near-sdk/5.29.1/near_sdk/struct.PublicKey.html", "https://nomicon.io/DataStructures/Account.html"]
-status = "unverified"
+observed = "ST-7: on near-sdk 5.29.1 / near-sdk-core 4.2.3 / near-account-id 2.6.0, == on AccountId and PublicKey equals Borsh-byte equality, is reflexive and symmetric, and survives clone and a Borsh round trip, over edge identities (64-char and implicit accounts, keys of all three curves differing in one byte) and 200k random pairs. Parametricity half: the Kani harnesses instantiate A/K with opaque newtypes (Acct, Key) implementing only Clone, PartialEq, Debug and Arbitrary, so a new trait bound in the core breaks the build"
+status = "in-progress"
 
 [assumptions.ASM-STAKE]
 statement = "Account must hold storage_usage * 1e19 yocto; ~40 B overhead per record"
@@ -372,7 +377,7 @@ prolog_requirements = "prolog/model/approval_machine.pl"
   RD-8 = { status = "in-progress", layer = "kani", evidence = "bounded-proof", cross = ["verus"], harness = "h_read", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "proof_revocations(proof) = (V(agent registration), V(approver registration)); under Inv each is None exactly when that registration is still the key's current one" }
   ROB-1 = { status = "in-progress", layer = "kani", evidence = "bounded-proof", harness = "h_raw_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS"], description = "No panics, overflows or OOB indexing for any arguments and any MemStore within the bounds (beyond: ASM-MODEL), including non-Inv states" }
   ROB-2 = { status = "in-progress", layer = "kani", evidence = "bounded-proof", harness = "h_proto_request, h_proto_approve", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS"], description = "LogFull guards: count = MAXU with all earlier guards passing => Err(LogFull), no writes, before the shell's += 1 (which would panic under overflow-checks); approve's case needs a non-Inv state" }
-  ROB-3 = { status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["plain"], harness = "h_action_len", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-TOOLS", "ASM-IDENT"], description = "Action length boundaries in bytes: 0, 1 (a space), 2048, 2049 and a multi-byte 2050" }
+  ROB-3 = { status = "in-progress", layer = "kani", evidence = "bounded-proof", cross = ["plain"], harness = "h_action_len", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-TOOLS", "ASM-IDENT"], description = "Action length boundaries in bytes: 0, 1 (a space), 2048, 2049 and a multi-byte 2050" }
   ROB-4 = { status = "in-progress", layer = "kani", evidence = "bounded-proof", harness = "h_count_*, h_page_arith", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS"], description = "Bounded work: <= 4 Store reads and <= 3 writes per mutator; approvals <= 2*min(l,100)+1 reads" }
   ST-1 = { status = "in-progress", layer = "kani", evidence = "bounded-proof", harness = "h_store_laws_mem_law_*, h_store_laws_sparse, h_store_laws_sparse_reg, h_store_laws_arr", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS"], description = "Store laws for MemStore and Sparse (map/sequence semantics; removing an absent key is a no-op)" }
   ST-2 = { status = "in-progress", layer = "kani", evidence = "bounded-proof", harness = "h_proto_*, h_refine_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Store protocol: exact mutator call sequence per op; makes contract-store differences from MemStore unreachable" }
@@ -421,6 +426,7 @@ prolog_requirements = ""
   ST-4 = { status = "in-progress", layer = "difftest", evidence = "test", harness = "near-tests/tests/store_diff.rs store_refines_memstore_with_reload_every_step", depends_on = ["core/src/lib.rs", "contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-STORE", "ASM-SDK"], description = "Real ApprovalContract store (public methods, mocked runtime) refines MemStore over 10k x 50 random ops, persisted and reloaded every step: equal results and alpha after every step" }
   ST-5 = { status = "in-progress", layer = "unit", evidence = "test", cross = ["review", "difftest"], harness = "near-tests/tests/shell.rs st5_prefixes_distinct_and_state_roundtrips; store_diff.rs (exact key set every step)", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-STORE"], description = "Storage prefixes p/r/a/v pairwise distinct, prefix-free and distinct from STATE; after every random step the keys are exactly STATE and prefix ++ borsh(key) for the entries alpha lists" }
   ST-6 = { status = "in-progress", layer = "unit", evidence = "test", harness = "near-tests/tests/shell.rs st6_golden_borsh_bytes (tests/golden/layout.txt)", depends_on = ["core/src/lib.rs", "core/Cargo.toml", "contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-STORE"], description = "Golden Borsh bytes (key, value) for STATE and one entry of each map: ed25519 and secp256k1 principals; pending, approved, rejected requests; log entry; revocation. Layout changes flagged storage-breaking" }
+  ST-7 = { status = "in-progress", layer = "unit", evidence = "test", harness = "near-tests/tests/ident.rs", depends_on = ["Cargo.lock"], assumptions = [], description = "Identity equality: == on near-sdk AccountId and PublicKey equals Borsh-byte equality, is reflexive and symmetric, and survives clone and a Borsh round trip (edge identities and 200k random pairs); the checked half of ASM-IDENT" }
 
 # ---------------------------------------------------------------------------
 [modules.contract_shell]
@@ -461,6 +467,7 @@ prolog_requirements = "prolog/requirements/threat_model.pl"
   RT-BATCH = { status = "in-progress", layer = "sandbox", evidence = "test", harness = "sandbox/tests/runtime.rs::rt_batch", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-ATOMIC"], description = "Batched [request_action(a), request_action('')] signed by a full-access registered agent key fails at action 1 and leaves counters unchanged; observed: the first action's approval_requested event appears in the failed outcome" }
   RT-RESET = { status = "in-progress", layer = "sandbox", evidence = "test", harness = "sandbox/tests/deploy.rs::rt_reset", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-CODE"], description = "Delete + recreate C resets counters; VER-3 detects it (VER-6 only heuristically)" }
   RT-SPOOF = { status = "in-progress", layer = "sandbox", evidence = "test", harness = "sandbox/tests/runtime.rs::rt_spoof", depends_on = ["contract/src/lib.rs", "Cargo.lock"], description = "Forged EVENT_JSON from a spoofer contract rejected by the VER-1 executor_id rule" }
+  RT-TIME = { status = "in-progress", layer = "sandbox", evidence = "test", harness = "sandbox/tests/runtime.rs::rt_time", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-TIME"], description = "Stored request/approval/rejection times equal the block their receipt ran in; heights strictly increase and timestamps never decrease across receipts on C" }
   RT-CODEHASH = { status = "in-progress", layer = "sandbox", evidence = "check", harness = "sandbox/tests/runtime.rs::rt_codehash", depends_on = ["Cargo.toml", "Cargo.lock", "contract/Cargo.toml", "core/Cargo.toml", "core/src/lib.rs", "contract/src/lib.rs"], assumptions = ["ASM-DEPLOY", "ASM-COMPILE"], description = "Wasm under test is the reproducible build; record sha256 (hex) and NEAR code_hash (base58)" }
   RT-TRACE = { status = "in-progress", layer = "sandbox", evidence = "test", harness = "sandbox/tests/trace.rs::rt_trace", depends_on = ["core/src/lib.rs", "contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-COMPILE", "ASM-SDK"], description = "Prolog traces + 200 random sequences replayed on the reproducible wasm equal spec.rs: results, exact messages, logs, views" }
 
