@@ -51,7 +51,7 @@ target code ──► extract ──► facts (Prolog) ──► rules/queries �
          cargo metadata, later others)
 ```
 
-1. **Extract** — language front-ends produce facts, following the precedent of near-approval's generated `prolog/extracted/{code,tla,api}_facts.pl` (checked in; regeneration must show no diff): `module/1`, `calls/2`, `uses_dep/2`, `has_effect/2`, `unsafe_block/1`, `nondeterministic/2`, `loop/2`, `recursion/1`, `handles_untrusted/1`, etc. Rust first (matches the workspace); front-ends are pluggable.
+1. **Extract** — language front-ends produce facts, following the precedent of near-approval's generated `prolog/extracted/{code,tla}_facts.pl` (checked in; regeneration must show no diff; near-approval's M3 plans an `api_facts.pl` the same way): `module/1`, `calls/2`, `uses_dep/2`, `has_effect/2`, `unsafe_block/1`, `nondeterministic/2`, `loop/2`, `recursion/1`, `handles_untrusted/1`, etc. Rust first (matches the workspace); front-ends are pluggable.
 2. **Model** — Prolog (scryer-prolog, as elsewhere in the workspace) holds the facts and the rules for propagation (e.g. nondeterminism and effects propagate up the call graph) and classification.
 3. **Strategize** — queries produce a ranked, justified plan per section: tiers and milestones with acceptance criteria and effort, in the shape `near-approval/strategy.md` uses.
 4. **Report** — emit markdown + TOML for human review and downstream tools.
@@ -90,7 +90,13 @@ Integration notes (from the current `main`):
 
 Calibrate against the two hand-made strategies. The derived strategy is the test; where it disagrees with the hand-made one, that is a finding about one or the other.
 
-1. **near-approval** (`projects/near-approval/source-mirror`, pinned). The richer ground truth, and the one that exercises the full stack. From derived facts alone, reproduce:
+Code extraction alone cannot establish criticality, threats, or runtime assumptions, and the hand-made strategies depend on all three. So the calibration fixture has two parts, versioned together:
+- the source: repo, pinned commit, file hashes;
+- the human-supplied inputs: a criticality/threat file and an environment-assumption file, transcribed from the hand-made strategy (near-approval §3 for example). These are inputs, not outputs, and never a score.
+
+The test is that decisions follow from *facts plus these inputs*: proof targets, technique per section, `ASM-*` boundaries, ordering. A disagreement is attributed to extraction, rules, or inputs by changing one at a time.
+
+1. **near-approval** (`projects/near-approval/source-mirror`, pinned). The richer ground truth, and the one that exercises the full stack. From extracted facts plus those inputs, reproduce:
    - the split: `approval-core` (dependency-free, deterministic) is the proof target; the near-sdk shell and runtime are test targets
    - Kani first on the real core, because it needs no rewrite
    - a bound argument for Kani's state bounds, and an unbounded layer (Lean on the TLA+ model) where the bound matters
@@ -104,4 +110,4 @@ Calibrate against the two hand-made strategies. The derived strategy is the test
 - How to represent confidence in extracted facts.
 - How much of the system-level behavior (interleavings, protocols) to model in Prolog. TLA+ is now in the workspace, so the default is to *route* to it, and keep Prolog for facts, rules and the requirements oracle.
 - Whether the strategy's own rules need the vacuity guards the proof layers use (canaries, mutants of the rule base).
-- Where the criticality knowledge base comes from (user-supplied, derived from threat model, or both).
+- Format of the criticality/threat and environment-assumption inputs. They are user-supplied and versioned with the source pin (see First milestone); open is whether a threat model can seed them mechanically.
