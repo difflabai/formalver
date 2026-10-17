@@ -150,6 +150,7 @@ fn dir() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/mc2")
 }
 
+// PROP: REF-5L (the traces run-lean.sh replays)
 #[test]
 fn mc2_core_traces() {
     let n: u64 = std::env::var("MC2_TRACES")

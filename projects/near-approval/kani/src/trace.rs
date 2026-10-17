@@ -389,6 +389,7 @@ mod tests {
 
     /// Checks the traces against `tla.rs` and writes `TraceData.tla` to
     /// `$REF5_OUT` (default `target/ref5`) for `run-tla.sh`.
+    // PROP: REF-5
     #[test]
     fn ref5_traces() {
         let n: u64 = std::env::var("REF5_TRACES")

@@ -29,6 +29,15 @@ pub const OWNER: Acct = Acct(0);
 /// separately (`Src::empty_action`).
 pub const ACTIONS: [&str; 3] = ["ab", "  ", "\u{e9}"];
 pub const ACTION_BYTES: [[u8; 2]; 3] = [*b"ab", *b"  ", [0xC3, 0xA9]];
+// `spec::act_code` compares bytes against ACTION_BYTES: keep it ACTIONS'.
+const _: () = {
+    let mut i = 0;
+    while i < ACTIONS.len() {
+        let a = ACTIONS[i].as_bytes();
+        assert!(a.len() == 2 && a[0] == ACTION_BYTES[i][0] && a[1] == ACTION_BYTES[i][1]);
+        i += 1;
+    }
+};
 
 #[cfg(kani)]
 impl kani::Arbitrary for Acct {

@@ -6,7 +6,7 @@
 //! states and drawn from `0..8` in `Inv` states, where INV-15 forces
 //! `G = #P + #V ≤ 6` and INV-11/12/14 put every id below `G`.
 
-use crate::ids::{Acct, ACTION_BYTES, OWNER};
+use crate::ids::{Acct, ACTIONS, OWNER};
 #[cfg(not(kani))]
 use crate::spec::{apply, ghost_step, GPre};
 use crate::spec::{Ghost, Op, C, S};
@@ -50,8 +50,8 @@ pub fn state_time(src: &mut impl Src, raw: bool) -> BlockTime {
 
 /// One of [`ACTIONS`], built from its bytes so its length is concrete.
 pub fn alphabet_action(src: &mut impl Src) -> String {
-    let b = ACTION_BYTES[src.below(ACTION_BYTES.len() as u8) as usize];
-    String::from_utf8(b.to_vec()).unwrap()
+    // `to_string` copies a valid `&str`: no UTF-8 validation loop.
+    ACTIONS[src.below(ACTIONS.len() as u8) as usize].to_string()
 }
 
 /// The action stored in a request: one of [`ACTIONS`], or also `""` in raw

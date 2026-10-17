@@ -1,0 +1,13 @@
+# SH-4/SH-8: request_view sets requested_at_block from timestamp_ns
+# Shell mutant (strategy.md section 9): the near-tests suite must fail on it.
+--- a/contract/src/lib.rs
++++ b/contract/src/lib.rs
+@@ -389,7 +389,7 @@
+             agent_public_key: r.agent_key.clone(),
+             agent_registration_id: r.agent_registration_id,
+             action: r.action.clone(),
+-            requested_at_block: r.requested_at.height,
++            requested_at_block: r.requested_at.timestamp_ns,
+             requested_at_ns: r.requested_at.timestamp_ns.into(),
+             status,
+         }

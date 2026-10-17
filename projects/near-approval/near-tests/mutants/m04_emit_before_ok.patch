@@ -1,0 +1,34 @@
+# SH-3/SH-6: key_added is emitted before the core accepts the call (same event on success)
+# Shell mutant (strategy.md section 9): the near-tests suite must fail on it.
+--- a/contract/src/lib.rs
++++ b/contract/src/lib.rs
+@@ -339,20 +339,20 @@
+ impl ApprovalContract {
+     fn add_principal(&mut self, account_id: AccountId, public_key: PublicKey, role: Role) {
+         let caller = env::predecessor_account_id();
+-        let added = ok(approval_core::add_principal(
++        ApprovalEvent::KeyAdded(KeyView {
++            public_key: public_key.clone(),
++            account_id: account_id.clone(),
++            role: role.into(),
++            registration_id: self.registration_count,
++        })
++        .emit();
++        ok(approval_core::add_principal(
+             self,
+             &caller,
+-            public_key.clone(),
++            public_key,
+             account_id,
+             role,
+         ));
+-        ApprovalEvent::KeyAdded(KeyView {
+-            public_key,
+-            account_id: added.account_id,
+-            role: added.role.into(),
+-            registration_id: added.registration_id,
+-        })
+-        .emit();
+     }
+ 
+     fn proof_view(&self, proof: Proof) -> ApprovalProofView {

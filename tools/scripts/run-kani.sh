@@ -47,6 +47,7 @@ for h in "$@"; do
   covers=$(grep -oE '[0-9]+ of [0-9]+ cover properties satisfied' "$log" | tail -1)
   family=${h%_tx}; family=${family%_post}; family=${family%_hist}; family=${family%_inv}; family=${family%_reg}
   family=${family%_empty}; family=${family%_page}; family=${family%_find}; family=${family%_witness}
+  family=${family%_law_*}
   awk -v fam="$family" '/^Check [0-9]+: .*\.cover\./ {c=1; next}
        c && /Status:/ {st=$NF; next}
        c && /Description:/ {sub(/.*Description: /, ""); print fam "\t" $0 "\t" st; c=0}' \

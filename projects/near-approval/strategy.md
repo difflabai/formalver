@@ -117,7 +117,7 @@ only if "formally verified" will be claimed externally.
 - **`approval-contract`:**
   - The `Store` impl.
   - `caller()`, `now()` and `ok()`.
-  - All 16 `#[near]` methods (13 before PR #15; SH-11 still says 13, F-15).
+  - All 16 `#[near]` methods (13 before PR #15).
   - Events, views and conversions.
   - Init and deposit handling.
   - Storage layout.
@@ -261,7 +261,8 @@ Fixed in `3426c92` (PR #15):
 | F-7 | `approve`'s `LogFull` branch is unreachable under `Inv`: a pending request implies `#L < #R ≤ MAXU`. | Kept as defence in depth. LEM-3. |
 | F-9 | `predecessor == signer` also admits code deployed on the signer's own account. | DEP-1 requires registered keys to be function-call keys with receiver `C`. RT-SELFACCT. |
 | F-10 | **formalver tooling defects:** <br>(a) `run-prolog.sh` ends with `\|\| true` and runs `-g "run_tests, halt."`; a failing `run_tests` falls through to the toplevel, which exits 0 at EOF. Failures never fail the script. <br>(b) `run-verus.sh` and the README's direct `verus` command omit `--cfg 'feature="verus"'`, so ironclaw's `cfg(feature="verus")` spec and proof modules are never compiled [conf: high]. The README's `./tools/get-z3.sh` lives under `source/` in the Verus repo. <br>(c) ironclaw proofs take their conclusion as a `requires`. <br>(d) ironclaw's gitlink `d313f44` ≠ recorded pin `34550ad`. <br>(e) No CI. | M0 fixed (a) and (e). (b) is still open in `run-verus.sh`; it matters from M5 or for ironclaw. (d): `check-pin.sh` is per project and CI runs it for near-approval only (OQ-6). Rule for this project: no proof assumes its conclusion. |
-| F-15 | PR #15 changes the shell: a `reject` method, `action_rejected`, `key_added` and `key_revoked` events, `agent_key_revoked_at` / `approver_key_revoked_at` on proof views, `get_revocation`, and a `v` storage prefix for revocations. SH-4..SH-8, SH-10, SH-11 (export count: 16 at `main`, the row says 13), C-4, ST-5, RES-1 and requirement D11 ("no rejection") still describe the `5736251` shell. | Rewrite them at M3, before any is checked. The core-level properties (§5.1–5.5), the TLA+ model (§17.6) and the Lean model are already updated. |
+| F-15 | PR #15 changes the shell: a `reject` method, `action_rejected`, `key_added` and `key_revoked` events, `agent_key_revoked_at` / `approver_key_revoked_at` on proof views, `get_revocation`, and a `v` storage prefix for revocations. SH-4..SH-8, SH-10, SH-11 (export count: 16 at `main`, the row said 13), C-4, ST-5, RES-1 and requirement D11 ("no rejection") described the `5736251` shell. | **Done at M3** (2026-10-15): those rows, their `traceability.pl` and `status.toml` descriptions, and C-6's check describe the PR #15 shell; D11 reads "no upgrade, ownership transfer, expiry or threshold" and D17 covers rejection. |
+| F-17 | near-sdk-core 4.2.3 (in the lockfile) accepts **ML-DSA-65** public keys (1952 bytes; nearcore 2.13, protocol 85). With ML-DSA-65 keys on both sides, the worst-case `action_approved` line is 18256 B, over the 16384 B limit: the core accepts the request, and that approver key can never approve it (the call fails with `TotalLogLengthExceeded`). One ML-DSA-65 key on either side still fits (≤ 15775 B), so another approver with a shorter key can. Storage per request also grows (`B_req` 4160 B; 16 pending = 0.666 NEAR). The README's worst case assumes secp256k1. | Recorded by `f17_mldsa65_worst_case_exceeds_the_log_limit` (fails once fixed). Upstream options: bound `MAX_ACTION_LEN` for the longest key, refuse ML-DSA-65 keys in `add_principal`, or make DEP-1 forbid them. Whether ML-DSA-65 access keys are enabled on mainnet is unconfirmed (OQ). |
 | F-16 | `insert_revocation` is "written at most once per id" by contract, and the stores disagree otherwise: `MemStore` keeps the first write, the contract's `LookupMap` the last. The core writes `P(k).reg` on revoke, which INV-11 keeps out of `V`, so the case is unreachable from `Init`. | INV-11/INV-12 prove the law holds on reachable states. ST-2 records the call. |
 | F-14 | Two equivalent mutants. In `live_agent_registration`, dropping the role check or the account check survives all tests: under INV-8 both are implied by `active_from ≤ id`. They are kept as defence in depth. | LEM-4 proves the redundancy, so the equivalence is established and not merely assumed. |
 
@@ -413,16 +414,16 @@ within bounds), VC/VM (unbounded), PM and Kp.
 | ST-2 | **Store protocol (the correspondence hinge).** The core's mutating `Store` calls are exactly: <br>• add → `[increment_registration_count(), insert_principal(k)]`, with `k ∉ dom P` and `G < MAXU`; <br>• revoke → `[remove_principal(k), insert_revocation(P(k).reg, t)]`, the first also on failure with `k ∉ dom P` (F-6), the second with `P(k).reg ∉ dom V` (F-16); <br>• request → `[insert_principal(c.key, pend+1), push_request(r)]`, with `r.id = #R < MAXU`; <br>• approve → `[insert_principal(R[i].ak, pend−1), replace_request(r), push_approval(i)]`, with `r.id = i < #R`, `r` equal to `R[i]` except `ap` going from `None` to `Some`, and `#L < MAXU`; <br>• reject → `[insert_principal(R[i].ak, pend−1), replace_request(r)]`, with `r.id = i < #R` and `r` equal to `R[i]` except `rj` going from `None` to `Some`; <br>• any other failure → no calls. <br>This makes the on-chain impl's differences from `MemStore` unreachable: `replace_request` inserts unconditionally (`MemStore` drops an out-of-range write), and `+= 1` at `u64::MAX` panics under overflow-checks instead of returning `LogFull`. | K (recording `Sparse`) |
 | ST-3 | `Sparse`, a line-by-line transliteration of `impl Store for ApprovalContract` with each `LookupMap` replaced by an association list, refines `MemStore`: same results, same abstraction `α`. | K (`h_refine_*`) |
 | ST-4 | **The real store refines `MemStore`:** `ApprovalContract` and `MemStore<AccountId,PublicKey>` run random op sequences (10k × 50) through the core and through the public methods. **Before each step the contract is persisted and reloaded** (`state_write`, drop, `state_read`), so every step reads Borsh from cold storage. After every step, results and `α` are equal. | D (`store_diff.rs`) |
-| ST-5 | Storage layout: prefixes `p`, `r`, `a` are pairwise distinct and distinct from `STATE`. After random runs, every key is `STATE` or `p|r|a ‖ borsh(key)`. | D / R |
-| ST-6 | Layout stability: golden Borsh bytes for `STATE` and one value of each map (ed25519 and secp256k1 keys; approval `Some` and `None`). A diff must be flagged as storage-breaking in the pin-bump PR. | D |
+| ST-5 | Storage layout: prefixes `p` (principals), `r` (requests), `a` (approval log) and `v` (revocations) are pairwise distinct, none is a prefix of another, and none overlaps `STATE`. After every step of the random runs, the storage keys are **exactly** `STATE` and `p\|r\|a\|v ‖ borsh(key)` for the entries `α` lists. | D / R |
+| ST-6 | Layout stability: golden Borsh bytes (key and value) for `STATE` (fresh and after a run) and one entry of each map: principals with an ed25519 and a secp256k1 key; requests pending, approved and rejected; a log entry; a revocation. A diff must be flagged as storage-breaking in the pin-bump PR. | D |
 
 ### 5.7 Resource limits (RES)
 
 | ID | Statement | Check |
 |---|---|---|
-| RES-1 | **Storage growth per operation:** <br>• `Req` adds one record of ≤ `B_req` bytes and rewrites one principal at the same size (`pend` is fixed-width); <br>• `Appr` grows one request by ≤ `B_ap` and adds a log record of `B_log`; <br>• `Add` adds ≤ `B_p`; <br>• failures add nothing. <br>The bounds come from the Borsh layout (D), and the deltas are measured on-chain (S). With INV-9, the worst case an agent key can lock without an approver is 16 × `B_req` (about 0.36 NEAR). | D / S |
-| RES-2 | Every accepted request is approvable within log limits: for `1 ≤ len(a) ≤ N`, the worst-case `approval_requested` and `action_approved` lines are each ≤ 16384 B (about 13.0 KB today, F-4). | D (explicit-limit unit test) / S |
-| RES-3 | `get_approvals(0,100)` over 100 maximum-size, fully escaped proofs stays under the view gas cap and the 4 MiB return limit (estimate about 1.3 MB). | S |
+| RES-1 | **Storage growth per operation** (bytes, each record counted with its key and the 40-byte per-record overhead): <br>• `Req` adds one record of ≤ `B_req` and rewrites one principal at the same size (`pend` is fixed-width); <br>• `Appr` grows one request by ≤ `B_ap` and adds a log record of `B_log`; <br>• `Rej` grows one request by ≤ `B_rej`; <br>• `Add` adds ≤ `B_p`; <br>• `Revoke` removes one principal and adds a revocation record of `B_v`; <br>• failures add nothing. <br>With 64-character accounts, 2048-byte actions and ed25519/secp256k1 keys (secp256k1 is the larger): `B_p` = 199, `B_req` = 2272, `B_ap` = 169, `B_log` = 57, `B_rej` = 161, `B_v` = 65. The bounds come from the Borsh layout and equal VMLogic's metering of the worst case (D), and the deltas are measured on-chain (S). With INV-9, the worst case an agent key can lock without an approver is 16 × `B_req` = 0.364 NEAR (0.666 NEAR with ML-DSA-65 keys, `B_req` = 4160: F-17). | D / S |
+| RES-2 | Every accepted request is approvable within log limits: for `1 ≤ len(a) ≤ N`, the worst-case `approval_requested`, `action_approved` and `action_rejected` lines are each ≤ 16384 B. The worst case: 64-character accounts, ed25519 or secp256k1 keys, 2048 control bytes (each escaped to `\u00XX`), `u64::MAX` times and 20-digit ids; the longest line is `action_approved` at 13197 B (F-4). **Not true with ML-DSA-65 keys** on both the agent and the approver key: 18256 B (F-17). | D (explicit-limit unit test) / S |
+| RES-3 | `get_approvals(0,100)` over 100 maximum-size, fully escaped proofs stays under the view gas cap and the 4 MiB return limit (estimate about 1.3 MB). *Measured (M6):* about 1.30 MB (1,299,658-1,299,659 B; the count varies by a byte between runs); about 88.3-88.4 TGas when called as a transaction. | S |
 
 ### 5.8 Contract shell (SH)
 
@@ -432,14 +433,14 @@ within bounds), VC/VM (unbounded), PM and Kp.
 | SH-2 | One core transition per change call, with no other writes (`α` compared around each public call). | D |
 | SH-3 | **Exact errors:** a core `Err(e)` panics with exactly `e.as_str()`, compared exactly via `catch_unwind` after extracting `panic_msg` from the mocked runtime's payload (payload format recorded at M3), and nothing is logged. On-chain the failure message is `"Smart contract panicked: " ‖ as_str` [conf: high on the prefix]. | D, S |
 | SH-4 | `approval_requested` is exactly one log line, `EVENT_JSON:{"standard":"trust_approval","version":"1.0.0","event":"approval_requested","data":RequestView(r)}`, with `status: "pending"`. The method returns `r.id`. The emit happens only after the core returned `Ok`. The only failures after it are gas exhaustion and `LackBalanceForState` (ASM-ATOMIC, VER-1). | D / R |
-| SH-5 | `action_approved` is exactly one line. Its `data` = the return value = `get_approval(i)` now and later (HIST-5). | D |
-| SH-6 | No other method logs. | D |
-| SH-7 | **View mapping:** <br>• `get_approval` is `approval`, and `get_approvals(f?,l?)` is `approvals(f.unwrap_or(0), l.unwrap_or(50))`; <br>• `get_request(i)` is `None` for `i ≥ #R`, otherwise a `RequestView` with every field equal to `R[i]` and `status = request_status`; <br>• `get_principal(k)` is `None` for `k ∉ dom P`, otherwise `account_id`, `role` and `pending` equal `P(k)`; <br>• `get_owner` is `o`; <br>• the counts are the store counters. | D |
-| SH-8 | **JSON shape:** <br>• field names as in the README; <br>• `*_ns` are strings (`U64`); ids, indices and heights are numbers; <br>• arguments `{}`, or `from_index`/`limit` set to `null`, give the defaults; whole-args `null` and empty input fail with near-sdk's deserialization panic (message recorded); <br>• `From` conversions and `request_view` preserve every field. | D, S |
+| SH-5 | `action_approved` is exactly one line. Its `data` = the return value = `get_approval(i)` right after the call, with `agent_key_revoked_at` and `approver_key_revoked_at` both `null`. Later `get_approval(i)` differs from it **only** in those two fields, which report `proof_revocations` (RD-8): the `{block, ns}` at which the agent's or approver's registration was revoked, even after the key is registered again (HIST-5 for every other field). | D |
+| SH-6 | **Events per method:** each successful change method logs exactly one line, of exactly one event: `add_agent` and `add_approver` → `key_added` `{public_key, account_id, role, registration_id}`; `revoke_key` → `key_revoked` `{public_key, account_id, role, registration_id, revoked_at_block, revoked_at_ns, voided_pending}` (`voided_pending` = the removed registration's `pending`); `request_action` → `approval_requested` (SH-4); `approve` → `action_approved` (SH-5); `reject` → `action_rejected` with `data` = the returned `RejectionView` = `get_rejection(i)`. `new`, every `get_*` and every failed call log nothing. | D |
+| SH-7 | **View mapping:** <br>• `get_approval(i)` is `approval(s,i)` with the revocation fields from `proof_revocations` (RD-8), and `get_approvals(f?,l?)` is `approvals(f.unwrap_or(0), l.unwrap_or(50))` mapped the same way; <br>• `get_request(i)` is `None` for `i ≥ #R`, otherwise a `RequestView` with every field equal to `R[i]` (including `agent_registration_id`) and `status = request_status`; <br>• `get_rejection(i)` is `None` unless `R[i].rj ≠ None`, otherwise every field of `R[i]` and its rejection; <br>• `get_revocation(g)` is `V(g)` as `{block, ns}`; <br>• `get_principal(k)` is `None` for `k ∉ dom P`, otherwise `account_id`, `role`, `registration_id` and `pending` equal `P(k)`; <br>• `get_owner` is `o`; <br>• the counts are the store counters. | D |
+| SH-8 | **JSON shape:** <br>• field names as in the README for `RequestView`, `ApprovalProofView` (with `agent_key_revoked_at` / `approver_key_revoked_at`: `null` or `{block, ns}`), `RejectionView`, `PrincipalView` (with `registration_id`), `KeyView`, `KeyRevokedView` and `BlockTimeView`; <br>• `*_ns` and `ns` are strings (`U64`); ids, indices, heights and `block` are numbers, exact above 2⁵³; absent results are `null`; <br>• arguments `{}`, or `from_index`/`limit` set to `null`, give the defaults; whole-args `null` and empty input fail with near-sdk's deserialization panic (message recorded). The argument half exists only in the wasm wrappers: S (M6); <br>• `From` conversions, `request_view`, `proof_view` and `rejection_view` preserve every field. | D, S |
 | SH-9 | **Init:** `new` succeeds once (`#[init]`) and only from `C` (`#[private]`). Every method fails before init (`PanicOnDefault`). Post-init state is `Init(owner_id)`. Wrapper-only, so unit tests can't see it [conf: high]. | S / R |
-| SH-10 | **Deposits:** call all 13 exports with 1 yocto attached, using **full-access** keys (function-call keys can't attach deposits), calling `new` on a fresh, uninitialized deployment. Every change method and `new` must fail with near-sdk's non-payable panic; record the outcome for each `get_*` [conf: med that the wrapper checks `&self` methods]. | S |
-| SH-11 | **Export surface:** function exports are exactly the 13 methods plus `contract_source_metadata` and, if the build embeds the ABI, `__contract_abi` [conf: med]. Non-function exports are exactly `memory` (plus `__data_end`/`__heap_base` if present). `wasm-surface.expected` lists both sets. No `Store` method, upgrade or owner transfer is exported. | W / S |
-| SH-12 | **No escape hatches:** wasm imports include no `promise_*` (which covers create, then, batch, yield, and, return), no deploy, no delete, and no transfer. The only storage keys written are those of ST-5. | W / R |
+| SH-10 | **Deposits:** call all 16 exports at the pin (13 before PR #15, F-15) with 1 yocto attached, using **full-access** keys (function-call keys can't attach deposits), calling `new` on a fresh, uninitialized deployment. Every change method and `new` must fail with near-sdk's non-payable panic; record the outcome for each `get_*`. *Observed (M6, near-sandbox 2.13.4):* every change method and `new` fail with `Method <m> doesn't accept deposit`; every `get_*` (and `contract_source_metadata`) **accepts** the deposit when called as a transaction, so the wrapper checks only `&mut self` methods. | S |
+| SH-11 | **Export surface:** function exports are exactly the 16 `#[near]` methods (`new`, `add_agent`, `add_approver`, `revoke_key`, `request_action`, `approve`, `reject`, `get_owner`, `get_principal`, `get_request`, `get_request_count`, `get_approval`, `get_rejection`, `get_revocation`, `get_approvals`, `get_approval_count`) plus `contract_source_metadata` and `__contract_abi` (cargo-near embeds the ABI; observed at M3). The only non-function export is `memory` (no `__data_end`/`__heap_base` after cargo-near's `wasm-opt`). `wasm-surface.expected` lists both sets. No `Store` method, upgrade or owner transfer is exported. | W / S |
+| SH-12 | **No escape hatches:** wasm imports include no `promise_*` (which covers create, then, batch, yield, and, return), no deploy, no delete, no add-key, no global-contract and no transfer host function; `wasm-surface.expected` lists the exact import set (17 `env` functions at the pin). The only storage keys written are those of ST-5. | W / R |
 
 ### 5.9 Runtime assumption tests (RT): sandbox, reproducible wasm
 
@@ -448,14 +449,14 @@ within bounds), VC/VM (unbounded), PM and Kp.
 | RT-KEY | A function-call key `k` of account `a` arrives as `signer = predecessor = a` with `signer_pk = k`. An unregistered key on the right account gets `UnknownKey`. A registered key added to another account gets `KeyAccountMismatch`. | ASM-SIGNER |
 | RT-RELAY | `request_action`/`approve` through a third-party relay contract fails with `IndirectCall`. | ASM-PRED |
 | RT-SELFACCT | A contract on the signer's own account calling `C` **succeeds** (documents F-9). | ASM-PRED |
-| RT-METATX | NEP-366 delegate action: record the outcome (expected `IndirectCall`). | ASM-META |
+| RT-METATX | NEP-366 delegate action: record the outcome (expected `IndirectCall`). *Observed:* `IndirectCall` on C, for an agent function-call key and for a full-access agent key; the relayer's transaction succeeds. | ASM-META |
 | RT-FCKEY | An agent function-call key scoped to `request_action` can't call `approve` or `add_agent`. Assert `InvalidTxError::InvalidAccessKeyError(MethodNameMismatch)`, not a contract panic: the contract would also reject both calls, so only the error kind shows the runtime enforced the scope. | ASM-FCKEY |
-| RT-REVERT | Force failures, including `LackBalanceForState` after draining `C`'s balance, and a call with just enough gas for the core step. State and views must be unchanged. Record whether the event survives in the failed outcome. | ASM-ATOMIC |
-| RT-BATCH | One tx `[request_action("a"), request_action("")]`, signed by a **full-access** key of the agent account that is also its registered agent key (a function-call key can sign only single-action txs). The outcome fails at action index 1 with "action is empty", and the counters are unchanged. Record whether the first event appears. | ASM-ATOMIC |
+| RT-REVERT | Force failures, including `LackBalanceForState` after draining `C`'s balance, and a call with just enough gas for the core step. State and views must be unchanged. Record whether the event survives in the failed outcome. *Observed:* state unchanged in every case; the event **survives** in the failed outcome for out of gas after the emit (attached gas from about 27/40 to 39/40 of the minimum) and for `LackBalanceForState` on `request_action` and `approve`. | ASM-ATOMIC |
+| RT-BATCH | One tx `[request_action("a"), request_action("")]`, signed by a **full-access** key of the agent account that is also its registered agent key (a function-call key can sign only single-action txs). The outcome fails at action index 1 with "action is empty", and the counters are unchanged. Record whether the first event appears. *Observed:* it **appears** in the failed outcome. | ASM-ATOMIC |
 | RT-RESET | Delete and recreate `C`: counters reset. VER-3 (a full-access key or a `DeleteAccount` since `b₀`) detects it. VER-6 is only a heuristic that catches it while counters are below cached values. | ASM-CODE |
 | RT-SPOOF | A spoofer contract logs a forged `EVENT_JSON`. The VER-1 `executor_id` rule rejects it. | VER-1 |
 | RT-CODEHASH | The wasm under test is the `cargo near build reproducible-wasm` output. Record its sha256 (hex) **and** the NEAR `code_hash` (base58 of sha256). *Was blocked by F-12 (resolved upstream, R-8).* | ASM-DEPLOY, ASM-COMPILE |
-| RT-TRACE | **Main flows on the deployed artifact.** Replay every `conformance/traces/*.txt`, plus 200 random sequences of ≤30 ops, on the reproducible wasm. For each step, these must equal `spec.rs`: the result or return value, the exact failure message, the receipt logs, and the `get_*` views (including `{}` args, nulls, `limit = 0`, and values > 2⁵³). *Was blocked by F-12 (resolved upstream, R-8).* | ASM-COMPILE, ASM-SDK |
+| RT-TRACE | **Main flows on the deployed artifact.** Replay every `conformance/traces/*.txt`, plus 200 random sequences of ≤30 ops, on the reproducible wasm. For each step, these must equal `spec.rs`: the result or return value, the exact failure message, the receipt logs, and the `get_*` views (including `{}` args, nulls, `limit = 0`, and values > 2⁵³). *As built (M6):* `spec.rs` runs over the Kani `ArrStore` (at most 4 requests), so the per-step oracle is the real core on the host over `MemStore`, with the sandbox's block times and JSON rendered from the README; it is tied to `spec.rs` by Kani and plain mode, and to `tla.rs` and `step/4` because every step must also match the trace file (`prolog.txt` from `step/4`; `core-random.txt`, the 200 × 30 random sequences, from `kani/src/trace.rs`, each step checked against `tla.rs`). *Observed (M6):* 210 traces, 6,800 steps, every step equal, on the reproducible wasm (near-sandbox 2.13.4, about 10.5 min with 6 jobs). | ASM-COMPILE, ASM-SDK |
 
 ### 5.10 Deployment and verifier rules (DEP, VER)
 
@@ -472,7 +473,8 @@ within bounds), VC/VM (unbounded), PM and Kp.
 3. The owner is a multisig or DAO.
 4. Every registered key exists on its bound account as a **function-call
    key**: receiver `C`, `method_names = [request_action]` for agents or
-   `[approve]` for approvers, finite allowance. The contract can't list its
+   `[approve]` or `[approve, reject]` for approvers (the README asks for both
+   since PR #15 added `reject`), finite allowance. The contract can't list its
    keys, so the registered-key set is rebuilt by replaying every successful
    `add_agent`/`add_approver`/`revoke_key` receipt to `C` since `b₀` from an
    indexer (or NEAR Lake). This is a point-in-time check. VER-8 is the
@@ -499,9 +501,9 @@ within bounds), VC/VM (unbounded), PM and Kp.
 | C-1 | **Authority matrix:** each change method has exactly one authority; owner, agent and approver method sets are disjoint; no key can both request and approve. | P |
 | C-2 | **Guard table:** every `ApprovalError` comes from ≥1 guard. Each guard yields one error. Specified precedence = generated `code_precedence/2`. | P |
 | C-3 | Error messages are pairwise distinct and substring-free (R-2; expected to pass). | P |
-| C-4 | Each event comes from exactly one method. Every authority- or proof-changing operation emits an event, or has an `accepted_risk`. Since `3426c92` admin operations emit `key_added` / `key_revoked` (R-7). | P |
+| C-4 | Each event comes from exactly one core operation: `key_added` from `add_principal` (driven by both `add_agent` and `add_approver`), `key_revoked` from `revoke_key`, `approval_requested`, `action_approved` and `action_rejected` from `request_action`, `approve` and `reject`. Every authority- or proof-changing method emits an event, or has an `accepted_risk` (`new`, which emits nothing). Only change methods emit. Since `3426c92` admin operations emit `key_added` / `key_revoked` (R-7), and `reject` emits `action_rejected`. | P |
 | C-5 | Generated constants equal the requirement constants: `DPG ≤ PG`, `MAXP ≥ 1`, and `N` within the RES-2 bound. | P |
-| C-6 | The generated API surface (wasm exports and ABI) equals the requirements' API table. | P |
+| C-6 | The generated API surface equals the requirements' API table: the wasm's `#[near]` function exports (`api_method/1`) are exactly the `method/3` names, the only other function exports are near-sdk's (`api_sdk_export/1`: `contract_source_metadata`, `__contract_abi`), and each ABI entry's kind and modifiers match the method's kind and authority (`view` ↔ view; `call` ↔ change; `call` with `[init, private]` ↔ `new`). | P |
 | C-7 | Traceability both ways: every requirement maps to ≥1 property, and every property to ≥1 requirement or threat. | P |
 | C-8 | Every threat has `mitigated_by` or `accepted_risk`. | P |
 | C-9 | Property and assumption IDs in `status.toml` = IDs in `traceability.pl`. | P |
@@ -528,12 +530,13 @@ within bounds), VC/VM (unbounded), PM and Kp.
 | D8 append-only paged log | INV-1, INV-3, INV-4, INV-7, LEM-1, LEM-2, HIST-3, HIST-4, RD-2, RD-4 |
 | D9 bounded storage (action ≤ 2048 B, ≤ 16 pending/key) | INV-2, INV-9, ROB-3, TR-6, RES-1, RES-2 |
 | D10 approval commits to content | TX-5, TR-1 |
-| D11 no upgrade, rejection, expiry or threshold | SH-11, SH-12, C-1 |
+| D11 no upgrade, ownership transfer, expiry or threshold (rejection is D17) | SH-11, SH-12, C-1, C-6 |
 | D12 atomic, bounded execution | TX-0, ROB-1, ROB-2, ROB-4, ST-1, ST-2, ST-3, ST-4, ST-5, ST-6, SH-2, SH-3, RD-6, LEM-3 |
 | D13 timestamps recorded and ordered | INV-10, TR-4 |
 | D14 deployed artifact = verified source | RT-CODEHASH, RT-RESET, RT-TRACE, DEP-1, VER-2, VER-3, VER-6 |
 | D15 verification hygiene (ASM-SPEC, ASM-TOOLS) | TR-5, MC-1, MC-2, C-2, C-3, C-5, C-6, C-7, C-8, C-9, C-10 |
 | D16 verifier and executor discipline | VER-1, VER-4, VER-5, VER-7, VER-8 |
+| D17 an approver of another account may reject a pending request | TX-7, HIST-9, INV-13, INV-5, INV-6, TR-2, RD-7, SH-6, TLA-LIVE-2 |
 
 ---
 
@@ -556,9 +559,17 @@ opaque newtypes `Acct(u8)` and `Key(u8)` that implement only `Clone`,
 | `src.rs` | **Dual mode.** Harness bodies are written against a `Src` trait. `Sym` uses `kani::any`/`assume`: **the proof**. `Rng` uses xorshift with hints toward `Inv` states: **not a proof**. Plain mode debugs specs in seconds and gates CI without Kani. `kani/kani-stub/` lets `RUSTFLAGS="--cfg kani --cfg kani_stub" cargo check` type-check `proofs.rs`. |
 
 M1 implements this design against the pinned API (results and run times in
-[`kani/RESULTS.md`](kani/RESULTS.md)). The ghost stores (`ghost.rs`: `Sparse`, `Window`,
-`Counting`) are M2 and not written yet. A plain-mode prototype from planning,
-against the pre-`5736251` API, was not committed.
+[`kani/RESULTS.md`](kani/RESULTS.md)). M2 adds the ghost stores in
+`ghost.rs` (`Sparse`, `Window`, `Counting`, plus `Obs`, the abstraction
+`α` read through the `Store` interface, and `expect`, the TX results with
+both counter `LogFull` guards) and their harness bodies in
+`ghost_checks.rs`. `Sparse` holds each `LookupMap` as a fixed-capacity
+association list and the counters as plain `u64`, so the shell's `+= 1`
+at `u64::MAX` panics as it does on-chain; the plain test
+`sparse_header_hash` fails when `contract/src/lib.rs` no longer has the
+sha256 in its header. Because M1 runs the core over `ArrStore` (RESULTS.md
+deviation 1), `h_store_laws_arr` and the `ArrStore` leg of `h_refine_*`
+discharge the ST-1/ST-3 obligations that deviation created.
 
 ### 6.2 Harnesses and covers
 
@@ -582,13 +593,13 @@ more than 15 GB once PR #15's state was added. They form one cover family.
 | `h_bmc_from_init` | `Init` + ≤ 5 ops (any kind, ≤ 2 requests), ghost history | GH (TR-1, TR-7) and TR-2 over every such trace | approved; rejected |
 | `h_bmc_from_init_witness` | `Init` + the 6 ops add, add, request, revoke, add, approve (any arguments) | the same, along that shape | revoke → re-add → approve old id fails with AgentRevoked |
 | `h_read` | like `h_step`; `id`, `from`, `limit` any `u64` | RD-1, RD-2, RD-5, RD-7, RD-8, LEM-4 | non-empty page; void status; rejected status; a proof whose agent key was revoked |
-| `h_page_arith` | `Window`: `from`, `limit`, `count`, `offset` any `u64`; out-of-page reads and any write panic; `#[kani::unwind(102)]` | RD-3, RD-6, and the page clamp | non-empty page at `count = MAXU` |
-| `h_proto_{request,approve}` | `Sparse` **raw** state (no `assume(inv)`), counters any `u64` ≥ stored size. ST-2 is also checked from `Inv` states with counters equal to size. | ST-2, ROB-2 | Ok; LogFull (approve's only from non-`Inv` states, per LEM-3) |
-| `h_proto_{add,revoke}` | same | ST-2 | Ok, each error |
-| `h_count_{op}` | `Counting` over `MemStore` | ROB-4 | none |
-| `h_refine_{op}` | the same `Inv` state in `MemStore` and `Sparse` | ST-3 | none |
-| `h_store_laws_{mem,sparse}` | small arbitrary stores | ST-1, INV-0 (`MemStore`) | none |
-| `h_action_len` | agent registered; `len ∈ {0, 1, 2048, 2049}` with the 1-byte case `" "`, plus the 2050-byte multi-byte case | ROB-3 | Ok, EmptyAction, ActionTooLong |
+| `h_page_arith`, `h_page_arith_empty` | `Window` over any `u64` `count`, offset and request-id shift; out-of-page reads, out-of-order reads and any write panic. `h_page_arith`: every request approved, `from` any `u64`, `limit ≤ 2` (`PAGE_SMALL`), page length and every entry checked. `h_page_arith_empty`: every request absent (fallback 6), any `limit`, `from` one of the 10 `PAGE_FROMS` (0, 1, 2^32, 2^63 and the distances to `u64::MAX` that change the page); the per-read assertions bound the slots read by `e − f`. Plain mode runs both over any `from` and `limit` and also checks the slot count of empty pages. `#[kani::unwind(5)]` / `(102)` | RD-3, RD-6, ROB-4 (`approvals` reads), and the page clamp | non-empty page at `count = MAXU`; non-empty page where `f + l` overflows; full page |
+| `h_proto_{request,approve}` | `Sparse` **raw** state (no `assume(inv)`), counters any `u64` ≥ stored size; `h_proto_request_empty` is the `""` instance. ST-2 is also checked from states with counters equal to size, in `h_refine_*`. | ST-2, ROB-2, TR-5 (exact result via `ghost::expect`, which adds both counter `LogFull` guards to `spec::expected`) | Ok; LogFull (approve's only from non-`Inv` states, per LEM-3) |
+| `h_proto_{add,revoke,reject}` | same | ST-2 | Ok, each error (add, revoke); Ok (reject) |
+| `h_count_{op}` | `Counting` over `MemStore`, raw state | ROB-4 (per-operation read and write bounds; no write on failure except F-6) | none |
+| `h_refine_{op}` (approve and reject as `_tx` and `_post`) | the same state in `ArrStore` and `Sparse` (and `MemStore` in plain mode; under Kani ST-1 ties `MemStore` to `ArrStore`): INV-0, INV-1, INV-8, distinct revocation ids and no live registration revoked (every `Inv` state, and more) | ST-3 (same results, same `α` read through `Store`), ST-2 with counters equal to size | none |
+| `h_store_laws_{mem,sparse,arr}` (mem and sparse split by law: `_reg` insert and remove principal, the base harness the other five, each over a fixed shape; arr every shape) | small well-formed stores (distinct keys, dense ids, distinct revocation ids), one mutator within its law's precondition | ST-1, INV-0 (`MemStore`, `ArrStore`) | insert over an existing key; remove of an absent key |
+| `h_action_len` | agent registered; `len ∈ {0, 1, 2048, 2049}` with the 1-byte case `" "`, plus the 2050-byte multi-byte case; result by kind and non-action fields (fallback 5); `#[kani::unwind(2051)]` so the chars-vs-bytes mutant fails on its assertion | ROB-3 | Ok, EmptyAction, ActionTooLong |
 | `h_canary` | any | asserts a false property; must report FAILED | none |
 
 ### 6.3 Bounds and the small-scope argument
@@ -640,11 +651,11 @@ seeded against the upstream suite during planning (27/27 killed).
 | `h_step_*` (M1) | self-approval check; relay check; key-account binding; double log push; drop-empty; `trim`-empty; `active_from` dropped / strict / +1 / 0; no increment; no decrement; no principal write-back; action-mismatch dropped; already-approved dropped; three guard swaps; void reported as pending (`h_read`); revoke not owner-only; `approval_index` from request count; proof copies agent as approver; `push_approval` before the checks |
 | `h_step_*`, `h_read` (M1, PR #15 API) | reject: self-approval check dropped, no decrement, rejection records the agent's registration; already-rejected dropped; revocation not recorded; registration count not incremented; request records registration 0; `proof_revocations` swapped (`h_read`); rejected reported as pending (`h_read`) |
 | `h_raw_*` (M1) | cap off-by-one (`>=` changed to `>`) (`h_raw_request`); add's `LogFull` dropped (`h_raw_add`: the counter overflows) |
-| `h_action_len` (M2) | length off-by-one; chars-vs-bytes |
-| `h_page_arith` (M2) | page clamp removed; page addition wraps |
-| `h_proto_*` (M2) | `LogFull` request dropped; `LogFull` approve dropped |
-| `h_store_laws_mem` (M2) | `MemStore` insert pushes duplicates |
-| **Must survive** (equivalent, F-14) | role check dropped / account check dropped in `live_agent_registration`. If either is killed, INV-8 or LEM-4 is wrong. |
+| `h_action_len` (M2) | length off-by-one (37); chars-vs-bytes (38) |
+| `h_page_arith` (M2) | page clamp (`.min(approval_count)`) removed (39); page addition wraps (40) |
+| `h_proto_*` (M2) | `LogFull` request dropped (41, `h_proto_request`); `LogFull` approve dropped (42, `h_proto_approve`) |
+| `h_store_laws_mem_law_insert` (M2) | `MemStore` insert pushes duplicates (43) |
+| **Must survive** (equivalent, F-14) | role check dropped / account check dropped in `live_agent_registration`. If either is killed, INV-8 or LEM-4 is wrong. Checked with the harnesses that see raw states skipped (`h_raw_*`, `h_proto_*`, and the `facts` generator), since the equivalence holds only under INV-8. |
 
 ---
 
@@ -758,7 +769,7 @@ facts.
   - **`tests/store_diff.rs`:** ST-4, SH-2, with persist and reload every step.
   - **`tests/shell.rs`:** SH-1, SH-3..8, ST-5, ST-6, RES-1 (computed),
     RES-2.
-  - **`mutants/*.patch`, each must fail the suite:**
+  - **`mutants/*.patch`, each must fail the suite** (`near-tests/run-mutants.sh`):
     - `add_agent` registers Approver;
     - `caller()` uses the signer as predecessor;
     - `now()` swaps height and timestamp;
@@ -768,7 +779,9 @@ facts.
     - `revoke_key` passes the signer;
     - `push_request` keyed by `count+1`;
     - two maps sharing a prefix;
-    - `request_view` sets `requested_at_block` from `timestamp_ns`.
+    - `request_view` sets `requested_at_block` from `timestamp_ns`;
+    - (PR #15) `proof_view` swaps the two revocation fields;
+    - (PR #15) `key_revoked` reports `voided_pending = 0`.
 - **`tools/scripts/wasm-surface.sh`:** the exports (SH-11) and imports (SH-12)
   of the `cargo near build non-reproducible-wasm` output, in the near-unit job
   (M3). It is repeated on the reproducible wasm in the sandbox job (M6; OQ-2
@@ -779,6 +792,95 @@ facts.
     lines each.
 - **`deploy-checks/check_deployment.sh <net>`:** DEP-1, VER-2, VER-3. These
   need an archival RPC and an indexer (DEP-1.4, VER-3).
+
+**Status (2026-10-15): M3 built; statuses `in-progress`.**
+
+- **`near-tests/`** depends on `approval-contract` and `approval-core` by
+  path and on near-sdk 5.29.1 with `unit-testing` (the real `VMLogic` of
+  near-vm-runner 0.37.4). Its `Cargo.lock` is the mirror's plus this crate's
+  own entry; `tests/lockfile.rs` checks the 258 shared packages. The
+  contract is driven as the runtime drives it: every call starts from
+  `state_read`, a successful call ends with `state_write` and a drop, and a
+  panicking call is discarded with its writes (ASM-ATOMIC). Expected values
+  are built from the README's field names and the core's results on a
+  `MemStore`, never from the contract's view types. α of the contract is
+  read through its `Store` impl over the key universe (local to
+  `near-tests/src/lib.rs`, not shared with `kani/spec.rs`, whose `abs` is
+  over `ArrStore<Acct, Key>`); the exact storage key set closes the gap.
+- **`store_diff.rs`** (ST-4, SH-2, and per step SH-3..SH-7 and ST-5):
+  10,000 × 50 steps with reload every step pass in about 3.5 min (debug
+  profile, dependencies at `opt-level = 2`, one core). After every step:
+  equal results and exact panic messages, exactly one event with the
+  expected data, equal α, the exact storage key set, and every view on every
+  id equal to the core's reads. Over a full run every operation succeeds
+  and all 16 errors reachable from `Init` occur. `STORE_DIFF_SEQS`,
+  `STORE_DIFF_STEPS`, `STORE_DIFF_SEED` and `STORE_DIFF_VIEWS` size it.
+- **`shell.rs`** (14 tests, under 5 s): SH-1, SH-3 (all 17 errors; the
+  three `LogFull` guards on states with a counter at `u64::MAX`; payload
+  `HostError(GuestPanic { panic_msg })`), SH-4..SH-8, ST-5, ST-6 (golden
+  bytes in `tests/golden/layout.txt`, regenerated with `UPDATE_GOLDEN=1`),
+  RES-1 (the Borsh bounds equal VMLogic's storage metering at the worst
+  case), RES-2 (13197 B worst line) and F-17. The argument half of SH-8 and
+  SH-9/SH-10 need the wasm wrappers: M6.
+- **Mutants:** the ten listed above, adapted to PR #15 (`emit before ok()`
+  is `key_added` emitted before `add_principal` runs; the status mapping
+  swaps `pending` and `void`), plus two for PR #15. `run-mutants.sh` first
+  checks the unpatched copy passes; all 12 are killed (about 13 min).
+- **`wasm-surface.sh`** builds with `cargo near build non-reproducible-wasm
+  --locked` (cargo-near 0.22.0, the version of the upstream reproducible
+  image) in a temporary copy, or takes `--wasm`/`--abi`; parses imports and
+  exports in Python; diffs against `wasm-surface.expected` (16 methods,
+  `contract_source_metadata`, `__contract_abi`, `memory`; 17 `env` imports);
+  and regenerates `prolog/extracted/api_facts.pl` from the exports and the
+  ABI. C-6 passes on it.
+
+**Status (2026-10-15, M6 and M7 built; statuses `in-progress` pending the spec
+review).**
+- **`sandbox/`** is a standalone workspace (`near-workspaces` 0.23.0, the
+  default near-sandbox 2.13.4, protocol 86) with its lockfile seeded from the
+  mirror (`scripts/check-lock.py`: 343 shared packages, no mismatch).
+  `scripts/run-sandbox.sh` is the job: lockfile check, `scripts/build-res.sh`
+  (the three helper contracts, via `cargo near`), `cargo test --locked`.
+  `scripts/build-wasm.sh [non-reproducible|reproducible|reproducible-manual]`
+  builds the wasm under test; tests take `APPROVAL_WASM`.
+- **Tests:** `runtime.rs` (RT-CODEHASH, RT-KEY, RT-RELAY, RT-SELFACCT,
+  RT-METATX, RT-FCKEY, RT-REVERT, RT-BATCH, RT-SPOOF), `shell.rs` (SH-9,
+  SH-10, RES-1 measured deltas, RES-3), `deploy.rs` (DEP-1/VER-2/VER-3/VER-8
+  demo, RT-RESET), `trace.rs` (RT-TRACE). Tests that record an outcome write
+  `results/<ID>.json`; the observations are copied into the `observed` field
+  of the matching `[assumptions]` entries.
+- **Wasm under test:** the reproducible build of the pin, sha256
+  `5223150408c6bce4d857eb155228c8f5e2dcdc5a2748d933c6ec7369947e443d`,
+  `code_hash` `6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg`, built with the
+  pinned `sourcescan/cargo-near:0.22.0-rust-1.97.0` image and cargo-near's
+  NEP-330 environment (`reproducible-manual`; the container needed a proxy).
+  Every test also passes on the non-reproducible host build (`ffdbb5a7…`).
+- **RT-TRACE inputs** are checked in under `conformance/traces/`
+  (`sandbox/scripts/gen-traces.sh`): `prolog.txt` (10 × 80 calls from
+  `step/4`) and `core-random.txt` (the 200 random sequences, 30 calls each,
+  from `kani/src/trace.rs`). Each step is compared with the trace file and
+  with the real core run on the host (see RT-TRACE in §5.9). The full run
+  (210 traces, 6,800 steps) passed on the reproducible wasm in 632 s with
+  `RT_TRACE_JOBS=6`.
+- **Recorded outcomes:** see §5.9 (RT-METATX, RT-REVERT, RT-BATCH) and §5.8
+  (SH-10). The event of a failed receipt **does** survive in its outcome
+  (out of gas after the emit, `LackBalanceForState`, a failed batch), so
+  VER-1's "successful receipt" clause is load-bearing.
+- **`deploy-checks/check_deployment.sh <net>`** (Python 3.11 behind a shell
+  wrapper) implements DEP-1.1–1.5, VER-2, VER-3 and VER-8 from
+  `[deployment.<net>]`, with `CHECK_<KEY>` overrides. Its only indexer is
+  `rpc-scan` (walk every block from `b0`), fit for a local chain; on a public
+  net without an indexer DEP-1.4, VER-3's scan and VER-8 fail as unchecked.
+  `[deployment.sandbox]` drives the demo; `[deployment.testnet]` is an empty
+  template (no testnet deployment has been made).
+- **`prolog/verification/verifier_rules.pl`** encodes VER-1..8;
+  `tests/test_verifier_rules.pl` (run by `run-prolog.sh`) has accepting and
+  rejecting cases for each. The sandbox feeds it real observations: RT-SPOOF
+  (VER-1 on real, copied, forged and failed-receipt events), the VER-8 key
+  views of sandbox proofs, and RT-RESET (VER-6).
+- **Local only:** neard raises `RLIMIT_NOFILE` to 65535; where the hard
+  limit is lower, `scripts/dev-nofile-shim.sh` (an `LD_PRELOAD` shim) is
+  needed. CI's runners don't use it.
 
 ---
 
@@ -922,9 +1024,25 @@ M3 run in parallel. Each milestone ends by updating the statuses it lists.
 **Total: M0–M7 about 25–39 days.** Kani precedes Verus because it checks the
 deployed code itself and buys the most assurance per day.
 
+**Progress (2026-10-15).** M3 is built (§9): `store_diff.rs` 10k × 50 and
+`shell.rs` pass, all 12 shell mutants are killed, golden bytes are committed,
+the `wasm-surface.sh` diff is clean and `api_facts.pl` is generated, so C-6
+runs and passes. Its statuses are `in-progress` until the spec sign-off and
+the `near-unit` CI job; F-17 is new.
+
 **Progress (2026-10-14).** M0, M1.5, M1.6 and M4 are done, except C-6 (waits
 on M3). M1 is done except its "spec reviewer sign-off" line, so its statuses
-stay `in-progress`. M2, M3, M5, M6 and M7 have not started. Remaining effort
+stay `in-progress`. M2, M3, M5, M6 and M7 have not started.
+
+**M6 and M7 (2026-10-15).** Built and passing locally on near-sandbox 2.13.4
+with the reproducible wasm (§9): every RT-* test, SH-9, SH-10, RES-1
+(measured), RES-3, RT-TRACE, the `check_deployment.sh sandbox` demo with its
+negative cases, and `verifier_rules.pl`. Not done: the `wasm-surface.sh` diff
+on the reproducible build (needs M3's script; RT-CODEHASH records the export
+list), the `cargo expand` review of SH-9/RD-6, the testnet deployment and
+`[deployment.testnet]`, the `sandbox` and `deploy-check` CI jobs, and
+`docs/architecture.md`. Statuses stay `in-progress` (spec reviewer sign-off;
+M7 also needs the testnet decision). Remaining effort
 on the critical path (re-pin, review, M2, M3, M6) is about 6–10 days plus
 the review; M7 adds 2 and needs a testnet decision.
 
@@ -992,7 +1110,10 @@ Not yet built: `verus` (M5), `near-unit` (M3), `sandbox` (M6), `status-lint`,
 8. **OQ-8:** Is separation by account id enough, or should the owner account
    be barred from holding agent or approver keys? MC-1 can flag it.
 9. **OQ-9:** Admin events (F-8): *answered in `3426c92` (R-7); C-4 and the
-   SH rows follow at M3 (F-15).*
+   SH rows followed at M3 (F-15, done).*
+10. **OQ-10 (F-17):** Are ML-DSA-65 access keys enabled on mainnet, and
+    should the contract bound `MAX_ACTION_LEN` for them, refuse them at
+    registration, or should DEP-1 forbid them?
 
 ---
 

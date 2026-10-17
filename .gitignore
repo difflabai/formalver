@@ -25,3 +25,6 @@ projects/near-approval/tla/states/
 projects/near-approval/tla/*_TTrace_*
 projects/near-approval/tla/_apalache-out/
 projects/near-approval/lean/.lake/
+
+# tools/scripts/get-cargo-near.sh
+tools/.cargo-near/
