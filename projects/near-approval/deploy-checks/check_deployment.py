@@ -176,12 +176,20 @@ class Checker:
         limit = int(self.cfg.get("scan_max_blocks", 20000))
         if head - b0 > limit:
             raise SystemExit(f"rpc-scan over {head - b0} blocks exceeds scan_max_blocks={limit}; use an indexer")
+        # Walk back from head along prev_hash, so skipped heights never need
+        # telling apart from blocks the node failed to return: every block
+        # on the chain is fetched by hash, and any RPC error fails the scan
+        # rather than certifying a partial history.
+        blocks = []
+        block = self.rpc.call("block", {"block_id": head})
+        while block["header"]["height"] >= b0:
+            blocks.append(block)
+            if block["header"]["height"] == 0:
+                break
+            block = self.rpc.call("block", {"block_id": block["header"]["prev_hash"]})
         txs = []
-        for h in range(b0, head + 1):
-            try:
-                block = self.rpc.call("block", {"block_id": h})
-            except RpcError:
-                continue  # skipped height
+        for block in reversed(blocks):
+            h = block["header"]["height"]
             for ch in block["chunks"]:
                 if ch.get("height_included") != h:
                     continue

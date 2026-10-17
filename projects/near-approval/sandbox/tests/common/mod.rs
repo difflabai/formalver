@@ -77,10 +77,13 @@ pub fn code_hash_b58(code: &[u8]) -> String {
     bs58::encode(sha256(code)).into_string()
 }
 
-/// Writes `value` to `results/<id>.json` (committed: the observed outcome of
-/// a test that records rather than asserts). Keep values free of block
-/// heights and other run-specific data, so a re-run shows a diff only if
-/// the behaviour changed.
+/// Checks `value` against the committed `results/<id>.json` (the observed
+/// outcome of a test that records rather than asserts) and fails on any
+/// difference, writing what it saw to `results/<id>.observed.json`. With
+/// `SANDBOX_RECORD=1` it rewrites the committed file instead: the explicit
+/// update mode after a reviewed runtime change. Keep values free of block
+/// heights and other run-specific data, so they differ only if the
+/// behaviour changed.
 pub fn record(id: &str, value: Value) {
     let dir = sandbox_dir().join("results");
     std::fs::create_dir_all(&dir).unwrap();
@@ -89,12 +92,21 @@ pub fn record(id: &str, value: Value) {
         m.insert("wasm_kind".into(), json!(wasm_kind()));
         m.insert("near_sandbox".into(), json!(near_workspaces_sandbox_version()));
     }
-    std::fs::write(
-        dir.join(format!("{id}.json")),
-        serde_json::to_string_pretty(&v).unwrap() + "\n",
-    )
-    .unwrap();
+    let text = serde_json::to_string_pretty(&v).unwrap() + "\n";
     eprintln!("{id}: {v}");
+    let path = dir.join(format!("{id}.json"));
+    if std::env::var("SANDBOX_RECORD").as_deref() == Ok("1") {
+        std::fs::write(&path, &text).unwrap();
+        return;
+    }
+    let committed = std::fs::read_to_string(&path).unwrap_or_default();
+    if committed != text {
+        std::fs::write(dir.join(format!("{id}.observed.json")), &text).unwrap();
+        panic!(
+            "{id}: observed outcome differs from results/{id}.json \
+             (rerun with SANDBOX_RECORD=1 to accept it)\n--- committed\n{committed}--- observed\n{text}"
+        );
+    }
 }
 
 pub fn near_workspaces_sandbox_version() -> String {
