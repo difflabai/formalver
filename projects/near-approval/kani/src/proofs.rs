@@ -351,6 +351,20 @@ fn h_proto_reject() {
     g2::proto_reject(&mut Sym(None, checks::PART_ALL, false));
 }
 
+// K-ORACLE: approve and reject at any store size (requests and log slots at
+// any positions, counters free); see `ghost_checks::sparse_free`.
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_oracle_approve() {
+    g2::oracle_approve(&mut Sym(None, checks::PART_ALL, false));
+}
+
+#[kani::proof]
+#[kani::unwind(5)]
+fn h_oracle_reject() {
+    g2::oracle_reject(&mut Sym(None, checks::PART_ALL, false));
+}
+
 // ROB-4: `Counting` over `MemStore`, state shape `MEM_SHAPE`.
 #[kani::proof]
 #[kani::unwind(5)]

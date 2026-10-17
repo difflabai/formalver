@@ -239,8 +239,9 @@ status = "in-progress"
 [assumptions.ASM-MODEL]
 statement = "Until M5 path A: a core step on a state larger than the Kani bound behaves like one within it (strategy section 6.3)"
 level = "med"
-checked_by = ["MC-2"]
-status = "unverified"
+checked_by = ["MC-2", "ST-8"]
+observed = "ST-8 (K-ORACLE): the code's exact result and store calls equal the local spec ghost::expect / ghost::protocol at every store size (footprint at any positions, counters free), so the state bound no longer applies to the code side. Still open: the spec side, that expect/protocol equal the TLA+/Lean Next at every size (L2, see l2-oracle-proposal.md). Until then the step-property proofs on B extend to larger states by the CUTOFF.md argument"
+status = "in-progress"
 
 [assumptions.ASM-TLA-SCOPE]
 statement = "TLA+ model bounds (strategy section 17.3): behaviours with more requests, keys or accounts than TLC and Apalache explore add no new violations. Accounts and keys are covered by ASM-IDENT parametricity; the request bound is a small-scope assumption. Since section 18 it is needed only for liveness (TLA-LIVE-1): LEAN-IND, LEAN-STEP and LEAN-TR prove the safety properties at every size"
@@ -382,6 +383,7 @@ prolog_requirements = "prolog/model/approval_machine.pl"
   ST-1 = { status = "in-progress", layer = "kani", evidence = "bounded-proof", harness = "h_store_laws_mem_law_*, h_store_laws_sparse, h_store_laws_sparse_reg, h_store_laws_arr", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS"], description = "Store laws for MemStore and Sparse (map/sequence semantics; removing an absent key is a no-op)" }
   ST-2 = { status = "in-progress", layer = "kani", evidence = "bounded-proof", harness = "h_proto_*, h_refine_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Store protocol: exact mutator call sequence per op; makes contract-store differences from MemStore unreachable" }
   ST-3 = { status = "in-progress", layer = "kani", evidence = "bounded-proof", harness = "h_refine_*", depends_on = ["core/src/lib.rs", "contract/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS"], description = "Sparse (transliteration of the contract Store impl) refines ArrStore under Kani (h_refine_*) and MemStore in plain mode; ST-1 laws tie ArrStore and MemStore to the same observations" }
+  ST-8 = { status = "in-progress", layer = "kani", evidence = "bounded-proof", harness = "h_oracle_approve, h_oracle_reject (with h_proto_add/revoke/request)", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-TOOLS"], description = "Store protocol at any store size (K-ORACLE): on a Sparse holding the step's footprint at any keys and positions, with every field and counter free, approve and reject return exactly expect() and make exactly the protocol() calls; add, revoke and request read no request, so h_proto_* already covers them at every size" }
 
 # ---------------------------------------------------------------------------
 [modules.tla_model]

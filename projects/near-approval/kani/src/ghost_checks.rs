@@ -5,6 +5,8 @@
 //! - `h_page_arith`: `approvals` over a [`Window`] (RD-3, RD-6, ROB-4).
 //! - `h_proto_*`: one operation on a raw recording [`Sparse`] with free
 //!   counters (ST-2, ROB-2, TR-5).
+//! - `h_oracle_*`: approve and reject on a [`Sparse`] with requests and log
+//!   slots at any positions and every counter free (K-ORACLE: any store size).
 //! - `h_count_*`: one operation on [`Counting`] over `MemStore` (ROB-4).
 //! - `h_refine_*`: one operation on the same state in `ArrStore`, `Sparse`
 //!   and `MemStore` (ST-3, and ST-2 from states with counters equal to size).
@@ -288,6 +290,93 @@ pub fn proto_reject(src: &mut impl Src) {
         assert!(*id < n_r, "ST-2 reject: i < #R");
     }
     cover!(out.is_ok(), "proto reject: Ok");
+}
+
+// ---------------------------------------------------------------------------
+// h_oracle_*: any store size (K-ORACLE)
+// ---------------------------------------------------------------------------
+
+/// `sparse_raw` with every request and log slot moved to a free `u64`
+/// position and every counter free.
+///
+/// The core is generic over `Store` and reads at most two principals, one
+/// request and the counters per step (ROB-4). For a store of any size,
+/// keep only the entries the step reads, at their own keys and positions:
+/// every read returns what it returned on the full store, so the step makes
+/// the same calls and returns the same result. Such a restriction is a
+/// `Sparse` with at most 3 principals, 3 requests and 3 log slots at any
+/// keys and positions, any field values and any counters, which is what
+/// this builds. Principal keys and revocation ids are already free in
+/// `sparse_raw` (keys from 4 values: ASM-IDENT parametricity); add, revoke
+/// and request read no request, so `h_proto_*` already covers them at every
+/// size.
+/// Also returns the request positions (plain mode aims ids at them).
+pub fn sparse_free(src: &mut impl Src, a: &S) -> (Sparse, [u64; crate::store::CAP_R]) {
+    let mut t = sparse_raw(src, a);
+    let mut pos = [0; crate::store::CAP_R];
+    let mut requests = Assoc::new();
+    let mut log = Assoc::new();
+    let mut i = 0;
+    while i < crate::store::CAP_R {
+        if i < a.nr() {
+            pos[i] = src.u64();
+            requests.insert(pos[i], a.req(i).clone());
+        }
+        if i < a.nl() {
+            log.insert(src.u64(), a.log(i));
+        }
+        i += 1;
+    }
+    t.requests = requests;
+    t.approval_log = log;
+    t.request_count = src.u64();
+    t.approval_count = src.u64();
+    (t, pos)
+}
+
+/// One approve or reject on [`sparse_free`]: the exact result and the exact
+/// mutating calls (`expect`, `protocol`) at every store size.
+// PROP: ST-8 ST-2 TX-0
+fn oracle(src: &mut impl Src, approve: bool) {
+    let a = gen::state(src, true);
+    let h = Ghost::init();
+    let mut op = if approve {
+        gen::op_appr(src, &a, &h)
+    } else {
+        gen::op_rej(src, &a, &h)
+    };
+    let (mut s, pos) = sparse_free(src, &a);
+    // Plain mode: aim the id at a stored request (and, for approve, match
+    // its action) often enough to reach Ok. Under Kani both stay free.
+    if a.nr() > 0 && src.hint(80) {
+        let i = src.below(a.nr() as u8) as usize;
+        match &mut op {
+            Op::Appr { id, action, .. } => {
+                *id = pos[i];
+                if src.hint(80) {
+                    *action = a.req(i).action.clone();
+                }
+            }
+            Op::Rej { id, .. } => *id = pos[i],
+            _ => unreachable!(),
+        }
+    }
+    let (id, n_r) = match &op {
+        Op::Appr { id, .. } | Op::Rej { id, .. } => (*id, s.request_count),
+        _ => unreachable!(),
+    };
+    let out = check_proto(&mut s, &op);
+    cover!(out.is_ok() && id >= n_r, "oracle: Ok on a request at or past #R");
+    cover!(out.is_ok() && id > 3, "oracle: Ok on a request id above the bound");
+    cover!(out.err() == Some(E::RequestNotFound), "oracle: RequestNotFound");
+}
+
+pub fn oracle_approve(src: &mut impl Src) {
+    oracle(src, true)
+}
+
+pub fn oracle_reject(src: &mut impl Src) {
+    oracle(src, false)
 }
 
 // ---------------------------------------------------------------------------

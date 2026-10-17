@@ -205,6 +205,8 @@ inflate it).
 | `h_proto_request_empty` | verified | 89 s | 1.9 GB | `""` instance |
 | `h_proto_approve` | verified, 2/2 covers | 456 s | 5.6 GB | ST-2, ROB-2, TR-5 (approve `LogFull`) |
 | `h_proto_reject` | verified, 1/1 cover | 202 s | 2.6 GB | ST-2 |
+| `h_oracle_approve` | verified, 3/3 covers | 616 s | | ST-8 (any store size) |
+| `h_oracle_reject` | verified, 3/3 covers | 347 s | | ST-8 (any store size) |
 | `h_count_add`, `_revoke`, `_request`, `_approve`, `_reject` | verified | 40, 46, 49, 222, 115 s | 0.5-4.9 GB | ROB-4, TX-0 |
 | `h_refine_add`, `_revoke`, `_request` | verified | 841, 1078, 1177 s | 6.6, 6.7, 8.7 GB | ST-3, ST-2 |
 | `h_refine_approve_tx`, `_post` | verified | 588, 1398 s | 9.0, 11.2 GB | ST-3, ST-2 |
