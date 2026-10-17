@@ -10,6 +10,8 @@ in trust-framework, and IronClaw's safety modules.
 | near-approval | [trust-framework](https://github.com/difflabai/trust-framework) `contracts/approval` (NEAR action-approval contract) | [strategy](projects/near-approval/strategy.md) | [status](projects/near-approval/status.toml) (core: Kani, TLA+, Lean, Prolog done; shell, sandbox, deployment next) |
 | ironclaw | [nearai/ironclaw](https://github.com/nearai/ironclaw) safety modules | [strategy](projects/ironclaw/strategy.md) | [status](projects/ironclaw/status.toml) (Verus proofs scaffolded) |
 
+[`strategy/`](strategy/README.md) is not a verification target: it analyzes a codebase's behavior (determinism, effects, trust boundaries) and derives which of the layers below a project needs.
+
 How the layers fit together, and when to use Kani or Verus:
 [`docs/architecture.md`](docs/architecture.md).
 
