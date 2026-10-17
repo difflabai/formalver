@@ -1,4 +1,4 @@
-# near-approval: M1 results (Kani on the real core)
+# near-approval: M1 and M2 results (Kani on the real core)
 
 Pin: trust-framework `3426c9246cee98dbfaa3ff7980bd85ff839d60d6` (PR #15),
 `core/src/lib.rs` sha256 `f5d72cc7…0d0c`. Previous pin `5736251`; the
@@ -171,6 +171,154 @@ A GitHub runner has 16 GB, so the plan as written would not run in CI either.
     one harness `h_step_add` peaked at 13.6 GB and `h_step_approve` was
     killed in CI; each part fits a 7.9 GB runner. A part's covers count
     for the family (`run-kani.sh`, `check-covers.sh`).
+
+## M2: ghost-store harnesses
+
+`src/ghost.rs` holds the ghost stores, `src/ghost_checks.rs` the harness
+bodies (strategy.md section 6.1, 6.2). `ghost.rs` carries the contract pin
+and `contract/src/lib.rs`'s sha256 in its header; `plain::sparse_header_hash`
+fails when the contract file, that header and `status.toml [source_hashes]`
+disagree (it skips when the contract is absent, as in the mutant tree).
+
+* **`Sparse`**: the contract's `Store` impl transliterated line by line
+  over fixed association lists (`Assoc`, 4 slots), counters separate from
+  the stored sizes as in the contract (`+= 1`, so an overflow panics), and
+  every mutator call recorded (`Rec`).
+* **`Window<APPROVED>`**: a log of any `u64` length starting at any
+  offset; reads outside `from..e`, out of order, a slot without its request,
+  and every write panic.
+* **`Counting<T>`**: counts reads and writes through to `T`.
+
+Local runs, one harness at a time, Kani 0.68.0, 15 GB container shared with
+other jobs (peak = largest CBMC resident set seen; another job's CBMC may
+inflate it).
+
+<!-- M2-KANI-TABLE -->
+| Harness | Local result | Time | Peak | Properties |
+|---|---|---:|---:|---|
+| `h_page_arith` | verified | 24 s | 0.3 GB | RD-3, RD-6, ROB-4 (`Window<true>`, `limit ≤ 2`) |
+| `h_page_arith_empty` | verified | 206 s | 2.3 GB | RD-3, RD-6, ROB-4 (`Window<false>`, any limit); family covers 3/3 |
+| `h_action_len` | verified, 3/3 covers | 34 s | 0.7 GB | ROB-3, TR-5 |
+| `h_proto_add` | verified, 4/4 covers | 84 s | 1.4 GB | ST-2 |
+| `h_proto_revoke` | verified, 4/4 covers | 92 s | 1.5 GB | ST-2 (F-6 absent key) |
+| `h_proto_request` | verified, 2/2 covers | 119 s | 2.0 GB | ST-2, ROB-2, TR-5 (request `LogFull`) |
+| `h_proto_request_empty` | verified | 89 s | 1.9 GB | `""` instance |
+| `h_proto_approve` | verified, 2/2 covers | 456 s | 5.6 GB | ST-2, ROB-2, TR-5 (approve `LogFull`) |
+| `h_proto_reject` | verified, 1/1 cover | 202 s | 2.6 GB | ST-2 |
+| `h_count_add`, `_revoke`, `_request`, `_approve`, `_reject` | verified | 40, 46, 49, 222, 115 s | 0.5-4.9 GB | ROB-4, TX-0 |
+| `h_refine_add`, `_revoke`, `_request` | verified | 841, 1078, 1177 s | 6.6, 6.7, 8.7 GB | ST-3, ST-2 |
+| `h_refine_approve_tx`, `_post` | verified | 588, 1398 s | 9.0, 11.2 GB | ST-3, ST-2 |
+| `h_refine_reject_tx`, `_post` | verified | 278, 1076 s | 4.2, 8.4 GB | ST-3, ST-2 |
+| `h_store_laws_arr` | verified, 2/2 covers | 699 s | 4.5 GB | ST-1, INV-0 |
+| `h_store_laws_sparse_reg`, `h_store_laws_sparse` | verified, 2/2 covers | 663, 765 s | 7.8, 8.6 GB | ST-1 |
+| `h_store_laws_mem_law_insert`, `_remove` | verified, 1/1 cover each | 174, 404 s | 2.2, 7.4 GB | ST-1, INV-0 (`MEM_SHAPE_REG`) |
+| `h_store_laws_mem_law_push_request`, `_replace_request`, `_push_approval`, `_count`, `_revocation` | verified | 227, 267, 210, 205, 294 s | 2.5, 3.3, 2.4, 2.4, 3.0 GB | ST-1, INV-0 (`MEM_SHAPE_SEQ`) |
+
+`h_refine_add/_revoke/_request` ran before `refine` took its `part`
+argument; they pass both bits, so their assertions are unchanged. The
+`MemStore` law harnesses pass in plain mode, and mutant 43 is killed there;
+the `MemStore` harnesses run one law each through `mem_law` (see
+deviation 6).
+<!-- /M2-KANI-TABLE -->
+
+### Deviations from section 6.2, and why
+
+1. **`Assoc` loops over its 4 concrete slots**, never a symbolic index:
+   with a symbolic index, `h_proto_approve` and `h_proto_reject` ran out of
+   memory at 13 GB; over concrete slots approve takes 456 s at 5.6 GB.
+2. **`h_page_arith` is two harnesses.** One `Window` instance per harness:
+   `h_page_arith` approves every request with `limit ≤ PAGE_SMALL` (2) and
+   any `from`, and checks page length and every entry;
+   `h_page_arith_empty` drops every request (fallback 6), any `limit`, and
+   `from` drawn from the 10 `PAGE_FROMS` (0, 1, 2^32, 2^63 and every
+   distance to `u64::MAX` that changes the page). With `from` free the
+   100-slot instance timed out after 40 min in SAT (relating 100 unrolled
+   increments to `from + min(l, PG)`); the Window's per-read assertions
+   (slot `j` is the next one, `j < e`) bound the slots read by `e − f`, so
+   ROB-4 holds for it without asserting the count. Plain mode runs both
+   instances over any `from` and `limit` and also asserts the slot count of
+   empty pages. Every `count` and offset stays free.
+3. **`h_count_*` use a fixed `MemStore` shape** (`MEM_SHAPE`: 3
+   principals, 3 requests, 3 log entries, 3 revocations; contents free).
+   With a symbolic shape every `h_count_*` ran out of memory at 13.5 GB.
+4. **`h_refine_*` compare `ArrStore` and `Sparse` under Kani**; the
+   `MemStore` leg runs in plain mode only. `MemStore` is tied to the same
+   observations by ST-1 (`h_store_laws_mem*` prove every mutator's law on
+   it, from every well-formed state of the shape), and the core reaches the
+   store only through those mutators and reads, so the third leg adds no
+   behaviour Kani would check.
+5. **`h_action_len` asserts the error kind and the non-action fields**
+   (fallback 5); unwind 2051 so the chars-vs-bytes mutant fails on its
+   assertion. Comparing the full 2 KB actions took more than 11 min of
+   symex; this way 43 s.
+6. **The `MemStore` law harnesses run one law each, straight-line**
+   (`h_store_laws_mem_law_*`, through `ghost_checks::mem_law`), and
+   `h_store_laws_sparse` is split in two (`_reg`: insert and remove
+   principal; the base harness: the other five). All use a fixed shape:
+   the registry laws 3 principals and one request, log entry and
+   revocation (the frame), the others one principal and 3 of each other.
+   Through the shared `Law` enum (`check_law`) the `MemStore` harnesses ran
+   out of memory, two laws each, on the 64 GB CI runners as well as locally
+   (1.06 M program steps for one law): CBMC kept every arm of the dispatch
+   alive over the `Vec`-backed store. Straight-line, one law is 0.26 M steps
+   and 2 to 7 GB;
+   `h_store_laws_sparse` took 29 min at 9.6 GB, and with a symbolic shape
+   its halves still took 20 and 23 min at 9.7 GB. `h_store_laws_arr` keeps every shape
+   up to the `ArrStore` capacities, and the laws are per call, so a fixed
+   shape loses only sizes the `ArrStore` harness covers.
+7. **`h_refine_approve` and `h_refine_reject` run in two parts**: `_tx`
+   (both results, `== expect`, the ST-2 calls) and `_post` (start and end
+   observations agree). Same state and operation, disjoint assertions.
+   As one harness approve ran out of memory (1.7 M steps, 13.5 GB) and
+   reject took 25 min at 9.6 GB.
+8. **`h_refine_*` assume `refine_pre`** (INV-0, INV-1, INV-8, distinct
+   revocation ids, no live registration revoked): `ghost::expect` is
+   `spec::expected` plus both counter guards, which is only the core's
+   behaviour under INV-8 (F-14).
+
+### Loop bounds (U-1)
+
+`unwind-rules.tsv` gains rules for the ghost stores: `Obs` and `Rec` array
+comparisons, the `Obs::r` clone, `MemStore`'s `insert_principal` and
+`revocation` searches, and `approvals` per `Window` instance (`PAGE_SMALL +
+1` for `Window<true>`, `MAX_PAGE_SIZE + 1` for `Window<false>`, ahead of
+the generic `CAP_R + 1` rule). The unicode table search reached only from
+`Result::unwrap`'s panic message (Debug of a string) is bound at 1 with the
+other formatting code. With them `kani-loops.py` derives every loop:
+6,368 (harness, loop) pairs on the M2 tree, none underived. New flags, all
+dead or over-approximated, checked by hand:
+
+* `h_page_arith`: the two `approvals` loops of `Window<false>` ("needs 101
+  > unwind 5"); that instance runs only under `PAGE_EMPTY`, which
+  `h_page_arith` never sets.
+* `h_count_*`: `MemStore::insert_principal`'s search ("needs 6 > unwind
+  5"); the rule's bound is for `CAP_MEM` (5) principals, `MEM_SHAPE` holds 3.
+
+### Plain mode
+
+`cargo test --release`: 29 tests, 3 s of test time. M2 adds
+`h_page_arith`, the five `h_proto_*`, `h_count`, `h_refine`,
+`h_store_laws` (mem, sparse, arr), `h_action_len`, `client_enum` (RD-4:
+logs of up to 250 entries mixed with rejections and pending requests, `l ∈
+{1, 2, 99, 100, 101, 200}`, both stop rules, the log optionally growing
+between pages: every approval exactly once, in order),
+`sparse_header_hash` and `sha256_known_answer`. Every cover each body
+evaluates fires.
+
+### Mutants
+
+<!-- M2-MUTANTS -->
+Seven new mutants (37-43), each with its `# killed-by:` harness:
+action length off by one and counted in chars (`h_action_len`), the page
+clamp removed and the page addition wrapping (`h_page_arith`), request's
+and approve's `LogFull` guard dropped (`h_proto_request`,
+`h_proto_approve`), `MemStore::insert_principal` appending a duplicate
+key (`h_store_laws_mem_law_insert`). `run-mutants.sh near-approval` (plain mode, all
+43): 41 killed, the 2 equivalent ones (25, 26) survive. The survival check
+now also skips `h_proto*` and `facts`: both see raw (non-INV-8) states, and
+`facts::facts` already killed 25 and 26 on `7200b99` before M2. Not yet
+run under Kani (`--kani`); CI's mutants matrix needs entries 37-43.
+<!-- /M2-MUTANTS -->
 
 ## Status in `status.toml`
 

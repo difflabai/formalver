@@ -25,8 +25,8 @@ Two projects use different subsets:
 
 The contract splits into a dependency-free core (`approval-core`, every
 authorization and state transition) and a thin near-sdk shell. All of the
-proof layers target the core; the shell and the runtime are covered by tests
-(planned: M3, M6, M7).
+proof layers target the core; the shell, the wasm and the runtime are covered
+by tests and checks (M3, M6, M7).
 
 ```text
             requirements (R1-R6, D1-D16)
@@ -46,7 +46,7 @@ proof layers target the core; the shell and the runtime are covered by tests
       │                                                     Inv, step and run
       ▼                                                     properties, every size
   near-sdk shell ─► wasm ─► deployed contract
-  (M3 tests)       (M6 sandbox)  (M7 deploy checks)
+  (M3 near-tests) (M6 sandbox)  (M7 deploy checks)
 ```
 
 ### What each layer contributes
@@ -57,7 +57,9 @@ proof layers target the core; the shell and the runtime are covered by tests
 | **Kani** on `approval-core` | For one call from any state satisfying `Inv`: the exact result, the exact post-state, the invariant, the history properties. Also panics, overflow and paging over any `u64`. | ≤ 3 principals, requests, log entries and revocations per state; loops unwound to bounds derived from those capacities (U-1) | `h_ref_*` (REF-1..4) prove the core refines the TLA+ model: same errors, same effects, rejected calls stutter. CUT-1 + `CUTOFF.md` argue the state bounds suffice for every size. |
 | **TLA+** | Every interleaving of every call by every party: `Inv`, step properties, liveness (`Live1` under approver fairness). Apalache shows `Inv` is inductive. | TLC: ≤ 3 requests, 2 keys, 3 accounts. Apalache: arrays ≤ 3 before the step | REF-5 replays real-core traces through TLC. MC-3 and MC-4 against Prolog and Lean. |
 | **Lean** | The TLA+ model's `Inv`, step properties and TR-1/2/3 for **every** state size, key type and `MaxPending`. Kernel-checked, three standard axioms only. | none | MC-4: Lean's graph equals TLC's. REF-5L: 2,000 real-core traces replay step for step. Guard order equals `tla_facts.pl`. |
-| **Shell, sandbox, deploy** (planned) | Store layout, events, exports, deposit handling; runtime assumptions (signer identity, relaying, atomicity, limits) on the reproducible wasm; deployment lock and verifier rules. | tests | ST-*, SH-*, RT-*, DEP-1, VER-* |
+| **Shell** (M3, `near-tests/`) | The real contract over near-sdk's mocked runtime refines `MemStore`: 10k × 50 random calls with a Borsh reload every step, equal results, panics, events, views and storage keys (ST-4, SH-2..7). Golden layout bytes (ST-6), storage and log-size bounds (RES-1/2). | tests | `wasm-surface.sh` pins the wasm's exports and imports (SH-11/12) and regenerates `api_facts.pl` for C-6. 12 shell mutants must fail the suite. |
+| **Sandbox** (M6, `sandbox/`) | The reproducible wasm (sha256 pinned in `status.toml`) on near-sandbox: signer identity, relays, own-account code, delegate actions, function-call key scope, atomicity of failed receipts, batches, account reset, forged events (RT-*); init, deposits, page size (SH-9/10, RES-3). | tests, recorded outcomes | RT-TRACE replays the checked-in Prolog and core traces on the wasm, step for step against the host core. Observed outcomes are copied into the `[assumptions]` they test. |
+| **Deploy and verify** (M7) | `check_deployment.sh <net>`: code hash, lock-at-deploy, owner, function-call-only registered keys, balance (DEP-1), code hash over time, no full-access keys since deploy (VER-2/3), per-proof key scope (VER-8). `verifier_rules.pl` states VER-1..8. | checks | Demonstrated on the sandbox chain with passing and failing deployments; no public-network deployment yet. |
 
 ### Reading the chain
 
@@ -80,7 +82,13 @@ says which kind of evidence it is:
 The remaining gaps are named assumptions in `status.toml` (`ASM-*`):
 the small-scope step for the code (`ASM-MODEL`), the Lean transcription
 (`ASM-LEAN-TLA`), the specs meaning what we intend (`ASM-SPEC`, which needs a
-human reviewer), and the NEAR runtime behaviour the shell relies on (M6).
+human reviewer), and the NEAR runtime behaviour the shell relies on (tested on
+near-sandbox by M6, with the observed outcomes recorded on each assumption).
+
+`tools/scripts/check-status.sh` (status-lint, in the `pin` job) keeps
+`status.toml` honest: every claimed property has its artifact or `PROP` tag,
+evidence matches the layer, and no Kani property reaches `verified*` without a
+named spec reviewer.
 
 ## Kani vs Verus
 

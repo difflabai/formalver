@@ -1,0 +1,8 @@
+{
+  "attributed_to": "agent account and its full-access key",
+  "event": "approval_requested",
+  "fc_key_scoped_to_C": "InvalidAccessKeyError::ReceiverMismatch",
+  "near_sandbox": "2.13.4 (near-sandbox 0.3.16 default)",
+  "outcome": "success",
+  "wasm_kind": "reproducible"
+}

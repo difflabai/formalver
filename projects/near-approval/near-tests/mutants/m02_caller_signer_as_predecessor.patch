@@ -1,0 +1,13 @@
+# SH-1: caller() reports the signer as the predecessor, so relayed calls pass
+# Shell mutant (strategy.md section 9): the near-tests suite must fail on it.
+--- a/contract/src/lib.rs
++++ b/contract/src/lib.rs
+@@ -462,7 +462,7 @@
+ 
+ fn caller() -> Caller<AccountId, PublicKey> {
+     Caller {
+-        predecessor: env::predecessor_account_id(),
++        predecessor: env::signer_account_id(),
+         signer: env::signer_account_id(),
+         signer_key: env::signer_account_pk(),
+     }

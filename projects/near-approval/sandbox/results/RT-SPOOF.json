@@ -1,0 +1,11 @@
+{
+  "near_sandbox": "2.13.4 (near-sandbox 0.3.16 default)",
+  "spoofer_receipt_status": "success",
+  "ver1": {
+    "copy_from_spoofer": "reject",
+    "failed_receipt_on_C": "reject",
+    "forged_from_spoofer": "reject",
+    "real_event_on_C": "accept"
+  },
+  "wasm_kind": "reproducible"
+}

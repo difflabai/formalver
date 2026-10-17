@@ -1,0 +1,15 @@
+# SH-1: now() swaps block height and timestamp
+# Shell mutant (strategy.md section 9): the near-tests suite must fail on it.
+--- a/contract/src/lib.rs
++++ b/contract/src/lib.rs
+@@ -470,8 +470,8 @@
+ 
+ fn now() -> BlockTime {
+     BlockTime {
+-        height: env::block_height(),
+-        timestamp_ns: env::block_timestamp(),
++        height: env::block_timestamp(),
++        timestamp_ns: env::block_height(),
+     }
+ }
+ 

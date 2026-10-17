@@ -1,0 +1,17 @@
+{
+  "files": {
+    "core-random.txt": {
+      "steps": 6000,
+      "traces": 200
+    },
+    "prolog.txt": {
+      "steps": 800,
+      "traces": 10
+    }
+  },
+  "near_sandbox": "2.13.4 (near-sandbox 0.3.16 default)",
+  "result": "every step equal",
+  "steps": 6800,
+  "traces": 210,
+  "wasm_kind": "reproducible"
+}

@@ -1,0 +1,13 @@
+# SH-1: revoke_key passes the signer, not the predecessor, as the owner candidate
+# Shell mutant (strategy.md section 9): the near-tests suite must fail on it.
+--- a/contract/src/lib.rs
++++ b/contract/src/lib.rs
+@@ -219,7 +219,7 @@
+     /// Pending requests made with the key become void permanently, even if
+     /// the key is registered again. Emits `key_revoked`.
+     pub fn revoke_key(&mut self, public_key: PublicKey) {
+-        let caller = env::predecessor_account_id();
++        let caller = env::signer_account_id();
+         let at = now();
+         let removed = ok(approval_core::revoke_key(self, &caller, &public_key, at));
+         ApprovalEvent::KeyRevoked(KeyRevokedView {

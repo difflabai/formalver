@@ -1,0 +1,44 @@
+# M6 (strategy.md sections 5.9 and 9): near-workspaces tests of the runtime
+# assumptions, run on the approval contract's wasm in a local near-sandbox.
+#
+# Standalone workspace: the root workspace excludes this directory. The
+# lockfile was seeded from source-mirror/contracts/approval/Cargo.lock, Cargo
+# added the missing entries once, and every build uses --locked (section 9).
+[workspace]
+members = [".", "res/relay", "res/selfacct", "res/spoofer"]
+resolver = "2"
+
+[package]
+name = "near-approval-sandbox"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Sandbox tests (RT-*, SH-9, SH-10, RES-1, RES-3, DEP-1 demo) for near-approval"
+
+[dependencies]
+
+[dev-dependencies]
+# Same version as upstream's sandbox crate, so the near-sandbox binary is the same.
+near-workspaces = { version = "0.23", default-features = false, features = ["install"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+# The host-side oracle for RT-TRACE: the real core, run over MemStore with the
+# block times the sandbox reports. No borsh: the same logic Kani checks.
+approval-core = { path = "../source-mirror/contracts/approval/core", default-features = false }
+sha2 = "0.10"
+bs58 = "0.5"
+futures = "0.3"
+# RT-METATX builds a NEP-366 delegate action by hand; same versions as
+# near-workspaces uses (see Cargo.lock).
+near-primitives = "=0.37.4"
+near-crypto = "=0.37.4"
+near-jsonrpc-client = "=0.22.0"
+
+# Helper contracts (res/) are built for wasm32 by scripts/build-res.sh.
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true

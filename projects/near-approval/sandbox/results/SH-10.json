@@ -1,0 +1,21 @@
+{
+  "add_agent": "Smart contract panicked: Method add_agent doesn't accept deposit",
+  "add_approver": "Smart contract panicked: Method add_approver doesn't accept deposit",
+  "approve": "Smart contract panicked: Method approve doesn't accept deposit",
+  "contract_source_metadata": "success",
+  "get_approval": "success",
+  "get_approval_count": "success",
+  "get_approvals": "success",
+  "get_owner": "success",
+  "get_principal": "success",
+  "get_rejection": "success",
+  "get_request": "success",
+  "get_request_count": "success",
+  "get_revocation": "success",
+  "near_sandbox": "2.13.4 (near-sandbox 0.3.16 default)",
+  "new": "Smart contract panicked: Method new doesn't accept deposit",
+  "reject": "Smart contract panicked: Method reject doesn't accept deposit",
+  "request_action": "Smart contract panicked: Method request_action doesn't accept deposit",
+  "revoke_key": "Smart contract panicked: Method revoke_key doesn't accept deposit",
+  "wasm_kind": "reproducible"
+}

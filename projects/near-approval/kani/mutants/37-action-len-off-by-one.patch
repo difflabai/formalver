@@ -1,0 +1,12 @@
+# killed-by: h_action_len
+--- a/core/src/lib.rs
++++ b/core/src/lib.rs
+@@ -442,7 +442,7 @@
+     if action.is_empty() {
+         return Err(ApprovalError::EmptyAction);
+     }
+-    if action.len() > MAX_ACTION_LEN {
++    if action.len() >= MAX_ACTION_LEN {
+         return Err(ApprovalError::ActionTooLong);
+     }
+     if principal.pending >= MAX_PENDING_PER_KEY {

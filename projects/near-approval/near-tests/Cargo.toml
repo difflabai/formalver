@@ -1,0 +1,24 @@
+[package]
+name = "near-approval-near-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "near-sdk unit and differential tests of approval-contract (strategy.md section 9, M3)"
+
+# Standalone: the root workspace excludes this directory (strategy.md section 11).
+# Needs crates.io. Lockfile rule (section 9): Cargo.lock was seeded from the
+# mirror's Cargo.lock; tests/lockfile.rs fails if a package present in both
+# differs in version or checksum. Build with --locked.
+[workspace]
+
+[dependencies]
+approval-core = { path = "../source-mirror/contracts/approval/core", features = ["borsh"] }
+approval-contract = { path = "../source-mirror/contracts/approval/contract" }
+near-sdk = { version = "5.29", features = ["unit-testing"] }
+
+[profile.dev]
+overflow-checks = true
+
+# store_diff runs 500k steps; optimise dependencies even in debug builds.
+[profile.dev.package."*"]
+opt-level = 2
