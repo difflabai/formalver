@@ -265,6 +265,7 @@ jobs:
           - "h_page_arith h_page_arith_empty h_action_len"
           - "h_proto_add h_proto_revoke h_proto_request h_proto_request_empty"
           - "h_proto_approve h_proto_reject"
+          - "h_oracle_approve h_oracle_reject"
           - "h_count_add h_count_revoke h_count_request h_count_approve h_count_reject"
           - "h_refine_add"
           - "h_refine_revoke"

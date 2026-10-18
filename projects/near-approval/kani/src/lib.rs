@@ -28,3 +28,6 @@ mod facts;
 
 #[cfg(all(test, not(kani)))]
 mod mc2;
+
+#[cfg(all(test, not(kani)))]
+mod link;

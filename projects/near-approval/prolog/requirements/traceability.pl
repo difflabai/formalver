@@ -42,8 +42,8 @@ trace_row('D9',  ['INV-2', 'INV-9', 'ROB-3', 'TR-6', 'RES-1', 'RES-2']).
 trace_row('D10', ['TX-5', 'TR-1']).
 % D11 amended (decision D17): "no upgrade, expiry or threshold".
 trace_row('D11', ['SH-11', 'SH-12', 'C-1', 'C-6']).
-trace_row('D12', ['TX-0', 'ROB-1', 'ROB-2', 'ROB-4', 'ST-1', 'ST-2', 'ST-3', 'ST-4', 'ST-5', 'ST-6', 'SH-2', 'SH-3', 'RD-6', 'LEM-3']).
-trace_row('D13', ['INV-10', 'TR-4']).
+trace_row('D12', ['TX-0', 'ROB-1', 'ROB-2', 'ROB-4', 'ST-1', 'ST-2', 'ST-3', 'ST-4', 'ST-5', 'ST-6', 'ST-7', 'ST-8', 'SH-2', 'SH-3', 'RD-6', 'LEM-3']).
+trace_row('D13', ['INV-10', 'TR-4', 'RT-TIME']).
 trace_row('D14', ['RT-CODEHASH', 'RT-RESET', 'RT-TRACE', 'DEP-1', 'VER-2', 'VER-3', 'VER-6']).
 trace_row('D15', ['TR-5', 'MC-1', 'MC-2', 'C-2', 'C-3', 'C-5', 'C-6', 'C-7', 'C-8', 'C-9', 'C-10']).
 trace_row('D16', ['VER-1', 'VER-4', 'VER-5', 'VER-7', 'VER-8']).
@@ -72,6 +72,8 @@ trace_row('D7',  ['LEAN-IND', 'LEAN-STEP', 'LEAN-TR']).
 trace_row('D8',  ['LEAN-IND', 'LEAN-STEP']).
 trace_row('D9',  ['LEAN-IND']).
 trace_row('D15', ['LEAN-GUARD', 'LEAN-WIT', 'REF-5L', 'MC-4']).
+% Strategy 18.6 (L2): the code steps like the model at every store size.
+trace_row('D12', ['LEAN-DELTA', 'LINK']).
 
 %%% IDs in this file that status.toml does not have yet (decision 'C-9-new-ids').
 status_pending_id(_) :- fail.
@@ -155,6 +157,7 @@ property('ROB-4', kani, "Bounded work: <= 4 Store reads and <= 3 writes per muta
 property('ST-1', kani, "Store laws for MemStore and Sparse (map/sequence semantics; removing an absent key is a no-op)").
 property('ST-2', kani, "Store protocol: exact mutator call sequence per op; makes contract-store differences from MemStore unreachable").
 property('ST-3', kani, "Sparse (transliteration of the contract Store impl) refines MemStore").
+property('ST-8', kani, "Store protocol at any store size (K-ORACLE): approve and reject on a Sparse with the footprint at any keys and positions, every field and counter free, return exactly expect() and make exactly the protocol() calls").
 % [modules.tla_model]
 property('TLA-SAFE', tla, "TLC: Inv (INV-3..9, INV-11..16, LEM-1/2, TR-1 provenance, RidLive, Approvable) in every reachable state and StepProperty (HIST-1/2/3/7/8/9/10, TR-2, TR-3) on every step, any interleaving of all calls by all parties").
 property('TLA-IND', tla, "Apalache: Init => Inv, and Inv /\\ Next => Inv' /\\ StepProps from any state with <= 3 requests, integers unbounded, MaxPending scaled to 2: Inv and the step properties hold at every depth").
@@ -174,12 +177,15 @@ property('LEAN-TR', lean, "Lean: over every run from a reachable state, decision
 property('LEAN-GUARD', lean, "Lean: each error operator returns the first failing guard of a list whose codes are TLA+'s GuardOrder; LogFull never returned").
 property('LEAN-WIT', lean, "Non-vacuity: approved, rejected, void, revived-still-void and pending-cap states reachable in the Lean machine").
 property('REF-5L', plain, "The real core's MC-2 traces replayed on the Lean machine: every result and post-store equal").
+property('LEAN-DELTA', lean, "Lean: on every concrete store of every size with ids at their positions and counters below u64::MAX, the transcribed expect/protocol step refines the model's step").
+property('LINK', lean, "Rust expect/protocol equal the Lean cstep on every footprint view of a bounded domain covering every observable identity pattern and counter boundary").
 property('MC-4', lean, "Graph equivalence: the Lean machine and TLC export the full labelled reachable graph of the MC_Graph universe; stores, rejected calls and edges are equal").
 property('REF-5', plain, "Trace validation: 60 x 80-call core traces equal tla.rs on every step, and TLC accepts each as a behaviour of ApprovalCore.tla (>= 5 revival attempts, >= 20 rejections and revocations)").
 % [modules.contract_store]
 property('ST-4', difftest, "Real ApprovalContract store refines MemStore over 10k x 50 random ops, persisted and reloaded every step").
 property('ST-5', unit, "Storage prefixes p/r/a/v pairwise distinct, prefix-free and distinct from STATE; after every random step the keys are exactly STATE and prefix ++ borsh(key) for the entries alpha lists").
 property('ST-6', unit, "Golden Borsh bytes for STATE and one entry of each map (ed25519 and secp256k1 principals; pending, approved, rejected requests; log; revocation); layout changes flagged storage-breaking").
+property('ST-7', unit, "Identity equality: == on near-sdk AccountId and PublicKey equals Borsh-byte equality, is reflexive and symmetric, and survives clone and a Borsh round trip (edge identities and 200k random pairs); the checked half of ASM-IDENT").
 % [modules.contract_shell]
 property('SH-1', unit, "Env mapping (caller, now); add_agent/add_approver pass the right role; owner methods pass the predecessor").
 property('SH-2', difftest, "Exactly one core transition per change call and no other writes").
@@ -206,6 +212,7 @@ property('RT-REVERT', sandbox, "Forced failures (LackBalanceForState, gas-starve
 property('RT-BATCH', sandbox, "Batched [request_action(a), request_action('')] signed by a full-access registered agent key fails at action 1 and leaves counters unchanged; record whether the first event appears").
 property('RT-RESET', sandbox, "Delete + recreate C resets counters; VER-3 detects it (VER-6 only heuristically)").
 property('RT-SPOOF', sandbox, "Forged EVENT_JSON from a spoofer contract rejected by the VER-1 executor_id rule").
+property('RT-TIME', sandbox, "Stored request/approval/rejection times equal the block their receipt ran in; heights strictly increase and timestamps never decrease across receipts on C").
 property('RT-CODEHASH', sandbox, "Wasm under test is the reproducible build; record sha256 (hex) and NEAR code_hash (base58)").
 property('RT-TRACE', sandbox, "Prolog traces + 200 random sequences replayed on the reproducible wasm equal spec.rs: results, exact messages, logs, views").
 % [modules.deployment]

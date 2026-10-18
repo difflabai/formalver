@@ -13,13 +13,14 @@ with `tools/scripts/run-lean.sh near-approval`.
 | LEAN-TR | `reach_run`, `tr1_provenance`, `tr2_decision_final`, `tr3_void_terminal`, `hist1_run`, `hist3_run`, `hist10_run` | proved, runs of any length |
 | LEAN-GUARD | `err_eq_firstFail`, `guards_order`, `err_mem_guardOrder`, `err_ne_logFull` | proved |
 | LEAN-WIT | `witness_approved`, `witness_rejected`, `witness_void`, `witness_revival`, `witness_cap`, `witness_cap_refused` | proved by evaluation |
+| LEAN-DELTA | `delta_add`, `delta_revoke`, `delta_request`, `delta_approve`, `delta_reject`, `delta_refines` (2026-10-17) | proved, concrete stores of every size |
 
 No invariant needed strengthening: `Inv` exactly as `ApprovalProps.tla`
 states it is inductive at every size, which TLA-IND had shown only from
 states with at most 3 requests. The step properties follow from the guards
 alone; `stepProps_next` does not use `Inv`.
 
-Axiom audit: all 24 theorems in `Audit.lean` depend only on `propext`,
+Axiom audit: all 25 theorems in `Audit.lean` depend only on `propext`,
 `Classical.choice` and `Quot.sound`. Both canaries fail to compile.
 
 Size: 3,478 lines (machine and properties 549, lemmas 315, proofs 2,097,
@@ -31,6 +32,7 @@ guard order and witnesses 260, tools 257). Clean build: 14 s.
 |---|---|
 | LEAN-GUARD vs `tla_facts.pl` (C-2t) | equal for all five entry points |
 | REF-5L | 2,000 core traces × 120 calls = 240,000 steps, every result and post-store equal (5 s with trace generation) |
+| LINK (2026-10-17) | 736,500 footprint views (add 504, revoke 84, request 912, approve 490,000, reject 245,000; 164 Ok): Lean `cstep` = Rust `expect`/`protocol` on every one, and the real core on each view agrees with both. About 2 s to generate, 7 s to check |
 | MC-4 | TLC and Lean: 21,670 stores, 6,298,932 rejected calls, 41,706 edges, all equal. TLC about 40 s for both runs, Lean export 0.9 s, `mc3.py` 150 s |
 
 With MC-3 (2026-10-11), the Prolog, TLC and Lean graphs of the MC_Graph
@@ -38,6 +40,10 @@ universe are one graph. MC-4 gives the same counts with TLC 1.7.4, the
 version now pinned.
 
 ## Spec mutants
+
+Since LEAN-DELTA (2026-10-17), every one of the 15 mutants below also breaks
+`Delta.lean`: the model is now pinned from the code side as well as by the
+invariant and step-property proofs.
 
 The 15 `tla/mutants` ported to `Machine.lean`. Each is killed by a proof
 (the files that failed to build):

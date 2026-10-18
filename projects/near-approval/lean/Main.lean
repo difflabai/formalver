@@ -11,10 +11,15 @@ approval-lean: runs the Lean machine against the other layers.
       tools/scripts/mc3.py to compare with TLC's.
   approval-lean guards
       LEAN-GUARD: `guardOrder` in prolog/extracted/tla_facts.pl's format.
+  approval-lean link <cases.txt> [max_pending]
+      LINK: for each footprint view and call (kani/src/link.rs), the Lean
+      `cstep` (Delta.lean) must give the Rust `expect`'s error and
+      `protocol`'s calls. max_pending defaults to the core's 16.
 -/
 import ApprovalLean.Machine
 import ApprovalLean.Guard
 import ApprovalLean.Text
+import ApprovalLean.DeltaText
 import Std.Data.HashSet
 
 open Approval Approval.Text
@@ -149,6 +154,39 @@ def guardsCmd : IO UInt32 := do
     IO.println s!"tla_guard_order({opName k}, [{", ".intercalate errs}])."
   return 0
 
+/-! ## link -/
+
+def link (path : String) (maxPending : Nat) : IO UInt32 := do
+  let cfg : Cfg String := { owner := "o", maxPending }
+  let h ← IO.FS.Handle.mk path .read
+  let mut n := 0
+  let mut lineno := 0
+  let mut oks := 0
+  repeat
+    let ln ← h.getLine
+    if ln.isEmpty then break
+    lineno := lineno + 1
+    let ln := if ln.endsWith "\n" then (ln.dropEnd 1).toString else ln
+    match ln.splitOn "\t" with
+    | [v, c, res, calls] =>
+      let some view := DeltaText.parseView v
+        | IO.eprintln s!"LINK line {lineno}: cannot parse view {v}"; return 1
+      let some op := parseCall c
+        | IO.eprintln s!"LINK line {lineno}: cannot parse call {c}"; return 1
+      let (e, cs) := cstep cfg view op
+      let got := ";".intercalate (cs.map DeltaText.callText)
+      if errName e != res || got != calls then
+        IO.eprintln s!"LINK line {lineno}: {v} {c}\n  rust: {res} {calls}\n  lean: {errName e} {got}"
+        return 1
+      n := n + 1
+      if e = .ok then oks := oks + 1
+    | _ => IO.eprintln s!"LINK line {lineno}: expected 4 tab-separated fields"; return 1
+  if n == 0 then
+    IO.eprintln s!"LINK: no cases in {path}"
+    return 1
+  IO.println s!"LINK: {n} views, {oks} Ok, Lean cstep = Rust expect/protocol on all"
+  return 0
+
 def main (args : List String) : IO UInt32 := do
   match args with
   | ["replay", path] => replay path 16
@@ -158,6 +196,11 @@ def main (args : List String) : IO UInt32 := do
     | none => IO.eprintln "max_pending must be a number"; return 2
   | ["graph", path] => graph path
   | ["guards"] => guardsCmd
+  | ["link", path] => link path 16
+  | ["link", path, mp] =>
+    match mp.toNat? with
+    | some n => link path n
+    | none => IO.eprintln "max_pending must be a number"; return 2
   | _ =>
-    IO.eprintln "usage: approval-lean replay <traces.txt> [max_pending] | graph <out.txt> | guards"
+    IO.eprintln "usage: approval-lean replay <traces.txt> [max_pending] | graph <out.txt> | guards | link <cases.txt> [max_pending]"
     return 2

@@ -143,6 +143,8 @@ fn h_proto() {
     run("h_proto_request", 0x9B05_688C, 40_000, g2::proto_request);
     run("h_proto_approve", 0x1F83_D9AB, 80_000, g2::proto_approve);
     run("h_proto_reject", 0x5BE0_CD19, 40_000, g2::proto_reject);
+    run("h_oracle_approve", 0x0AC1_E001, 40_000, g2::oracle_approve);
+    run("h_oracle_reject", 0x0AC1_E002, 40_000, g2::oracle_reject);
 }
 
 #[test]

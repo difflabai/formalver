@@ -1,6 +1,6 @@
 //! M6 runtime assumption tests (strategy.md section 5.9): RT-KEY, RT-RELAY,
-//! RT-SELFACCT, RT-METATX, RT-FCKEY, RT-REVERT, RT-BATCH, RT-SPOOF and
-//! RT-CODEHASH, on the approval wasm in a local near-sandbox.
+//! RT-SELFACCT, RT-METATX, RT-FCKEY, RT-REVERT, RT-BATCH, RT-SPOOF, RT-TIME
+//! and RT-CODEHASH, on the approval wasm in a local near-sandbox.
 //! (RT-RESET is in `deploy.rs`, next to the VER-3 check that detects it;
 //! RT-TRACE is in `trace.rs`.)
 //!
@@ -581,3 +581,64 @@ async fn rt_spoof() {
     );
 }
 
+
+// PROP: RT-TIME
+#[tokio::test]
+async fn rt_time() {
+    // ASM-TIME: the (height, timestamp) C sees never decreases across its
+    // receipts. Requests, approvals and rejections interleaved with 0..4 skipped blocks;
+    // every stored time equals the block its receipt ran in, and the times
+    // read back in execution order never decrease (height strictly, as each
+    // transaction here waits for the previous one to finish).
+    let s = setup(false, KeyType::ED25519).await;
+    let c = s.contract.id().clone();
+    let mut seen: Vec<(u64, u64)> = Vec::new();
+    let mut skips = 0;
+    for i in 0..40u64 {
+        let skip = i % 5;
+        if skip > 0 {
+            s.worker.fast_forward(skip).await.unwrap();
+            skips += skip;
+        }
+        let r = ok(s.request(&format!("t{i}")).await);
+        let at = block_time(&s.worker, receipts_on(&r, &c)[0]).await;
+        let id: u64 = r.json().unwrap();
+        let req = s.view("get_request", json!({ "request_id": id })).await;
+        let stored = (
+            req["requested_at_block"].as_u64().unwrap(),
+            req["requested_at_ns"].as_str().unwrap().parse::<u64>().unwrap(),
+        );
+        assert_eq!(stored, at, "request {id}: stored time vs its receipt's block");
+        seen.push(stored);
+        // Decide every request (the agent key holds at most 16 pending):
+        // approve the even ones, reject the odd ones.
+        let (d, method, field) = if i % 2 == 0 {
+            (ok(s.approve(id, &format!("t{i}")).await), "get_approval", "approved_at")
+        } else {
+            let r = s.approver.call(&c, "reject").args_json(json!({ "request_id": id })).max_gas().transact().await;
+            (ok(r), "get_rejection", "rejected_at")
+        };
+        let at = block_time(&s.worker, receipts_on(&d, &c)[0]).await;
+        let v = s.view(method, json!({ "request_id": id })).await;
+        let stored = (
+            v[format!("{field}_block")].as_u64().unwrap(),
+            v[format!("{field}_ns")].as_str().unwrap().parse::<u64>().unwrap(),
+        );
+        assert_eq!(stored, at, "{method} {id}: stored time vs its receipt's block");
+        seen.push(stored);
+    }
+    for w in seen.windows(2) {
+        assert!(w[0].0 < w[1].0, "height went from {} to {}", w[0].0, w[1].0);
+        assert!(w[0].1 <= w[1].1, "timestamp went from {} to {}", w[0].1, w[1].1);
+    }
+    record(
+        "RT-TIME",
+        json!({
+            "receipts_on_C": seen.len(),
+            "skipped_blocks": skips,
+            "stored_time_is_receipt_block": true,
+            "height_strictly_increasing": true,
+            "timestamp_non_decreasing": true,
+        }),
+    );
+}
