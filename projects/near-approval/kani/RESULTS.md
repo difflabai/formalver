@@ -311,7 +311,7 @@ evaluates fires.
 
 <!-- M2-MUTANTS -->
 Seven new mutants (37-43), each with its `# killed-by:` harness:
-action length off by one and counted in chars (`h_action_len`), the page
+action length off by one and counted in chars (`h_action_len`; 38 by `h_action_len_multi`), the page
 clamp removed and the page addition wrapping (`h_page_arith`), request's
 and approve's `LogFull` guard dropped (`h_proto_request`,
 `h_proto_approve`), `MemStore::insert_principal` appending a duplicate

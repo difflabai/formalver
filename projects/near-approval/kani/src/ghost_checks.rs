@@ -903,65 +903,80 @@ pub const LEN_CASES: [(&str, Option<E>); N_CASES] = [
 /// and `h_step_request` checks exact content on the 2-byte alphabet.
 // PROP: ROB-3 TR-5 TX-4
 pub fn action_len(src: &mut impl Src) {
-    let mut seen = [false; 3];
-    let mut i = 0;
-    while i < N_CASES {
-        let (action, want) = LEN_CASES[i];
-        let mut s = ArrStore::new(OWNER);
-        let acct = Acct(1 + src.below(NA - 1));
-        let key = src.key();
-        let pending = src.below(MAX_PENDING_PER_KEY as u8) as u32;
-        s.push_principal_entry(
-            key.clone(),
-            Principal {
-                account_id: acct.clone(),
-                role: Role::Agent,
-                registration_id: src.u64(),
-                active_from: src.u64(),
-                pending,
-            },
-        );
-        let op = Op::Req {
-            c: Caller {
-                predecessor: acct.clone(),
-                signer: acct.clone(),
-                signer_key: key.clone(),
-            },
-            action: action.to_string(),
-            t: gen::time(src),
-        };
-        let out = apply(&mut s, &op);
-        assert!(out.err() == want, "ROB-3 length boundary in bytes");
-        match &out {
-            Out::Req(Ok(r)) => {
-                assert!(
-                    r.id == 0
-                        && r.agent_account_id == acct
-                        && r.agent_key == key
-                        && r.action.len() == action.len()
-                        && r.approval.is_none()
-                        && r.rejection.is_none(),
-                    "TX-4 the request records the action"
-                );
-                assert!(
-                    s.nr() == 1 && s.req(0).action.len() == action.len(),
-                    "TX-4 the request is stored"
-                );
-                assert!(s.prin(0).1.pending == pending + 1, "TX-4 pending + 1");
-            }
-            _ => assert!(
-                s.nr() == 0 && s.prin(0).1.pending == pending,
-                "TX-0 atomic failure"
-            ),
-        }
-        seen[0] |= out.is_ok();
-        seen[1] |= out.err() == Some(E::EmptyAction);
-        seen[2] |= out.err() == Some(E::ActionTooLong);
-        i += 1;
-    }
+    let seen = action_len_cases(src, 0, N_CASES);
     cover!(seen[0], "action_len: Ok");
     cover!(seen[1], "action_len: EmptyAction");
     cover!(seen[2], "action_len: ActionTooLong");
+}
+
+/// [`action_len`] on `LEN_CASES[from..to]` only; returns which results were
+/// seen (Ok, EmptyAction, ActionTooLong). `h_action_len_multi` runs the last
+/// case alone, the harness mutant 38 (characters counted) is killed by.
+pub fn action_len_cases(src: &mut impl Src, from: usize, to: usize) -> [bool; 3] {
+    let mut seen = [false; 3];
+    let mut i = 0;
+    // Header over N_CASES, not `to`, so kani-loops.py can bound it (U-1).
+    while i < N_CASES {
+        if from <= i && i < to {
+            action_len_case(src, i, &mut seen);
+        }
+        i += 1;
+    }
+    seen
+}
+
+fn action_len_case(src: &mut impl Src, i: usize, seen: &mut [bool; 3]) {
+    let (action, want) = LEN_CASES[i];
+    let mut s = ArrStore::new(OWNER);
+    let acct = Acct(1 + src.below(NA - 1));
+    let key = src.key();
+    let pending = src.below(MAX_PENDING_PER_KEY as u8) as u32;
+    s.push_principal_entry(
+        key.clone(),
+        Principal {
+            account_id: acct.clone(),
+            role: Role::Agent,
+            registration_id: src.u64(),
+            active_from: src.u64(),
+            pending,
+        },
+    );
+    let op = Op::Req {
+        c: Caller {
+            predecessor: acct.clone(),
+            signer: acct.clone(),
+            signer_key: key.clone(),
+        },
+        action: action.to_string(),
+        t: gen::time(src),
+    };
+    let out = apply(&mut s, &op);
+    assert!(out.err() == want, "ROB-3 length boundary in bytes");
+    match &out {
+        Out::Req(Ok(r)) => {
+            assert!(
+                r.id == 0
+                    && r.agent_account_id == acct
+                    && r.agent_key == key
+                    && r.action.len() == action.len()
+                    && r.approval.is_none()
+                    && r.rejection.is_none(),
+                "TX-4 the request records the action"
+            );
+            assert!(
+                s.nr() == 1 && s.req(0).action.len() == action.len(),
+                "TX-4 the request is stored"
+            );
+            assert!(s.prin(0).1.pending == pending + 1, "TX-4 pending + 1");
+        }
+        _ => assert!(
+            s.nr() == 0 && s.prin(0).1.pending == pending,
+            "TX-0 atomic failure"
+        ),
+    }
+    seen[0] |= out.is_ok();
+    seen[1] |= out.err() == Some(E::EmptyAction);
+    seen[2] |= out.err() == Some(E::ActionTooLong);
 }
 
 // ---------------------------------------------------------------------------

@@ -262,7 +262,7 @@ jobs:
           - "h_cut_approve h_cut_reject"
           # M2 ghost stores (strategy.md section 6): store laws, protocol,
           # counting and refinement over Sparse, Window and Counting.
-          - "h_page_arith h_page_arith_empty h_action_len"
+          - "h_page_arith h_page_arith_empty h_action_len h_action_len_multi"
           - "h_proto_add h_proto_revoke h_proto_request h_proto_request_empty"
           - "h_proto_approve h_proto_reject"
           - "h_oracle_approve h_oracle_reject"

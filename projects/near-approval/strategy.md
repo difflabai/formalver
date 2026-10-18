@@ -655,7 +655,7 @@ seeded against the upstream suite during planning (27/27 killed).
 | `h_step_*` (M1) | self-approval check; relay check; key-account binding; double log push; drop-empty; `trim`-empty; `active_from` dropped / strict / +1 / 0; no increment; no decrement; no principal write-back; action-mismatch dropped; already-approved dropped; three guard swaps; void reported as pending (`h_read`); revoke not owner-only; `approval_index` from request count; proof copies agent as approver; `push_approval` before the checks |
 | `h_step_*`, `h_read` (M1, PR #15 API) | reject: self-approval check dropped, no decrement, rejection records the agent's registration; already-rejected dropped; revocation not recorded; registration count not incremented; request records registration 0; `proof_revocations` swapped (`h_read`); rejected reported as pending (`h_read`) |
 | `h_raw_*` (M1) | cap off-by-one (`>=` changed to `>`) (`h_raw_request`); add's `LogFull` dropped (`h_raw_add`: the counter overflows) |
-| `h_action_len` (M2) | length off-by-one (37); chars-vs-bytes (38) |
+| `h_action_len` (M2) | length off-by-one (37); chars-vs-bytes (38, `h_action_len_multi`: the 2050-byte case alone; the mutant counts lead bytes in a plain loop, since std's `chars().count()` runs CBMC out of memory) |
 | `h_page_arith` (M2) | page clamp (`.min(approval_count)`) removed (39); page addition wraps (40) |
 | `h_proto_*` (M2) | `LogFull` request dropped (41, `h_proto_request`); `LogFull` approve dropped (42, `h_proto_approve`) |
 | `h_store_laws_mem_law_insert` (M2) | `MemStore` insert pushes duplicates (43) |

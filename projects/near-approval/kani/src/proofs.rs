@@ -516,3 +516,12 @@ fn h_store_laws_arr() {
 fn h_action_len() {
     g2::action_len(&mut Sym(None, checks::PART_ALL, false));
 }
+
+/// ROB-3 on the multi-byte case alone (2050 bytes, 1025 characters): the
+/// harness mutant 38 (characters counted instead of bytes) is killed by.
+/// Same unwind as [`h_action_len`], a third of its strings.
+#[kani::proof]
+#[kani::unwind(2051)]
+fn h_action_len_multi() {
+    g2::action_len_cases(&mut Sym(None, checks::PART_ALL, false), g2::N_CASES - 1, g2::N_CASES);
+}

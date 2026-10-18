@@ -72,12 +72,13 @@ for p in "$proj"/kani/mutants/$glob.patch; do
     printf '%-42s %s\n' "$name" "PATCH-FAILED"; fail=1; continue
   fi
   # Must-survive mutants are equivalent only under Inv (F-14): raw harnesses
-  # (h_raw_*, h_proto_* on raw Sparse states, and facts, which judges guards
-  # on raw states half the time) see non-Inv states and rightly tell them
+  # (h_raw_*, h_proto_* on raw Sparse states, facts, which judges guards on
+  # raw states half the time, and link::link_cases, whose footprint views are
+  # arbitrary rather than reachable) see non-Inv states and rightly tell them
   # apart, so they are excluded.
   plain_filter=""
   if grep -q "^# must-survive" "$p"; then expect=survive; harnesses="h_step_approve_tx h_step_approve_post h_step_approve_hist h_step_approve_inv h_step_approve_reg h_read"
-    plain_filter="--skip h_raw_ --skip h_proto --skip facts"
+    plain_filter="--skip h_raw_ --skip h_proto --skip facts --skip link_cases"
   else expect=killed; harnesses=$(sed -n 's/^# killed-by: //p' "$p"); fi
 
   # A verdict needs evidence: "killed" only when a test or Kani property
