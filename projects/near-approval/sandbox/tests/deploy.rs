@@ -25,6 +25,7 @@ use near_workspaces::types::{AccessKey, KeyType, NearToken};
 use near_workspaces::{Account, AccountId, Worker};
 use serde_json::{json, Value};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct Deployed {
     id: AccountId,
@@ -95,7 +96,12 @@ impl Report {
 
 fn check(worker: &Worker<Sandbox>, d: &Deployed, overrides: &[(&str, String)]) -> Report {
     let code = wasm();
-    let dir = std::env::temp_dir().join(format!("m7-check-{}-{}", std::process::id(), d.id));
+    // One directory per call: the tests in this file run on parallel threads
+    // of one process and deploy under the same account name, so a directory
+    // keyed by pid and account alone let one test read the other's out.json.
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
+    let n = CALLS.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("m7-check-{}-{}-{n}", std::process::id(), d.id));
     std::fs::create_dir_all(&dir).unwrap();
     let (facts, out_json) = (dir.join("facts.pl"), dir.join("out.json"));
     let script = sandbox_dir().join("../deploy-checks/check_deployment.sh");
