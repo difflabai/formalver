@@ -1,4 +1,7 @@
-# killed-by: h_action_len
+# killed-by: h_action_len_multi
+# Counts characters (UTF-8 lead bytes) instead of bytes. Written as a plain
+# byte loop: `action.chars().count()` is the same function but std's SWAR
+# char_count runs CBMC out of memory on the 2050-byte case.
 --- a/core/src/lib.rs
 +++ b/core/src/lib.rs
 @@ -442,7 +442,7 @@
@@ -6,7 +9,7 @@
          return Err(ApprovalError::EmptyAction);
      }
 -    if action.len() > MAX_ACTION_LEN {
-+    if action.chars().count() > MAX_ACTION_LEN {
++    if { let b = action.as_bytes(); let mut n = 0; let mut i = 0; while i < b.len() { if b[i] & 0xC0 != 0x80 { n += 1; } i += 1; } n } > MAX_ACTION_LEN {
          return Err(ApprovalError::ActionTooLong);
      }
      if principal.pending >= MAX_PENDING_PER_KEY {
