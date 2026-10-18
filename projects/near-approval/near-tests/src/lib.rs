@@ -2,8 +2,8 @@
 //!
 //! Upstream: difflabai/trust-framework `contracts/approval/contract/src/lib.rs`
 //!           and `contracts/approval/core/src/lib.rs`
-//! Pin:      8635ca7b8b1d64bb226eb0b3b3a35779fcbf461b (contract code = PR #15 head 3426c92)
-//! sha256:   contract/src/lib.rs 7033fc7acf27d8c678c0f28167ed8cd01ad0c851382d83a661d8f96b83357900
+//! Pin:      081a3a645801f2a68f2c5d3d9b707dfbc8a2993c (trust-framework PR #19: ML-DSA-65 keys refused)
+//! sha256:   contract/src/lib.rs be9d35ba7a0cca151acf79882872eba18c6cf9078651fae94c35b55b389d0272
 //!           core/src/lib.rs     f5d72cc7bedd0866dfb7891246999315338410f06be00210e3ffd21452ea0d0c
 //! Covers:   every `#[near]` method of `ApprovalContract`, its `Store` impl, `caller()`,
 //!           `now()`, `ok()`, the views and event payloads, run under near-sdk's
