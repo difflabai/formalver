@@ -1,6 +1,7 @@
 //! M6 shell properties that only the real runtime shows (strategy.md 5.7,
 //! 5.8): SH-9 (init), SH-10 (deposits on all 16 exports at the pin), RES-1
-//! (measured storage deltas) and RES-3 (a full page of maximum-size proofs).
+//! (measured storage deltas), RES-3 (a full page of maximum-size proofs) and
+//! SH-13 (ML-DSA-65 keys refused, F-17).
 
 mod common;
 
@@ -275,4 +276,30 @@ async fn res3_full_page_of_max_proofs() {
             },
         }),
     );
+}
+
+// PROP: SH-13
+#[tokio::test]
+async fn sh13_mldsa65_key_refused() {
+    // F-17: the deployed wasm refuses an ML-DSA-65 key from the owner with
+    // exactly UNSUPPORTED_KEY_TYPE, logs nothing and stores nothing; a
+    // non-owner still gets NotOwner first.
+    let worker = sandbox().await;
+    let owner = subaccount(&worker, "owner", 10).await;
+    let stranger = subaccount(&worker, "stranger", 10).await;
+    let contract = deploy_init(&worker, "approvals", owner.id()).await;
+    let key = format!("ml-dsa-65:{}", bs58::encode(vec![7u8; 1952]).into_string());
+    for m in ["add_agent", "add_approver"] {
+        let args = json!({ "account_id": stranger.id(), "public_key": key });
+        let (msg, outcome) =
+            executed_failure(owner.call(contract.id(), m).args_json(args.clone()).max_gas().transact().await);
+        assert!(msg.contains("ML-DSA-65 keys are not supported"), "{m}: {msg}");
+        assert!(logs_on(&outcome, contract.id()).is_empty(), "{m} logged");
+        assert_fails_with(
+            stranger.call(contract.id(), m).args_json(args).max_gas().transact().await,
+            "only the owner can manage keys",
+        );
+    }
+    assert_eq!(view(&contract, "get_principal", json!({ "public_key": key })).await, Value::Null);
+    assert_eq!(view(&contract, "get_request_count", json!({})).await, json!(0));
 }

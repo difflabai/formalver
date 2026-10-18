@@ -38,7 +38,7 @@ trace_row('D5',  ['INV-5']).
 trace_row('D6',  ['TX-5', 'HIST-2', 'TR-2']).
 trace_row('D7',  ['TR-3', 'HIST-8', 'INV-8', 'LEM-4', 'RD-7']).
 trace_row('D8',  ['INV-1', 'INV-3', 'INV-4', 'INV-7', 'LEM-1', 'LEM-2', 'HIST-3', 'HIST-4', 'RD-2', 'RD-4']).
-trace_row('D9',  ['INV-2', 'INV-9', 'ROB-3', 'TR-6', 'RES-1', 'RES-2']).
+trace_row('D9',  ['INV-2', 'INV-9', 'ROB-3', 'TR-6', 'RES-1', 'RES-2', 'SH-13']).
 trace_row('D10', ['TX-5', 'TR-1']).
 % D11 amended (decision D17): "no upgrade, expiry or threshold".
 trace_row('D11', ['SH-11', 'SH-12', 'C-1', 'C-6']).
@@ -198,9 +198,10 @@ property('SH-8', unit, "JSON shape: README field names of every view and event p
 property('SH-9', sandbox, "Init once, only from C; methods fail before init; post-init state is Init(owner)").
 property('SH-10', sandbox, "All 16 #[near] methods (and contract_source_metadata) called with 1 yocto via full-access keys (new on a fresh deployment): change methods and new fail with the non-payable panic; view outcomes recorded").
 property('SH-11', 'wasm-check', "Function exports exactly the 16 #[near] methods + contract_source_metadata + __contract_abi (embedded by cargo-near); the only non-function export is memory; no Store, upgrade or owner-transfer export (wasm-surface.expected)").
+property('SH-13', unit, "add_agent/add_approver refuse ML-DSA-65 keys after the owner check and before the core's guards, with exactly UNSUPPORTED_KEY_TYPE and no log (F-17)").
 property('SH-12', 'wasm-check', "No promise_*, deploy, delete, add-key, global-contract or transfer imports (exact import set in wasm-surface.expected); only ST-5 storage keys written").
 property('RES-1', unit, "Storage growth per op (add, revoke, request, approve, reject) bounded from the Borsh layout and metered by VMLogic; measured on-chain; <= 16 x B_req lockable per agent key without an approver").
-property('RES-2', unit, "Worst-case approval_requested, action_approved and action_rejected lines (2048 escaped control bytes, 64-char accounts, ed25519/secp256k1 keys, max u64s) fit 16384 B (F-4); ML-DSA-65 keys on both sides do not (F-17)").
+property('RES-2', unit, "Worst-case approval_requested, action_approved and action_rejected lines (2048 escaped control bytes, 64-char accounts, ed25519/secp256k1 keys, max u64s) fit 16384 B (F-4); ML-DSA-65 keys, which would not (F-17), are refused at registration (SH-13)").
 property('RES-3', sandbox, "get_approvals(0,100) over max-size proofs stays under view gas and 4 MiB return").
 % [modules.runtime_assumptions]
 property('RT-KEY', sandbox, "FC key of account a arrives as signer = predecessor = a with signer_pk = key; unregistered and cross-account keys rejected").

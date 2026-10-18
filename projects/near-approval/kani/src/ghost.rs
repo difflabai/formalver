@@ -18,10 +18,12 @@
 //! sequence.
 //!
 //! Upstream: difflabai/trust-framework `contracts/approval/contract/src/lib.rs`
-//! Pin:      8635ca7b8b1d64bb226eb0b3b3a35779fcbf461b
-//! sha256:   7033fc7acf27d8c678c0f28167ed8cd01ad0c851382d83a661d8f96b83357900
+//! Pin:      081a3a645801f2a68f2c5d3d9b707dfbc8a2993c
+//! sha256:   be9d35ba7a0cca151acf79882872eba18c6cf9078651fae94c35b55b389d0272
 //! Covers:   `impl Store<AccountId, PublicKey> for ApprovalContract` and
-//!           `ApprovalContract::new`'s initial values.
+//!           `ApprovalContract::new`'s initial values. Both unchanged since
+//!           8635ca7; 081a3a6 only adds the ML-DSA-65 refusal in the
+//!           `add_principal` shell wrapper (F-17, SH-13), outside `Store`.
 //! The `sparse_header_hash` plain test fails when that file's sha256 no
 //! longer equals [`CONTRACT_SHA256`]: re-transliterate, then update both.
 
@@ -36,7 +38,7 @@ use core::cell::Cell;
 
 /// sha256 of upstream `contract/src/lib.rs` that [`Sparse`] transliterates.
 pub const CONTRACT_SHA256: &str =
-    "7033fc7acf27d8c678c0f28167ed8cd01ad0c851382d83a661d8f96b83357900";
+    "be9d35ba7a0cca151acf79882872eba18c6cf9078651fae94c35b55b389d0272";
 
 /// Run `op` through the real core over any store (`spec::apply` is the
 /// `ArrStore` instance).

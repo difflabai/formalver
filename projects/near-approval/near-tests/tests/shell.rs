@@ -1,12 +1,12 @@
 //! Exact shell tests (strategy.md 5.6-5.8, section 9): SH-1, SH-3..SH-8,
 //! ST-5, ST-6, RES-1 (computed and measured), RES-2 (explicit limit, F-4),
-//! and F-17 (ML-DSA-65 keys).
+//! and F-17 (ML-DSA-65 keys, refused by add_agent/add_approver).
 //!
 //! Every scenario runs the contract (mocked runtime, reload around every call)
 //! and the core over a `MemStore` side by side through `step`, which also
 //! checks results, events, α and the storage keys after every call.
 //!
-// PROP: SH-1 SH-3 SH-4 SH-5 SH-6 SH-7 SH-8 ST-5 ST-6 RES-1 RES-2
+// PROP: SH-1 SH-3 SH-4 SH-5 SH-6 SH-7 SH-8 ST-5 ST-6 RES-1 RES-2 SH-13
 
 use approval_contract::ApprovalContract;
 use approval_core::{ApprovalError as E, MemStore, MAX_ACTION_LEN, MAX_PENDING_PER_KEY};
@@ -856,14 +856,12 @@ fn res1_storage_growth_bounds() {
     // 16 x B_req per agent key without an approver: about 0.36 NEAR.
     let yocto = MAX_PENDING_PER_KEY as u128 * secp.req as u128 * 10u128.pow(19);
     assert!(yocto <= 37 * 10u128.pow(22), "16 x B_req = {yocto} yocto");
-    // ML-DSA-65 keys (F-17): larger records, measured the same way.
-    let pq = res1_for(mldsa65(1), mldsa65(2));
-    let pq_yocto = MAX_PENDING_PER_KEY as u128 * pq.req as u128 * 10u128.pow(19);
+    // ML-DSA-65 keys cannot be registered (F-17), so these are all key types.
     eprintln!(
         "RES-1 bounds (bytes incl. 40 B/record): secp256k1 B_p={} B_req={} B_ap={} B_log={} B_rej={} B_v={}; \
-         16 x B_req = {:.3} NEAR; ml-dsa-65 B_p={} B_req={} -> 16 x B_req = {:.3} NEAR",
+         16 x B_req = {:.3} NEAR",
         secp.p, secp.req, secp.ap, secp.log, secp.rej, secp.v,
-        yocto as f64 / 1e24, pq.p, pq.req, pq_yocto as f64 / 1e24
+        yocto as f64 / 1e24
     );
 }
 
@@ -962,22 +960,51 @@ fn res2_worst_case_event_lines_fit_16384_bytes() {
     );
 }
 
-/// F-17: with ML-DSA-65 keys (1952-byte keys, about 2676 characters each in
-/// JSON) on both sides, the worst-case `action_approved` line exceeds the
-/// limit, so a request the core accepted cannot be approved by that approver
-/// key. This test records the finding; it fails once upstream bounds it.
+/// SH-13 (F-17): an ML-DSA-65 key on both sides would push the worst-case
+/// `action_approved` line past the 16 KiB log limit (18,256 B), so upstream
+/// refuses ML-DSA-65 keys in `add_agent` and `add_approver`. The refusal comes
+/// after the owner check and before the core's guards (KeyAlreadyRegistered,
+/// LogFull), panics with exactly `UNSUPPORTED_KEY_TYPE` and logs nothing; the
+/// worst case can then not be set up with an ML-DSA-65 key on either side.
 #[test]
-fn f17_mldsa65_worst_case_exceeds_the_log_limit() {
-    let r = worst_case_lines(&mldsa65(1), &mldsa65(2));
-    let e = r.expect_err("expected the approve log to exceed the limit");
-    assert!(
-        e.contains("TotalLogLengthExceeded"),
-        "unexpected failure: {e}"
-    );
-    // One ML-DSA-65 key (either side) still fits.
-    for (ka, kb) in [(mldsa65(1), secp256k1(2)), (secp256k1(1), mldsa65(2))] {
-        let lens = worst_case_lines(&ka, &kb).expect("one ML-DSA-65 key fits");
-        eprintln!("F-17: one ml-dsa-65 key: lines {lens:?} B");
+fn f17_mldsa65_keys_are_refused() {
+    quiet_expected_panics();
+    let msg = approval_contract::UNSUPPORTED_KEY_TYPE;
+    let pq = mldsa65(1);
+    let a = accounts()[1].clone();
+    let base = deploy(&owner());
+    let refused = |ctx: &Ctx, st: Storage, op: &Op| -> String {
+        let o = contract_step(ctx, st, op);
+        assert!(o.logs.is_empty(), "refusal logged {:?}", o.logs);
+        o.result.expect_err("ML-DSA-65 key accepted")
+    };
+    for op in [add_agent(&a, &pq), add_approver(&a, &pq)] {
+        // Owner: refused with the exact message.
+        assert_eq!(refused(&by_owner(1), base.clone(), &op), msg);
+        // Non-owner: NotOwner still comes first.
+        assert_eq!(
+            refused(&signed(&a, &keys()[0], 1), base.clone(), &op),
+            E::NotOwner.as_str()
+        );
+        // Before the core's guards: with the registration counter at
+        // u64::MAX, any other key gets LogFull; an ML-DSA-65 key is still
+        // refused as unsupported.
+        let full = with_counters(&base, None, None, Some(u64::MAX));
+        assert_eq!(
+            contract_step(&by_owner(1), full.clone(), &add_agent(&a, &ed25519(9)))
+                .result
+                .unwrap_err(),
+            E::LogFull.as_str()
+        );
+        assert_eq!(refused(&by_owner(1), full, &op), msg);
     }
-    eprintln!("F-17: two ml-dsa-65 keys: approve fails: {e}");
+    // The F-17 worst case cannot be set up with an ML-DSA-65 key on either side.
+    for (ka, kb) in [
+        (mldsa65(1), mldsa65(2)),
+        (mldsa65(1), secp256k1(2)),
+        (secp256k1(1), mldsa65(2)),
+    ] {
+        let e = worst_case_lines(&ka, &kb).expect_err("ML-DSA-65 key registered");
+        assert_eq!(e, msg);
+    }
 }

@@ -2,14 +2,14 @@
 name = "near-approval"
 upstream = "https://github.com/difflabai/trust-framework"
 upstream_path = "contracts/approval"
-pinned_commit = "8635ca7b8b1d64bb226eb0b3b3a35779fcbf461b"   # trust-framework main (2026-10-14); code identical to PR #15 head 3426c92, only README.md differs (OQ-1)
-last_reviewed = "2026-10-15"
+pinned_commit = "081a3a645801f2a68f2c5d3d9b707dfbc8a2993c"   # trust-framework main (2026-10-17): PR #15 code plus PR #19 (add_agent/add_approver refuse ML-DSA-65 keys, F-17); core unchanged since 3426c92
+last_reviewed = "2026-10-17"
 verus_min_verified = 0      # raised at M5; run-verus.sh fails below it
 mc1_state_floor = 51568     # recorded at M4 (2026-10-11); MC-1 fails below it
 # RT-CODEHASH: `cargo near build reproducible-wasm` of the pin (sandbox job
 # asserts it; recompute on every pin bump).
-reproducible_wasm_sha256 = "5223150408c6bce4d857eb155228c8f5e2dcdc5a2748d933c6ec7369947e443d"
-reproducible_code_hash = "6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg"
+reproducible_wasm_sha256 = "3f48c2f2b121d359507ebc696c8a402e2ae7cba1c57552a5e18c49a65761bde9"
+reproducible_code_hash = "5G334oPHzjDvPLXKUSstbaf3BzUPaj1sWZnDhy5Baauv"
 release_overflow_checks = true  # ASM-COMPILE: check-pin.sh fails unless upstream [profile.release] sets overflow-checks = true
 
 # Status values: unverified | in-progress | verified | verified-with-assumptions | stale
@@ -53,12 +53,12 @@ near_proof_arena = "cb16c4090a82a6179d8e1a23d6e83e74e9d5d017"  # contract v1; to
 [source_hashes]             # sha256 at pinned_commit; check-pin.sh recomputes
 "Cargo.toml" = "1cbed4b212bec393ad67cdd2179357355a6b137694c1b604638b2f3e6ee382af"
 "Cargo.lock" = "3ef5ab18d24eb2fb74fc3033c9d2fefa611568b6e401127de8eb91557791b939"
-"README.md" = "bb52e145fe726bd0bd8608ba63ac8c864f4246daef74d5e6d4cd8b90dc648843"
+"README.md" = "bca19d675be6ff2e22ab60d130c238b4ea39fdcef3953806e8914bbbadcd6db6"
 "core/Cargo.toml" = "0a872e27977c514a3e35cba2afd0c4b9945f4eb6fbbfe60dd731d04937d4484a"
 "core/src/lib.rs" = "f5d72cc7bedd0866dfb7891246999315338410f06be00210e3ffd21452ea0d0c"
 "core/src/tests.rs" = "a5b29506a777012df246763a71d0d6bd7ac8f18c1927e341de766f8eab24c5b9"
 "contract/Cargo.toml" = "fcc73488270168cd81fa3a8da8cdc6ef4e87b5e31b195ac0b364a0aec571e736"
-"contract/src/lib.rs" = "7033fc7acf27d8c678c0f28167ed8cd01ad0c851382d83a661d8f96b83357900"
+"contract/src/lib.rs" = "be9d35ba7a0cca151acf79882872eba18c6cf9078651fae94c35b55b389d0272"
 "sandbox/Cargo.toml" = "6250ba551605a991a354e9d79f017bfe4bcae83741a17d7120248e04535967f6"
 "sandbox/src/lib.rs" = "955bc6fe5ea34c92f70e479b618046f26ad37637ed96a59c6192982d45b7ce18"
 "sandbox/tests/sandbox.rs" = "6aee5fae9f0db89f2361aebd8e6069ae6f44a2de2652156132b7a69fd8773798"
@@ -102,7 +102,7 @@ checked_by = ["RT-KEY"]
 source = ["https://nomicon.io/DataStructures/AccessKey.html", "https://nomicon.io/RuntimeSpec/Transactions.html", "https://nomicon.io/RuntimeSpec/Components/BindingsSpec/ContextAPI.html"]
 arena_excludes = ["transactions", "signature_verification"]
 observed = "RT-KEY: function-call keys (ed25519 and secp256k1) arrive as signer = predecessor = their account with signer_pk = the key; an unregistered key on the right account fails UnknownKey; a key registered to another account fails KeyAccountMismatch"
-observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 3f48c2f2...5761bde9, code_hash 5G334oPHzjDvPLXKUSstbaf3BzUPaj1sWZnDhy5Baauv; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
 status = "in-progress"
 
 [assumptions.ASM-PRED]
@@ -112,7 +112,7 @@ checked_by = ["RT-RELAY", "RT-SELFACCT"]
 source = ["https://nomicon.io/RuntimeSpec/Receipts.html", "https://nomicon.io/RuntimeSpec/Components/BindingsSpec/ContextAPI.html", "https://nomicon.io/RuntimeSpec/Scenarios/CrossContractCall.html"]
 arena_excludes = ["function_calls_and_wasm"]
 observed = "RT-RELAY: request_action, approve and reject through a third-party relay contract fail IndirectCall with no log and no state change; a DEP-1.4 key cannot even sign to the relay (ReceiverMismatch). RT-SELFACCT: code on the agent's own account calling C succeeds and is attributed to the agent's full-access key (F-9); a DEP-1.4 key cannot call that code (ReceiverMismatch)"
-observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 3f48c2f2...5761bde9, code_hash 5G334oPHzjDvPLXKUSstbaf3BzUPaj1sWZnDhy5Baauv; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
 status = "in-progress"
 
 [assumptions.ASM-ATOMIC]
@@ -122,7 +122,7 @@ checked_by = ["RT-REVERT", "RT-BATCH"]
 source = ["https://nomicon.io/RuntimeSpec/Receipts.html", "https://nomicon.io/RuntimeSpec/Actions.html", "https://nomicon.io/DataStructures/Account.html"]
 arena_excludes = ["failure_paths_and_rollback", "function_calls_and_wasm"]
 observed = "RT-REVERT: a core panic, out of gas after the emit and LackBalanceForState (request_action and approve) leave counters, principals, requests and approvals unchanged. The event line SURVIVES in the failed outcome for out of gas (attached gas between about 27/40 and 39/40 of the minimum) and for LackBalanceForState. RT-BATCH: [request_action(a), request_action('')] fails at action index 1, counters unchanged, and the first action's approval_requested line appears in the failed outcome. So VER-1's success requirement is load-bearing"
-observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 3f48c2f2...5761bde9, code_hash 5G334oPHzjDvPLXKUSstbaf3BzUPaj1sWZnDhy5Baauv; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
 status = "in-progress"
 
 [assumptions.ASM-SEQ]
@@ -141,7 +141,7 @@ checked_by = ["RT-TIME"]
 source = ["https://nomicon.io/RuntimeSpec/Components/BindingsSpec/ContextAPI.html", "https://nomicon.io/ChainSpec/BlockProcessing.html"]
 arena_excludes = ["block_finality"]
 observed = "RT-TIME: 80 receipts on C (40 requests, 20 approvals, 20 rejections, 80 skipped blocks interleaved): every stored requested_at/approved_at/rejected_at equals the block its receipt ran in, heights strictly increase and timestamps never decrease in execution order. A sample on one sandbox node, not a proof of the chain rule"
-observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 3f48c2f2...5761bde9, code_hash 5G334oPHzjDvPLXKUSstbaf3BzUPaj1sWZnDhy5Baauv"
 status = "in-progress"
 
 [assumptions.ASM-FINAL]
@@ -159,7 +159,7 @@ checked_by = ["RT-RESET", "DEP-1"]
 source = ["https://nomicon.io/RuntimeSpec/Actions.html", "https://github.com/near/NEPs/blob/master/neps/nep-0591.md"]
 arena_excludes = ["non_transfer_actions", "account_v2_global_contracts"]
 observed = "RT-RESET: an unlocked C deleted and recreated under the same name starts with counters 0; check_deployment VER-3 flags the DeleteAccount, the recreation AddKey and the DeployContract receipts since the original b0"
-observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 3f48c2f2...5761bde9, code_hash 5G334oPHzjDvPLXKUSstbaf3BzUPaj1sWZnDhy5Baauv; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
 status = "in-progress"
 
 [assumptions.ASM-SDK]
@@ -168,7 +168,7 @@ level = "high"
 checked_by = ["SH-9", "SH-10", "SH-11"]
 source = ["https://docs.rs/near-sdk/5.29.1/near_sdk/"]
 observed = "SH-9: new fails 'Method new is private' from another account; every other method, views included, fails 'The contract is not initialized' before init; post-init views equal Init(owner); a second new fails. SH-10: every change method and new fail 'Method <m> doesn't accept deposit' with 1 yocto; all 9 get_* methods and contract_source_metadata ACCEPT a 1 yocto deposit when called as a transaction (the wrapper checks only &mut self methods). Function exports: the 16 methods plus contract_source_metadata and __contract_abi"
-observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 3f48c2f2...5761bde9, code_hash 5G334oPHzjDvPLXKUSstbaf3BzUPaj1sWZnDhy5Baauv; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
 status = "in-progress"
 
 [assumptions.ASM-STORE]
@@ -194,7 +194,7 @@ checked_by = ["RES-1"]
 source = ["https://nomicon.io/DataStructures/Account.html", "https://nomicon.io/GenesisConfig/RuntimeConfig.html"]
 arena_excludes = ["non_transfer_actions"]
 observed = "RES-1 measured storage deltas (short names, ed25519 / 64-char names, secp256k1): add_agent 118/199 B, request_action(1 B) 144/225, request_action(2048 B) 2191/2272, approve 148/226, reject 83/161, revoke_key -53/-134, failures 0; 16 maximum requests lock 0.3506/0.3635 NEAR. LackBalanceForState when the balance is below storage_usage x 1e19 (RT-REVERT)"
-observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 3f48c2f2...5761bde9, code_hash 5G334oPHzjDvPLXKUSstbaf3BzUPaj1sWZnDhy5Baauv; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
 status = "in-progress"
 
 [assumptions.ASM-LIMITS]
@@ -204,7 +204,7 @@ checked_by = ["RES-2", "RES-3"]
 source = ["https://nomicon.io/GenesisConfig/VMConfig.html", "https://nomicon.io/RuntimeSpec/Components/BindingsSpec/MiscellaneousAPI.html"]
 arena_excludes = ["function_calls_and_wasm"]
 observed = "RES-3: get_approvals(0,100) over 100 maximum-size proofs returns about 1.30 MB (1,299,658-1,299,659 B across runs, < 4 MiB) as a view, and burns about 88.3-88.4 TGas as a transaction. RES-2 (sandbox cross-check): worst-case receipt logs 12,727-12,728 B (approval_requested) and 13,088 B (action_approved) of 16,384"
-observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 3f48c2f2...5761bde9, code_hash 5G334oPHzjDvPLXKUSstbaf3BzUPaj1sWZnDhy5Baauv; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
 status = "in-progress"
 
 [assumptions.ASM-META]
@@ -214,7 +214,7 @@ checked_by = ["RT-METATX"]
 source = ["https://github.com/near/NEPs/blob/master/neps/nep-0366.md", "https://github.com/near/NEPs/blob/master/neps/nep-0518.md", "https://nomicon.io/RuntimeSpec/Actions.html#delegateaction", "https://nomicon.io/architecture/how/meta-tx.html"]
 arena_excludes = ["transactions", "signature_verification", "non_transfer_actions"]
 observed = "RT-METATX: a NEP-366 delegate action (relayer signs, inner request_action signed by the agent's function-call key, and again by its full-access key) reaches C with signer = relayer and fails IndirectCall; the relayer's transaction itself succeeds; state unchanged. NEP-518 eth-implicit accounts not tested"
-observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 3f48c2f2...5761bde9, code_hash 5G334oPHzjDvPLXKUSstbaf3BzUPaj1sWZnDhy5Baauv; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
 status = "in-progress"
 
 [assumptions.ASM-FCKEY]
@@ -224,7 +224,7 @@ checked_by = ["RT-FCKEY"]
 source = ["https://nomicon.io/DataStructures/AccessKey.html#accesskeypermissionfunctioncall", "https://nomicon.io/RuntimeSpec/Transactions.html"]
 arena_excludes = ["transactions", "signature_verification", "non_transfer_actions"]
 observed = "RT-FCKEY: an agent key scoped to request_action calling approve or add_agent, and an approver key calling request_action, are rejected before execution with InvalidTxError InvalidAccessKeyError(MethodNameMismatch) (not a contract panic); a deposit through a function-call key is DepositWithFunctionCall; AddKey signed by a function-call key is RequiresFullAccess"
-observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 3f48c2f2...5761bde9, code_hash 5G334oPHzjDvPLXKUSstbaf3BzUPaj1sWZnDhy5Baauv; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
 status = "in-progress"
 
 [assumptions.ASM-COMPILE]
@@ -232,8 +232,8 @@ statement = "rustc/LLVM/wasm-opt preserve core semantics host -> wasm32; overflo
 level = "n/a"
 checked_by = ["RT-CODEHASH", "RT-TRACE"]
 source = ["https://doc.rust-lang.org/cargo/reference/profiles.html#overflow-checks"]
-observed = "RT-TRACE: 210 traces / 6,800 steps (prolog.txt 10x80, core-random.txt 200x30), every step equal to the host core and the trace file (results/RT-TRACE.json); RT-CODEHASH: on-chain code_hash = base58(sha256(wasm)) for the wasm under test. Ran on the reproducible build (sha256 5223150408c6bce4d857eb155228c8f5e2dcdc5a2748d933c6ec7369947e443d)"
-observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
+observed = "RT-TRACE: 210 traces / 6,800 steps (prolog.txt 10x80, core-random.txt 200x30), every step equal to the host core and the trace file (results/RT-TRACE.json); RT-CODEHASH: on-chain code_hash = base58(sha256(wasm)) for the wasm under test. Ran on the reproducible build (sha256 3f48c2f2b121d359507ebc696c8a402e2ae7cba1c57552a5e18c49a65761bde9)"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 3f48c2f2...5761bde9, code_hash 5G334oPHzjDvPLXKUSstbaf3BzUPaj1sWZnDhy5Baauv; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
 status = "in-progress"
 
 [assumptions.ASM-MODEL]
@@ -278,7 +278,7 @@ statement = "The deployed code is the reproducible build of the pin, locked at d
 level = "policy"
 checked_by = ["DEP-1", "VER-2", "VER-3"]
 observed = "check_deployment.sh sandbox passes on a DEP-1 lock-batch deployment with DEP-1.4 keys and fails on a kept full-access key, a wrong code hash and a full-access agent key (sandbox/results/DEP-1.json). No testnet deployment"
-observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 52231504...947e443d, code_hash 6XdTZhjsnsr2WRrk29PtnT5ZtiRrahC42STdba3CAmLg; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
+observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 3f48c2f2...5761bde9, code_hash 5G334oPHzjDvPLXKUSstbaf3BzUPaj1sWZnDhy5Baauv; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
 status = "in-progress"
 
 [assumptions.ASM-DISPLAY]
@@ -450,9 +450,10 @@ prolog_requirements = "prolog/requirements/approval_req.pl"
   SH-9 = { status = "in-progress", layer = "sandbox", evidence = "test", cross = ["review"], harness = "sandbox/tests/shell.rs::sh9_init", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-SDK"], description = "Init once, only from C; methods fail before init; post-init state is Init(owner)" }
   SH-10 = { status = "in-progress", layer = "sandbox", evidence = "test", harness = "sandbox/tests/shell.rs::sh10_deposits", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-SDK"], description = "All 16 exports at the pin (F-15; the row said 13) called with 1 yocto via full-access keys (new on a fresh deployment): every change method and new fail with the non-payable panic; observed: every get_* (and contract_source_metadata) accepts the deposit" }
   SH-11 = { status = "in-progress", layer = "wasm-check", evidence = "check", cross = ["sandbox"], harness = "tools/scripts/wasm-surface.sh vs wasm-surface.expected (cargo near build non-reproducible-wasm)", depends_on = ["contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-SDK"], description = "Function exports exactly the 16 #[near] methods + contract_source_metadata + __contract_abi (embedded by cargo-near); the only non-function export is memory; no Store, upgrade or owner-transfer export" }
+  SH-13 = { status = "in-progress", layer = "unit", evidence = "test", cross = ["sandbox"], harness = "near-tests/tests/shell.rs f17_mldsa65_keys_are_refused; sandbox/tests/shell.rs sh13_mldsa65_key_refused", depends_on = ["contract/src/lib.rs"], assumptions = ["ASM-LIMITS"], description = "add_agent and add_approver refuse ML-DSA-65 keys (F-17): after the owner check (non-owners get NotOwner) and before the core's guards (LogFull), with exactly UNSUPPORTED_KEY_TYPE and no log; so every registered key is ed25519 or secp256k1, the key types RES-1 and RES-2 bound" }
   SH-12 = { status = "in-progress", layer = "wasm-check", evidence = "check", cross = ["review", "difftest"], harness = "tools/scripts/wasm-surface.sh (forbidden-import check, exact import set); store_diff.rs (storage keys)", depends_on = ["contract/src/lib.rs", "Cargo.lock"], description = "No promise_*, deploy, delete, add-key, global-contract or transfer imports (exact import set in wasm-surface.expected); only ST-5 storage keys written" }
-  RES-1 = { status = "in-progress", layer = "unit", evidence = "test", cross = ["sandbox"], harness = "near-tests/tests/shell.rs res1_storage_growth_bounds", depends_on = ["core/src/lib.rs", "contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-STAKE"], description = "Storage growth per op (add, revoke, request, approve, reject) computed from the Borsh layout and equal to VMLogic's metering at the worst case; measured on-chain (sandbox); 16 x B_req = 0.364 NEAR per agent key without an approver (ed25519/secp256k1; 0.666 NEAR with ML-DSA-65, F-17)" }
-  RES-2 = { status = "in-progress", layer = "unit", evidence = "test", cross = ["sandbox"], harness = "near-tests/tests/shell.rs res2_worst_case_event_lines_fit_16384_bytes, f17_mldsa65_worst_case_exceeds_the_log_limit", depends_on = ["core/src/lib.rs", "contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-LIMITS"], description = "Worst-case approval_requested, action_approved and action_rejected lines (2048 escaped control bytes, 64-char accounts, ed25519/secp256k1 keys, max u64s) fit 16384 B: 13197 B (F-4). Not with ML-DSA-65 keys on both sides: 18256 B (F-17)" }
+  RES-1 = { status = "in-progress", layer = "unit", evidence = "test", cross = ["sandbox"], harness = "near-tests/tests/shell.rs res1_storage_growth_bounds", depends_on = ["core/src/lib.rs", "contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-STAKE"], description = "Storage growth per op (add, revoke, request, approve, reject) computed from the Borsh layout and equal to VMLogic's metering at the worst case; measured on-chain (sandbox); 16 x B_req = 0.364 NEAR per agent key without an approver (ed25519/secp256k1; ML-DSA-65 keys are refused, SH-13)" }
+  RES-2 = { status = "in-progress", layer = "unit", evidence = "test", cross = ["sandbox"], harness = "near-tests/tests/shell.rs res2_worst_case_event_lines_fit_16384_bytes, f17_mldsa65_keys_are_refused", depends_on = ["core/src/lib.rs", "contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-LIMITS"], description = "Worst-case approval_requested, action_approved and action_rejected lines (2048 escaped control bytes, 64-char accounts, ed25519/secp256k1 keys, max u64s) fit 16384 B: 13197 B (F-4). ML-DSA-65 keys, which would reach 18256 B on both sides (F-17), cannot be registered (SH-13)" }
   RES-3 = { status = "in-progress", layer = "sandbox", evidence = "test", harness = "sandbox/tests/shell.rs::res3_full_page_of_max_proofs", depends_on = ["core/src/lib.rs", "contract/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-LIMITS"], description = "get_approvals(0,100) over 100 max-size proofs stays under view gas and 4 MiB return; measured about 1.30 MB (1,299,658-1,299,659 B) and about 88.3-88.4 TGas as a transaction (near-sandbox 2.13.4)" }
 
 # ---------------------------------------------------------------------------
