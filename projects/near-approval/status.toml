@@ -4,7 +4,7 @@ upstream = "https://github.com/difflabai/trust-framework"
 upstream_path = "contracts/approval"
 pinned_commit = "081a3a645801f2a68f2c5d3d9b707dfbc8a2993c"   # trust-framework main (2026-10-17): PR #15 code plus PR #19 (add_agent/add_approver refuse ML-DSA-65 keys, F-17); core unchanged since 3426c92
 last_reviewed = "2026-10-17"
-verus_min_verified = 0      # raised at M5; run-verus.sh fails below it
+verus_min_verified = 52     # M5 spike (2026-10-19); run-verus.sh fails below it
 mc1_state_floor = 51568     # recorded at M4 (2026-10-11); MC-1 fails below it
 # RT-CODEHASH: `cargo near build reproducible-wasm` of the pin (sandbox job
 # asserts it; recompute on every pin bump).
@@ -37,7 +37,7 @@ tla2tools = "1.7.4"         # last stable release; the 1.8.0 asset is a rolling 
 apalache = "0.47.2"
 kani = "0.68.0"             # built from tag kani-0.68.0; nightly-2026-08-21
 cbmc = "6.11.0"
-verus = ""
+verus = "0.2026.10.04.426d8b0"  # weekly release; needs rustup 1.98.1
 scryer_prolog = "0.10.0"     # crates.io, cargo install --locked
 cargo_near = "0.22.0"            # M6 local builds (release binary); the reproducible image pins its own
 near_sandbox = "2.13.4"         # near-workspaces 0.23.0 / near-sandbox 0.3.16 default (M6)

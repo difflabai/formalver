@@ -1,0 +1,31 @@
+# Executable differences between the verified twin (src/lib.rs) and upstream
+# approval-core/src/lib.rs that tools/scripts/erasure-check.py allows
+# (strategy.md §7, path A). Everything else must match token for token once
+# ghost code is stripped.
+#
+# A rewrite of deployed code needs a Kani equivalence harness
+# (twin::f == upstream::f) and is reported with ASM-MODEL until it has one.
+# MemStore is test-only (the contract's Store impl is in the contract crate),
+# so its rewrites only change the satisfiability witness, not the proof of
+# the deployed path.
+
+[[rewrite]]
+fn = "approvals"
+deployed = true
+why = "upstream collects (from..end).filter_map(..).filter_map(..); vstd has no FilterMap spec and one can't be added outside vstd (orphan rule)"
+equivalence = "kani: h_twin_approvals (to do)"
+
+[[rewrite]]
+fn = "replace_request"
+deployed = false
+why = "MemStore: Verus closures can't capture &mut self (and_then(|i| self.requests.get_mut(i)))"
+
+[[rewrite]]
+fn = "insert_principal"
+deployed = false
+why = "MemStore: iter_mut().find leaves the skipped elements' mutable borrows unresolved, so Verus can't show them unchanged"
+
+[[attribute]]
+upstream = "# ! [ forbid ( unsafe_code ) ]"
+twin = "# ! [ deny ( unsafe_code ) ]"
+why = "assume_specification expands to unsafe code, and forbid can't be relaxed for trusted.rs"

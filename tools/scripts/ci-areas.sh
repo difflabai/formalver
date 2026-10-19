@@ -12,7 +12,7 @@
 #        CI_AREAS_EXPLAIN=1 ...              (also each path's jobs on stderr)
 set -euo pipefail
 
-jobs="plain loops kani tla lean prolog near_unit sandbox"
+jobs="plain loops kani tla lean prolog near_unit sandbox verus"
 on=" "
 p=projects/near-approval
 s=tools/scripts
@@ -27,8 +27,10 @@ else
       *.md) add="" ;;
       # Checked by the pin job alone (pin and status-lint).
       $p/status.toml | $s/check-pin.sh | $s/check-status.sh | $s/test-check-status.sh) add="" ;;
-      # Other projects and the weekly upstream watch.
-      $s/run-verus.sh | $s/upstream-watch.sh | tools/upstream-watch.toml) add="" ;;
+      # The weekly upstream watch.
+      $s/upstream-watch.sh | tools/upstream-watch.toml) add="" ;;
+      # M5: the verified twin, its canary, mutants and erasure check.
+      $p/verus/* | $s/run-verus.sh | $s/get-verus.sh | $s/erasure-check.py) add="verus" ;;
       # Mutant definitions: the weekly mutants job, and plain's self-test.
       $p/kani/mutants/* | $s/run-mutants.sh | $s/test-run-mutants.sh) add="plain" ;;
       # U-1 loop bounds.
