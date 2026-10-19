@@ -678,7 +678,9 @@ pub fn rep(c: &Cls) -> (View, Op) {
 // ---------------------------------------------------------------------------
 
 /// A first-match table of at most `N` rows. Rows are only ever read at
-/// a concrete index below the table's constant size (U-1).
+/// a concrete index below the table's constant size (U-1). Every path
+/// through `sub` fills the same slots, an absent row as `None`, so `n`
+/// stays concrete under Kani and no write lands at a symbolic index.
 #[derive(Clone, Debug)]
 pub struct Tab<T, U, const N: usize> {
     n: usize,
@@ -687,8 +689,13 @@ pub struct Tab<T, U, const N: usize> {
 
 impl<T: Clone, U: Clone, const N: usize> Tab<T, U, N> {
     fn push(&mut self, d: T, v: U) {
+        self.slot(Some((d, v)));
+    }
+
+    /// The next slot: a row, or `None` where the row is absent.
+    fn slot(&mut self, row: Option<(T, U)>) {
         assert!(self.n < N, "table overflow");
-        self.e[self.n] = Some((d, v));
+        self.e[self.n] = row;
         self.n += 1;
     }
 }
@@ -885,18 +892,16 @@ impl Sub {
     }
 }
 
-/// `Ident.pRows`.
-fn p_rows(t: &mut Tab<u64, u64, TN>, rid: u64, af: u64, pend: u64, p: &Principal<Acct>) {
-    t.push(rid, p.registration_id);
-    t.push(af, p.active_from);
-    t.push(pend, p.pending as u64);
+/// `Ident.pRows`, for a principal that may be absent.
+fn p_rows(t: &mut Tab<u64, u64, TN>, rid: u64, af: u64, pend: u64, p: Option<&Principal<Acct>>) {
+    t.slot(p.map(|p| (rid, p.registration_id)));
+    t.slot(p.map(|p| (af, p.active_from)));
+    t.slot(p.map(|p| (pend, p.pending as u64)));
 }
 
 /// `Ident.payRows`: a row for a payload action.
-fn pay_row(t: &mut Tab<usize, String, TP>, j: usize, x: &str) {
-    if kind(x) == XCls::Pay {
-        t.push(j, x.to_string());
-    }
+fn pay_row(t: &mut Tab<usize, String, TP>, j: usize, x: Option<&str>) {
+    t.slot(x.filter(|x| kind(x) == XCls::Pay).map(|x| (j, x.to_string())));
 }
 
 /// `Ident.sub.decAccts`, `decKeys`, `decNums` and the shared rows of
@@ -908,37 +913,26 @@ fn sub_dec<T: Store<Acct, Key>>(s: &T, c: &C, id: u64, t: &BlockTime) -> Sub {
     let g = g_of(s, k, &r);
     let mut o = Sub::new(signer.clone(), k.clone());
     o.acct.push(A_1, signer.clone());
-    if let Some(r) = &r {
-        o.acct.push(A_2, r.agent_account_id.clone());
-    }
-    if let Some(g) = &g {
-        o.acct.push(A_O, g.account_id.clone());
-    }
+    o.acct.slot(r.as_ref().map(|r| (A_2, r.agent_account_id.clone())));
+    o.acct.slot(g.as_ref().map(|g| (A_O, g.account_id.clone())));
     o.acct.push(A_2, pred.clone());
-    if let Some(b) = &b {
-        o.acct.push(A_2, b.account_id.clone());
-    }
+    o.acct.slot(b.as_ref().map(|b| (A_2, b.account_id.clone())));
     o.key.push(K_0, k.clone());
-    if let Some(r) = &r {
-        o.key.push(K_1, r.agent_key.clone());
-    }
-    if let Some(b) = &b {
-        o.num.push(RID0, b.registration_id);
-    }
-    match &r {
-        Some(r) => {
-            if let Some(g) = &g {
-                let af = if g.active_from <= r.id { AF_LE } else { AF_GT };
-                let pd = if g.pending == 0 { 0 } else { PEND_REP as u64 };
-                p_rows(&mut o.num, RID1, af, pd, g);
-            }
-            o.num.push(ID_REP, id);
-            o.num.push(RID_R, r.agent_registration_id);
-            pay_row(&mut o.pay, 0, &r.action);
-            o.time.push(T_REQ, r.requested_at);
-        }
-        None => o.num.push(ID_REP, id),
-    }
+    o.key.slot(r.as_ref().map(|r| (K_1, r.agent_key.clone())));
+    o.num.slot(b.as_ref().map(|b| (RID0, b.registration_id)));
+    // g is only ever present with r (g_of reads r's key).
+    let (af, pd) = match (&r, &g) {
+        (Some(r), Some(g)) => (
+            if g.active_from <= r.id { AF_LE } else { AF_GT },
+            if g.pending == 0 { 0 } else { PEND_REP as u64 },
+        ),
+        _ => (0, 0),
+    };
+    p_rows(&mut o.num, RID1, af, pd, r.as_ref().and(g.as_ref()));
+    o.num.push(ID_REP, id);
+    o.num.slot(r.as_ref().map(|r| (RID_R, r.agent_registration_id)));
+    pay_row(&mut o.pay, 0, r.as_ref().map(|r| r.action.as_str()));
+    o.time.slot(r.as_ref().map(|r| (T_REQ, r.requested_at)));
     o.time.push(T_CALL, *t);
     o
 }
@@ -963,9 +957,7 @@ pub fn sub<T: Store<Acct, Key>>(s: &T, op: &Op) -> Sub {
             o.acct.push(A_O, s.owner().clone());
             o.acct.push(A_1, caller.clone());
             o.key.push(K_0, key.clone());
-            if let Some(p) = s.principal(key) {
-                o.num.push(RID0, p.registration_id);
-            }
+            o.num.slot(s.principal(key).map(|p| (RID0, p.registration_id)));
             o.time.push(T_CALL, *t);
             o
         }
@@ -974,17 +966,16 @@ pub fn sub<T: Store<Acct, Key>>(s: &T, op: &Op) -> Sub {
             o.acct.push(A_1, c.signer.clone());
             o.acct.push(A_2, c.predecessor.clone());
             let p = s.principal(&c.signer_key);
-            if let Some(p) = &p {
-                o.acct.push(A_2, p.account_id.clone());
-            }
+            o.acct.slot(p.as_ref().map(|p| (A_2, p.account_id.clone())));
             o.key.push(K_0, c.signer_key.clone());
-            if let Some(p) = &p {
-                let pd = if p.pending >= MAX_PENDING_PER_KEY { 16 } else { 15 };
-                p_rows(&mut o.num, RID0, AF0, pd, p);
-            }
+            let pd = match &p {
+                Some(p) if p.pending >= MAX_PENDING_PER_KEY => 16,
+                _ => 15,
+            };
+            p_rows(&mut o.num, RID0, AF0, pd, p.as_ref());
             let nr = s.request_count();
             o.num.push(if nr == MAXU { MAXU } else { NR_REP }, nr);
-            pay_row(&mut o.pay, 1, action);
+            pay_row(&mut o.pay, 1, Some(action));
             o.time.push(T_CALL, *t);
             o
         }
@@ -992,7 +983,7 @@ pub fn sub<T: Store<Acct, Key>>(s: &T, op: &Op) -> Sub {
             let mut o = sub_dec(s, c, *id, t);
             let nl = s.approval_count();
             o.num.push(if nl == MAXU { MAXU } else { NL_REP }, nl);
-            pay_row(&mut o.pay, 1, action);
+            pay_row(&mut o.pay, 1, Some(action));
             o
         }
         Op::Rej { c, id, t } => sub_dec(s, c, *id, t),
