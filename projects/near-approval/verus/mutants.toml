@@ -1,7 +1,10 @@
 # Mutants run-verus.sh applies one at a time to a copy of src/; each must
 # make Verus report an error (strategy.md §7 hygiene gate). `old` must occur
 # exactly once in `file`. Spec mutants check the specs are not vacuous; code
-# mutants check the refinement postconditions bite.
+# mutants check the refinement postconditions bite. Paired mutants (`edit`
+# lists) change the spec and the code the same way, so the refinement still
+# holds: only the property lemmas (props.rs, hist.rs, runs.rs, inv.rs) can
+# reject them.
 
 [[mutant]]
 id = "spec-sod"
@@ -97,3 +100,38 @@ file = "lib.rs"
 old = """    store.insert_revocation(removed.registration_id, now);
     Ok(removed)"""
 new = """    Ok(removed)"""
+
+[[mutant]]
+id = "pair-sod"
+what = "spec and code both drop separation of duties on approve (INV-5)"
+edit = [
+  { file = "abs.rs", old = """            } else if c.signer == r.agent_account_id {
+                Err(ApprovalError::SelfApproval)
+            } else if s.log.len() == u64::MAX {""", new = """            } else if s.log.len() == u64::MAX {""" },
+  { file = "lib.rs", old = """    if caller.signer == request.agent_account_id {
+        return Err(ApprovalError::SelfApproval);
+    }
+    let approval_index""", new = """    let approval_index""" },
+]
+
+[[mutant]]
+id = "pair-revival"
+what = "spec and code both drop `active_from <= id`: a re-registered key revives its void requests (INV-8, TR-3)"
+edit = [
+  { file = "abs.rs", old = """            && p.active_from <= r.id {""", new = """            {""" },
+  { file = "lib.rs", old = """
+                && p.active_from <= request.id),""", new = """),""" },
+  { file = "lib.rs", old = """
+            && p.active_from <= request.id
+    })""", new = """
+    })""" },
+]
+
+[[mutant]]
+id = "pair-pending"
+what = "spec and code both forget to count a new pending request (INV-9, TR-6)"
+edit = [
+  { file = "abs.rs", old = "let p2 = Principal { pending: (p.pending + 1) as u32, ..p };", new = "let p2 = p;" },
+  { file = "lib.rs", old = """    principal.pending += 1;
+""", new = "" },
+]

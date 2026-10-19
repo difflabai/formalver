@@ -59,6 +59,40 @@ pub fn witness_trace() {
         reveal_with_fuel(approvals_from, 2);
     }
     assert(page@.len() == 1);
+
+    // A rejected request (HIST-9, TR-2 non-vacuity).
+    let ghost s4 = s.view();
+    let r = request_action(&mut s, &agent, x.to_owned(), t);
+    assert(r is Ok);
+    proof { lemma_request_inv(s4, agent, s.view().requests[1].action, t, s.view()); }
+    let ghost s5 = s.view();
+    let r = reject(&mut s, &approver, 1, t);
+    assert(r is Ok);
+    proof { lemma_reject_inv(s5, approver, 1, t, s.view()); }
+
+    // TR-3 non-vacuity: a pending request, its agent key revoked and
+    // re-registered to the same account; the request stays Void and
+    // approving it fails.
+    let ghost s6 = s.view();
+    let r = request_action(&mut s, &agent, x.to_owned(), t);
+    assert(r is Ok);
+    proof { lemma_request_inv(s6, agent, s.view().requests[2].action, t, s.view()); }
+    let ghost s7 = s.view();
+    let r = revoke_key(&mut s, &0, &1, t);
+    assert(r is Ok);
+    proof { lemma_revoke_inv(s7, 0, 1, t, s.view()); }
+    let ghost s8 = s.view();
+    let r = add_principal(&mut s, &0, 1, 10, Role::Agent);
+    assert(r is Ok);
+    proof { lemma_add_inv(s8, 0, 1, 10, Role::Agent, s.view()); }
+    let st = request_status(&s, 0);
+    assert(st == Some(RequestStatus::Approved));
+    let st = request_status(&s, 1);
+    assert(st == Some(RequestStatus::Rejected));
+    let st = request_status(&s, 2);
+    assert(st == Some(RequestStatus::Void));
+    let r = approve(&mut s, &approver, 2, x, t);
+    assert(r == Err::<ApprovalProof<u64, u64>, ApprovalError>(ApprovalError::AgentRevoked));
 }
 
 } // verus!

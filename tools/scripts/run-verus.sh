@@ -12,8 +12,9 @@
 # - fails if fewer than status.toml's verus_min_verified items verify;
 # - requires verus/canary/false_lemma.rs to FAIL;
 # - runs tools/scripts/erasure-check.py against the pinned upstream file;
-# - applies each verus/mutants.toml mutant to a copy of src/ and requires
-#   Verus to reject it.
+# - applies each verus/mutants.toml mutant (one edit, or an `edit` list
+#   changing spec and code together) to a copy of src/ and requires Verus
+#   to reject it.
 # VERUS_LOG_DIR (optional) receives each run's output.
 
 set -euo pipefail
@@ -121,11 +122,12 @@ if [ -f "$VERUS_DIR/mutants.toml" ]; then
 import sys, tomllib, pathlib
 muts, want, src = sys.argv[1], sys.argv[2], pathlib.Path(sys.argv[3])
 m = next(m for m in tomllib.load(open(muts, "rb"))["mutant"] if m["id"] == want)
-f = src / m["file"]
-text = f.read_text()
-if text.count(m["old"]) != 1:
-    sys.exit(f"mutant {want}: `old` occurs {text.count(m['old'])} times in {m['file']}")
-f.write_text(text.replace(m["old"], m["new"]))
+for e in m.get("edit", [m]):
+    f = src / e["file"]
+    text = f.read_text()
+    if text.count(e["old"]) != 1:
+        sys.exit(f"mutant {want}: `old` occurs {text.count(e['old'])} times in {e['file']}")
+    f.write_text(text.replace(e["old"], e["new"]))
 PY
         if run_verus "$work/src/lib.rs" "$LOG_DIR/mutant-$id.log"; then
             echo "::error::verus: mutant $id survived"

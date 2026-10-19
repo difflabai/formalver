@@ -59,6 +59,11 @@ pub open spec fn byte_len(s: Seq<char>) -> nat {
 
 /// `res` and the store's post-state `s2` are what the spec `sp` says for
 /// pre-state `s`: on `Err(e)` the store is unchanged.
+///
+/// Every core mutator `ensures refines(<op>_spec(..), ..)`, which is TX-0
+/// (failure leaves the store as it was) and TX-1..5/7 (exact result, guard
+/// order and post-state) at every store size; `authenticate` ensures
+/// `auth_spec` (TX-3). PROP: TX-0 TX-1 TX-2 TX-3 TX-4 TX-5 TX-7
 pub open spec fn refines<A, K, T>(
     sp: Result<(AbsStore<A, K>, T), ApprovalError>,
     s: AbsStore<A, K>,

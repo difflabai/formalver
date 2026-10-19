@@ -21,7 +21,7 @@ rather than a model of it. The shell is thin enough to cover with tests,
 review and wasm inspection.
 
 **Status (2026-10-19, formalver main `519528c`, pin `081a3a6`).** Every
-milestone except M5 is built and green in CI. What keeps the contract short
+milestone is built and green in CI (M5, Verus path A, since 2026-10-19). What keeps the contract short
 of "fully verified" is the spec sign-off, the testnet deployment and the
 unmechanised steps listed under "Next".
 
@@ -36,7 +36,7 @@ unmechanised steps listed under "Next".
 | Prolog requirements oracle | M4 | C-1..C-10 and C-2t pass; MC-1 51,568 states; MC-2 agrees both ways; MC-3 (Prolog graph = TLC graph) nightly (§8). |
 | Ghost-store harnesses | M2 | `h_page_arith`, `h_proto_*`, `h_count_*`, `h_refine_*`, `h_store_laws_*`, `h_oracle_*`, `h_action_len(_multi)` green; nightly mutants job. |
 | Shell and store | M3 | `near-tests/` (`store_diff.rs`, `shell.rs`, `ident.rs`, golden Borsh), shell mutants killed, `wasm-surface.sh` clean, `api_facts.pl` generated; job `near-unit`. |
-| Verus | M5 | Not started. Path B superseded by §18; path A spike is a pending decision. |
+| Verus on the real core | M5 | Path A (§7): the twin refines the spec machine for every core function, and INV, LEM, HIST, TR-1/2/3/4/6/7 and RD-1/2/4/5/7/8 are Verus lemmas at every size (49 properties on `layer = "verus"`); erasure check, canary, spec, code and paired mutants; job `verus`. |
 | Sandbox | M6 | RT-*, RT-TRACE, SH-9/10, RES-1, RES-3 and the reproducible-wasm surface diff pass on near-sandbox 2.13.4; job `sandbox`. Assumptions move to `in-progress` as their tests land. |
 | Deployment | M7 | `check_deployment.sh` and `verifier_rules.pl` pass against a sandbox deployment; job `deploy-check`. No testnet deployment. |
 
@@ -223,13 +223,15 @@ scope exclusions that keep a machine-checked model of it out of reach; see
 | ASM-META | NEP-366: the inner receipt has signer = relayer, so relayed calls fail `IndirectCall`. The same holds for NEP-518 eth-implicit accounts. | med | RT-METATX |
 | ASM-FCKEY | Function-call keys restrict receiver and methods, can't attach a deposit, and have an allowance. Function-call keys can't add keys. | high | RT-FCKEY |
 | ASM-COMPILE | rustc/LLVM/wasm-opt preserve core semantics from host to wasm32. The release profile keeps `overflow-checks = true`. The only on-chain `usize` use is `action.len() > MAX_ACTION_LEN`; every value is far below 2³², so host and wasm32 agree (`MemStore` is off-chain). `cfg(feature = "borsh")` gates only `use` and `derive` items, so Kani (borsh off) and the wasm (borsh on) compile the same logic. | n/a | RT-CODEHASH, RT-TRACE, `check-pin.sh` grep |
-| ASM-MODEL | *Until M5 (code-level Verus):* a core step on a state larger than the Kani bound behaves like one within it (the §6.3 small-scope argument). | med | Plain-mode random traces of ≤200 steps, MC-2. Discharged at every store size by the L2 chain (§18.6): ST-8 (code = `expect`/`protocol`), LINK (`expect`/`protocol` = Lean `cstep` on every footprint view of a bounded domain), LEAN-DELTA (`cstep` = the model's step). What stays trusted is ASM-IDENT and LINK's domain argument. Removed by M5 path A. |
+| ASM-MODEL | *Kani-layer properties only (the verus layer, M5 path A, does not use it):* a core step on a state larger than the Kani bound behaves like one within it (the §6.3 small-scope argument). | med | Plain-mode random traces of ≤200 steps, MC-2. Discharged at every store size by the L2 chain (§18.6): ST-8 (code = `expect`/`protocol`), LINK (`expect`/`protocol` = Lean `cstep` on every footprint view of a bounded domain), LEAN-DELTA (`cstep` = the model's step). What stays trusted is ASM-IDENT and LINK's domain argument. Not needed by the 49 verus-layer properties (M5 path A). |
 | ASM-SPEC | The specs (`spec.rs`, Verus, Prolog) state the intended behaviour. | n/a | Independent authorship, signed off by a **named human who did not write `approval-core`** (`[review] spec_reviewer`), required before any K/V property is `verified*`. Also traceability (C-7), mutants and three-way trace replay. |
 | ASM-TOOLS | Kani (CBMC, unwinding assertions on), Verus with Z3, and scryer-prolog are sound at the pinned versions. | n/a | `tools/versions.env`, the canary lemma must fail, mutants must be caught |
 | ASM-OWNER | The owner registers keys honestly. It could otherwise register two accounts it controls and approve anything. | policy | DEP-1 (multisig/DAO), VER-4 |
 | ASM-DEPLOY | The deployed code is the reproducible build of the pin, locked at deploy. | policy | DEP-1, VER-2, VER-3 |
 | ASM-DISPLAY | The approver UI renders `action` faithfully (escaped). The approver's tx commits to the text (TX-5); this assumption covers only its rendering. | policy | none |
 | ASM-STRLEN | *(M5 only.)* `String::len` is the UTF-8 byte length, and `is_empty ⇔ len = 0`. | high | none |
+| ASM-DERIVE | *(M5 only.)* `#[derive(Clone)]` clones field-wise and `#[derive(PartialEq)]` on `Role` compares variants. The twin keeps the data types outside `verus!`, so their derives are untouched, and declares this in `verus/TRUSTED.toml`. | high | none |
+| ASM-IDTYPE | *(M5 only.)* On `AccountId` and `PublicKey`, `==` is structural and `clone` returns an equal value: the `eq_laws`/`clone_laws` hypotheses every Verus core function requires. The equivalence half of ASM-IDENT, without its parametricity half. | high | ST-7 |
 
 ---
 
@@ -265,7 +267,7 @@ Fixed in `3426c92` (PR #15):
 | F-6 | `revoke_key` calls `remove_principal` before knowing the key exists. The core's "no writes on `Err`" holds only because removing an absent key is a no-op (L-REMOVE-ABSENT). On-chain the call panics before any flush, so nothing is written. | ST-2 records it. Optionally reorder upstream (OQ-5). |
 | F-7 | `approve`'s `LogFull` branch is unreachable under `Inv`: a pending request implies `#L < #R ≤ MAXU`. | Kept as defence in depth. LEM-3. |
 | F-9 | `predecessor == signer` also admits code deployed on the signer's own account. | DEP-1 requires registered keys to be function-call keys with receiver `C`. RT-SELFACCT. |
-| F-10 | **formalver tooling defects:** <br>(a) `run-prolog.sh` ends with `\|\| true` and runs `-g "run_tests, halt."`; a failing `run_tests` falls through to the toplevel, which exits 0 at EOF. Failures never fail the script. <br>(b) `run-verus.sh` and the README's direct `verus` command omit `--cfg 'feature="verus"'`, so ironclaw's `cfg(feature="verus")` spec and proof modules are never compiled [conf: high]. The README's `./tools/get-z3.sh` lives under `source/` in the Verus repo. <br>(c) ironclaw proofs take their conclusion as a `requires`. <br>(d) ironclaw's gitlink `d313f44` ≠ recorded pin `34550ad`. <br>(e) No CI. | M0 fixed (a) and (e). (b) is still open in `run-verus.sh`; it matters from M5 or for ironclaw. (d): `check-pin.sh` is per project and CI runs it for near-approval only (OQ-6). Rule for this project: no proof assumes its conclusion. |
+| F-10 | **formalver tooling defects:** <br>(a) `run-prolog.sh` ends with `\|\| true` and runs `-g "run_tests, halt."`; a failing `run_tests` falls through to the toplevel, which exits 0 at EOF. Failures never fail the script. <br>(b) `run-verus.sh` and the README's direct `verus` command omit `--cfg 'feature="verus"'`, so ironclaw's `cfg(feature="verus")` spec and proof modules are never compiled [conf: high]. The README's `./tools/get-z3.sh` lives under `source/` in the Verus repo. <br>(c) ironclaw proofs take their conclusion as a `requires`. <br>(d) ironclaw's gitlink `d313f44` ≠ recorded pin `34550ad`. <br>(e) No CI. | M0 fixed (a) and (e). M5 fixed (b): `run-verus.sh` always passes the cfg, so ironclaw's Verus code now compiles and fails (it predates vstd's current API; out of scope). (d): `check-pin.sh` is per project and CI runs it for near-approval only (OQ-6). Rule for this project: no proof assumes its conclusion. |
 | F-15 | PR #15 changes the shell: a `reject` method, `action_rejected`, `key_added` and `key_revoked` events, `agent_key_revoked_at` / `approver_key_revoked_at` on proof views, `get_revocation`, and a `v` storage prefix for revocations. SH-4..SH-8, SH-10, SH-11 (export count: 16 at `main`, the row said 13), C-4, ST-5, RES-1 and requirement D11 ("no rejection") described the `5736251` shell. | **Done at M3** (2026-10-15): those rows, their `traceability.pl` and `status.toml` descriptions, and C-6's check describe the PR #15 shell; D11 reads "no upgrade, ownership transfer, expiry or threshold" and D17 covers rejection. |
 | F-17 | near-sdk-core 4.2.3 (in the lockfile) accepts **ML-DSA-65** public keys (1952 bytes; nearcore 2.13, protocol 85). With ML-DSA-65 keys on both sides, the worst-case `action_approved` line is 18256 B, over the 16384 B limit: the core accepts the request, and that approver key can never approve it (the call fails with `TotalLogLengthExceeded`). One ML-DSA-65 key on either side still fits (≤ 15775 B), so another approver with a shorter key can. Storage per request also grows (`B_req` 4160 B; 16 pending = 0.666 NEAR). The README's worst case assumes secp256k1. | **Fixed upstream** in trust-framework PR #19 (pin `081a3a6`, 2026-10-17): `add_agent`/`add_approver` refuse ML-DSA-65 keys after the owner check. Checked by SH-13 (`f17_mldsa65_keys_are_refused`). Supporting them later needs a shorter event or a lower action limit (README). |
 | F-16 | `insert_revocation` is "written at most once per id" by contract, and the stores disagree otherwise: `MemStore` keeps the first write, the contract's `LookupMap` the last. The core writes `P(k).reg` on revoke, which INV-11 keeps out of `V`, so the case is unreachable from `Init`. | INV-11/INV-12 prove the law holds on reachable states. ST-2 records the call. |
@@ -670,9 +672,52 @@ seeded against the upstream suite during planning (27/27 killed).
 
 ## 7. Verus (M5): real code first, model as fallback
 
-**Status (2026-10-14): not started; the spike is a pending decision.**
-`verus_min_verified = 0`. Path A is the only route to `evidence = proof` on
-the real code.
+**Status (2026-10-19): path A built.** Gabe approved path A, upstream
+adoption of the `approvals` loop and ASM-STORE as a tested assumption on
+2026-10-19. The verified twin (`verus/`) refines a spec machine over
+`AbsStore` for every public core function, and the catalogue's INV, LEM,
+HIST, TR and RD properties are Verus lemmas over that machine, so 49
+properties now sit on `layer = "verus"`, `evidence = "proof"`, at every store
+size (they stay `in-progress` until `spec_reviewer` is set; §12). See
+"As built" below; the original plan follows it for reference.
+
+**As built.**
+- `verus/src/lib.rs` is the pinned `core/src/lib.rs` plus ghost code. Every
+  mutator `ensures refines(<op>_spec(old@, ..), old@, store@, res)` (TX-0..5,
+  TX-7), and the readers `ensures` their read specs (RD-1, RD-2, RD-7, RD-8).
+  `abs.rs` holds `AbsStore` and the spec machine, written from the catalogue.
+- `props.rs`: `full_inv` (INV-0..16, LEM-2) holds on the empty store and every
+  operation preserves it (`lemma_full_inv`); LEM-1/3/4 follow.
+- `hist.rs`: `hist(s, op, exec(s, op))` (HIST-1..6, 8..10) from every
+  invariant state, HIST-7's spec half from any state, INV-10 and TR-4 under
+  ASM-TIME (`lemma_timed`), and TR-6 key by key (`lemma_tr6`; the sum over
+  keys follows).
+- `runs.rs`: runs of any length. TR-2 (a request is decided at most once),
+  TR-3 (revoked while pending ⇒ never approved, re-registration included),
+  TR-1 (provenance from init, with the agent registration held throughout)
+  and TR-7 (the revocation record lists exactly the successful revokes, each
+  once, with its time, each id issued by an earlier Add).
+- `reads.rs`: RD-2/RD-5 (a page is exactly the log slice, no drops), RD-4
+  (the client loop enumerates the log once, in order), RD-7, RD-8.
+- `witness.rs` runs the real core on a `MemStore<u64, u64>` to approved,
+  rejected and void (revoked, re-added, approve fails `AgentRevoked`).
+- Trust base: ASM-DERIVE, ASM-STRLEN, ASM-TOOLS (`verus/TRUSTED.toml`), plus
+  two hypotheses the functions `require`: ASM-IDTYPE (`==`/`clone` laws for
+  `AccountId`/`PublicKey`) and ASM-STORE (the NEAR `Store` impl meets the
+  trait contract; verified for `MemStore`, tested by ST-4..6 for the NEAR
+  store). ASM-MODEL and ASM-IDENT's parametricity half are not needed for
+  verus-layer properties.
+- `erasure-check.py` strips the ghost code and requires token equality with
+  the pinned upstream file, modulo `verus/REWRITES.toml` (test-only
+  `MemStore` helpers; `approvals` until the re-pin to trust-framework PR #20,
+  which adopts the twin's loop upstream).
+- Mutants (`verus/mutants.toml`): spec mutants, code mutants, and paired
+  mutants that change spec and code together (dropping separation of
+  duties, `active_from <= id`, or the pending count) so only the property
+  lemmas can reject them.
+- What Kani still owns: non-`Inv` states (HIST-7's code half, ROB-1/2, the
+  `h_raw_*` harnesses), store protocol and footprint (ST-*, CUT-*), error
+  reachability (TR-5), byte boundaries (ROB-3) and bounded work (ROB-4).
 
 **Spike (2 days).** Wrap a copy of `approval-core` in `verus!` (a "verified
 twin"). Try to verify `request_action`, `approve`, `approvals`,
@@ -1026,7 +1071,7 @@ M3 run in parallel. Each milestone ends by updating the statuses it lists.
 | **M2** | Ghost-store harnesses | • `h_page_arith`, `h_proto_*`, `h_count_*`, `h_refine_*`, `h_store_laws_*` and `h_action_len` pass, with their covers satisfied. <br>• Every §6.4 mutant except the must-survive pair is killed by Kani and by plain mode. <br>• RD-4 plain check passes (log ≤ 250; `l ∈ {1, 2, 99, 100, 101, 200}`). <br>• **Statuses:** INV-0, TR-5, RD-3, RD-4, RD-6, ROB-2..4 and ST-1..3 updated. | 1–2 |
 | **M3** | near-sdk shell and store | • `store_diff.rs` (10k × 50, with reload) passes. <br>• `shell.rs` passes. <br>• All shell mutants are killed. <br>• Golden Borsh bytes are committed. <br>• `wasm-surface.sh` diff on the non-reproducible build is clean. <br>• `api_facts.pl` generated. <br>• **Statuses:** ST-4..6, SH-1..8, SH-11, SH-12, RES-1 and RES-2 updated. | 2–3 |
 | **M4** | Prolog | • `run-prolog.sh near-approval` exits 0 (strict). <br>• C-1..10 pass, or each failure has a recorded decision (C-4/F-8). <br>• MC-1 and MC-1s meet the §5.11 criteria, each in < 5 min, and `mc1_state_floor` is recorded. <br>• Traces checked in; MC-2 replay passes on the core and `spec.rs`. <br>• `code_facts.pl` regeneration shows no diff. <br>• **Statuses:** C-1..10, MC-1 and MC-2 updated. | 3–4 |
-| **M5** | Verus (2-day spike, then path A; path B superseded by §18) | • Spike decision recorded. <br>• `verus/canary/false_lemma.rs` fails. <br>• **Path A:** the twin verifies with refinement `ensures` for every public core fn and `MemStore`; the erasure check passes; every `REWRITES.toml` entry has a passing Kani equivalence harness. Core properties become `verified-with-assumptions` / `proof`, with trusted ASM-IDENT, ASM-STRLEN and listed std specs. <br>• **Path B:** all lemmas in §7 are proved under the hygiene gate; spec mutants each break a lemma. Status becomes `verified-with-assumptions` / `model-proof` + ASM-MODEL. | 9–15 |
+| **M5** | Verus (2-day spike, then path A; path B superseded by §18) | • Spike decision recorded. <br>• `verus/canary/false_lemma.rs` fails. <br>• **Path A:** the twin verifies with refinement `ensures` for every public core fn and `MemStore`; the erasure check passes; every `REWRITES.toml` entry has a passing Kani equivalence harness (as built: the one deployed rewrite, `approvals`, was adopted upstream instead, trust-framework PR #20; the others are test-only `MemStore` helpers). Core properties become `verified-with-assumptions` / `proof`, with trusted ASM-IDENT, ASM-STRLEN and listed std specs. <br>• **Path B:** all lemmas in §7 are proved under the hygiene gate; spec mutants each break a lemma. Status becomes `verified-with-assumptions` / `model-proof` + ASM-MODEL. | 9–15 |
 | **M6** | Sandbox | Needed F-12, resolved upstream (R-8). <br>• RT-* (including RT-TRACE and RT-BATCH), SH-9 and SH-10 pass on a pinned neard with the reproducible wasm. <br>• `wasm-surface.sh` diff on the reproducible build is clean. <br>• RES measured, with thresholds and both hashes recorded. <br>• RT-METATX outcome documented. <br>• `[assumptions]` statuses filled from observations. <br>• `cargo expand` review of SH-9/RD-6 signed off. <br>• **Statuses:** RT-*, SH-9, SH-10 and RES-3 updated. | 3–5 |
 | **M7** | Deployment and automation | • A testnet deployment with the DEP-1 lock batch and at least one agent key and one approver key registered; `check_deployment.sh` passes; `[deployment.testnet]` filled. <br>• `verifier_rules.pl` encodes VER-1..8; RT-SPOOF and a VER-8 check against the testnet proof demonstrate them. <br>• Every CI job live; pin-bump procedure documented; `docs/architecture.md` gains the Kani, shell and deployment layers. <br>• **Statuses:** DEP-1 and VER-1..8 updated. | 2 |
 
@@ -1067,7 +1112,7 @@ the review; M7 adds 2 and needs a testnet decision.
 | `tla` | PR, push | any §17.3 check failing; a witness or the unfair liveness run passing; a spec mutant surviving |
 | `prolog` | PR, push | any failure; drift in `conformance/traces`; MC-1/MC-1s state count below the floor |
 | `lean` | PR, push | a `sorry` or forbidden construct; an axiom beyond `propext`, `Classical.choice`, `Quot.sound`; a canary compiling; guard order ≠ `tla_facts.pl`; a REF-5L, MC-4 or LINK difference; a Lean spec mutant surviving |
-| `verus` | PR, push (from M5) | any error; count below the floor; canary verifies; a spec mutant verifies; hygiene |
+| `verus` | PR, push | any error; count below `verus_min_verified`; canary verifies; a spec, code or paired mutant verifies; hygiene (trusted constructs outside `trusted.rs`); erasure check (twin ≠ pinned core outside `REWRITES.toml`) |
 | `near-unit` | PR, push | any failure; lockfile version mismatch; export or import diff (non-reproducible build) |
 | `sandbox` | nightly; submodule bump; manual (from M6) | any failure; export or import diff (reproducible build); threshold exceeded |
 | `status-lint` | PR | a non-`unverified` ID without its artifact or PROP tag; `verified*` without a passing harness in this run; `evidence` not allowed for its `layer` (§12); a K/V property past `unverified` without spec sign-off |
@@ -1084,7 +1129,7 @@ runners (`vars.CI_RUNNER`). On a PR, `pin` always runs and each other job
 runs only when the diff touches its inputs (`tools/scripts/ci-areas.sh`;
 Markdown changes run none). Push to `main`, nightly and manual runs run
 every job.
-Not yet built: `verus` (M5).
+`verus` (M5) since 2026-10-19.
 
 ## 15. Risks
 
