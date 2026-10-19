@@ -20,7 +20,7 @@ dependencies, so Kani and Verus can target **the deployed logic itself**
 rather than a model of it. The shell is thin enough to cover with tests,
 review and wasm inspection.
 
-**Status (2026-10-19, formalver main `519528c`, pin `081a3a6`).** Every
+**Status (2026-10-19, pin `293f4a6`).** Every
 milestone is built and green in CI (M5, Verus path A, since 2026-10-19). What keeps the contract short
 of "fully verified" is the spec sign-off, the testnet deployment and the
 unmechanised steps listed under "Next".
@@ -708,9 +708,12 @@ size (they stay `in-progress` until `spec_reviewer` is set; §12). See
   store). ASM-MODEL and ASM-IDENT's parametricity half are not needed for
   verus-layer properties.
 - `erasure-check.py` strips the ghost code and requires token equality with
-  the pinned upstream file, modulo `verus/REWRITES.toml` (test-only
-  `MemStore` helpers; `approvals` until the re-pin to trust-framework PR #20,
-  which adopts the twin's loop upstream).
+  the pinned upstream file, modulo `verus/REWRITES.toml`, which may only
+  list test-only `MemStore` helpers: `run-verus.sh` rejects a rewrite of
+  deployed code. The one deployed function Verus could not take as written,
+  `approvals` (`filter_map` has no vstd spec), became a plain loop upstream
+  (trust-framework PR #20, pin `293f4a6`), so the deployed core is verified
+  token for token.
 - Mutants (`verus/mutants.toml`): spec mutants, code mutants, and paired
   mutants that change spec and code together (dropping separation of
   duties, `active_from <= id`, or the pending count) so only the property

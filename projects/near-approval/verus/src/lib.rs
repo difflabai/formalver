@@ -899,9 +899,6 @@ where
 /// approval log. `limit` is clamped to [`MAX_PAGE_SIZE`], so callers should
 /// page until an empty page comes back (or `from_index` reaches
 /// `approval_count()`), not until a page is shorter than `limit`.
-// REWRITE (verus/REWRITES.toml): upstream collects
-// `(from_index..end).filter_map(..).filter_map(..)`; vstd has no `FilterMap`
-// spec and one can't be added outside vstd (orphan rule), so the twin loops.
 pub fn approvals<A, K, S>(store: &S, from_index: u64, limit: u64) -> (res: Vec<ApprovalProof<A, K>>)
 where
     A: Clone,
@@ -917,6 +914,9 @@ where
     let end = from_index
         .saturating_add(limit.min(MAX_PAGE_SIZE))
         .min(store.approval_count());
+    // A plain loop rather than an iterator chain: Verus (formalver M5) has
+    // no specification for `filter_map`, and this keeps the verified copy
+    // token-for-token identical to this code.
     let mut out = Vec::new();
     let mut i = from_index;
     while i < end

@@ -11,6 +11,7 @@
 # upstream code (strategy.md §7, path A). For it this script also:
 # - fails if fewer than status.toml's verus_min_verified items verify;
 # - requires verus/canary/false_lemma.rs to FAIL;
+# - rejects any REWRITES.toml entry that rewrites deployed code;
 # - runs tools/scripts/erasure-check.py against the pinned upstream file;
 # - applies each verus/mutants.toml mutant (one edit, or an `edit` list
 #   changing spec and code together) to a copy of src/ and requires Verus
@@ -101,6 +102,14 @@ if grep -nE '\b(assume|admit)\(|external_(body|type_specification|fn_specificati
     fail=1
 else
     echo "verus: hygiene ok (trusted constructs only in src/trusted.rs)"
+fi
+
+# Deployed code is verified as written: only test-only (MemStore) rewrites.
+if ! python3 -I -c 'import sys,tomllib
+bad=[r["fn"] for r in tomllib.load(open(sys.argv[1],"rb")).get("rewrite",[]) if r.get("deployed",True)]
+print("\n".join(bad)); sys.exit(1 if bad else 0)' "$VERUS_DIR/REWRITES.toml" > "$LOG_DIR/rewrites.log"; then
+    echo "::error::verus: REWRITES.toml rewrites deployed code ($(tr '\n' ' ' < "$LOG_DIR/rewrites.log")); change it upstream instead"
+    fail=1
 fi
 
 upstream_path=$(python3 -I -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["project"]["upstream_path"])' \

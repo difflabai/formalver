@@ -2,14 +2,14 @@
 name = "near-approval"
 upstream = "https://github.com/difflabai/trust-framework"
 upstream_path = "contracts/approval"
-pinned_commit = "081a3a645801f2a68f2c5d3d9b707dfbc8a2993c"   # trust-framework main (2026-10-17): PR #15 code plus PR #19 (add_agent/add_approver refuse ML-DSA-65 keys, F-17); core unchanged since 3426c92
-last_reviewed = "2026-10-17"
+pinned_commit = "293f4a6641ca9bf574b56e8d5f86fd55ca0fe554"   # trust-framework main (2026-10-19): PR #19 plus PR #20 (approvals as a plain loop, adopted from the Verus twin; no behaviour change)
+last_reviewed = "2026-10-19"
 verus_min_verified = 94     # M5 path A (2026-10-19): twin + property lemmas; run-verus.sh fails below it
 mc1_state_floor = 51568     # recorded at M4 (2026-10-11); MC-1 fails below it
 # RT-CODEHASH: `cargo near build reproducible-wasm` of the pin (sandbox job
 # asserts it; recompute on every pin bump).
-reproducible_wasm_sha256 = "3f48c2f2b121d359507ebc696c8a402e2ae7cba1c57552a5e18c49a65761bde9"
-reproducible_code_hash = "5G334oPHzjDvPLXKUSstbaf3BzUPaj1sWZnDhy5Baauv"
+reproducible_wasm_sha256 = "9824b77f3b281806ed3a8a00955ce1b3eee33dd2df8cc1c22c83aeb4042c5542"
+reproducible_code_hash = "BEuSfoqfJsByHQ7uYihKRcTFquESwHgD7zpqiL1VRDX7"
 release_overflow_checks = true  # ASM-COMPILE: check-pin.sh fails unless upstream [profile.release] sets overflow-checks = true
 
 # Status values: unverified | in-progress | verified | verified-with-assumptions | stale
@@ -55,7 +55,7 @@ near_proof_arena = "cb16c4090a82a6179d8e1a23d6e83e74e9d5d017"  # contract v1; to
 "Cargo.lock" = "3ef5ab18d24eb2fb74fc3033c9d2fefa611568b6e401127de8eb91557791b939"
 "README.md" = "bca19d675be6ff2e22ab60d130c238b4ea39fdcef3953806e8914bbbadcd6db6"
 "core/Cargo.toml" = "0a872e27977c514a3e35cba2afd0c4b9945f4eb6fbbfe60dd731d04937d4484a"
-"core/src/lib.rs" = "f5d72cc7bedd0866dfb7891246999315338410f06be00210e3ffd21452ea0d0c"
+"core/src/lib.rs" = "a3d77f6c26f5c759b7a941dbeb5361bc6225297cd6eda358e152e92e6ec722d3"
 "core/src/tests.rs" = "a5b29506a777012df246763a71d0d6bd7ac8f18c1927e341de766f8eab24c5b9"
 "contract/Cargo.toml" = "fcc73488270168cd81fa3a8da8cdc6ef4e87b5e31b195ac0b364a0aec571e736"
 "contract/src/lib.rs" = "be9d35ba7a0cca151acf79882872eba18c6cf9078651fae94c35b55b389d0272"

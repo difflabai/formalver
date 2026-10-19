@@ -3,17 +3,12 @@
 # (strategy.md §7, path A). Everything else must match token for token once
 # ghost code is stripped.
 #
-# A rewrite of deployed code needs a Kani equivalence harness
-# (twin::f == upstream::f) and is reported with ASM-MODEL until it has one.
+# Deployed code may not be rewritten: run-verus.sh rejects any entry with
+# `deployed = true`. A deployed function Verus can't handle as written is
+# changed upstream instead (as `approvals` was, trust-framework PR #20).
 # MemStore is test-only (the contract's Store impl is in the contract crate),
 # so its rewrites only change the satisfiability witness, not the proof of
 # the deployed path.
-
-[[rewrite]]
-fn = "approvals"
-deployed = true
-why = "upstream collects (from..end).filter_map(..).filter_map(..); vstd has no FilterMap spec and one can't be added outside vstd (orphan rule)"
-equivalence = "kani: h_twin_approvals (to do)"
 
 [[rewrite]]
 fn = "replace_request"

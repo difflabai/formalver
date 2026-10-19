@@ -2,9 +2,9 @@
 //!
 //! Upstream: difflabai/trust-framework `contracts/approval/contract/src/lib.rs`
 //!           and `contracts/approval/core/src/lib.rs`
-//! Pin:      081a3a645801f2a68f2c5d3d9b707dfbc8a2993c (trust-framework PR #19: ML-DSA-65 keys refused)
+//! Pin:      293f4a6641ca9bf574b56e8d5f86fd55ca0fe554 (trust-framework PR #20: approvals as a plain loop)
 //! sha256:   contract/src/lib.rs be9d35ba7a0cca151acf79882872eba18c6cf9078651fae94c35b55b389d0272
-//!           core/src/lib.rs     f5d72cc7bedd0866dfb7891246999315338410f06be00210e3ffd21452ea0d0c
+//!           core/src/lib.rs     a3d77f6c26f5c759b7a941dbeb5361bc6225297cd6eda358e152e92e6ec722d3
 //! Covers:   every `#[near]` method of `ApprovalContract`, its `Store` impl, `caller()`,
 //!           `now()`, `ok()`, the views and event payloads, run under near-sdk's
 //!           mocked runtime (`unit-testing`, real `VMLogic` from near-vm-runner).
