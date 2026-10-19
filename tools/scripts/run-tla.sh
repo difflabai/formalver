@@ -6,7 +6,8 @@
 #   safety     TLC, MC_Safety: Inv, StepProperty (TLA-SAFE); then each
 #              Witness_* invariant must be VIOLATED (non-vacuity, TR-5)
 #   liveness   TLC, MC_Liveness: Live1 and Inv under fairness (TLA-LIVE-1/2);
-#              MC_Liveness_Unfair: Live1 must be VIOLATED without fairness
+#              MC_Liveness_Unfair: Live1 must be VIOLATED without fairness;
+#              MC_Liveness_SF: Live1Inf under strong fairness (TLA-LIVE-1s)
 #   apalache   Apalache, MC_Apalache: Init => Inv, Inv /\ Next => Inv' and
 #              Inv /\ Next => StepProps (TLA-IND); IndWitness must be VIOLATED
 #   trace      REF-5: kani/src/trace.rs runs the real core and checks it
@@ -90,6 +91,10 @@ check_liveness() {
   tlc "$d" MC_Liveness.tla MC_Liveness_Unfair.cfg "$log"
   grep -qE 'Temporal propert(y|ies) .* violated' "$log"
   report liveness-unfair $? "Live1 must fail without fairness" "$log"
+  log="$logs/liveness_sf.log"
+  start=$(date +%s)
+  tlc "$d" MC_Liveness.tla MC_Liveness_SF.cfg "$log"
+  tlc_ok "$log"; report liveness-sf $? "$(states "$log"), $(( $(date +%s) - start ))s" "$log"
 }
 
 check_apalache() {

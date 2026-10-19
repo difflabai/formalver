@@ -1,0 +1,10 @@
+--- a/ApprovalLean/Machine.lean
++++ b/ApprovalLean/Machine.lean
+@@ -208,6 +208,7 @@
+     | some r =>
+       if r.act ≠ x then .actionMismatch
+       else if signer = r.acct then .selfApproval
++      else if (prin cfg s r.key).pending ≥ cfg.maxPending then .tooManyPending
+       else .ok
+ 
+ /-- `RejectErr`. -/

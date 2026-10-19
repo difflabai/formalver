@@ -25,6 +25,7 @@ every mutant verdict. Times vary from run to run.
 | `IndWitness` (IndInit has approved, rejected and void requests and a revocation) | violated, as required | 8 s |
 | TLA-LIVE-1 (TLC, `MC_Liveness`, with `Inv`) | no error | 199,145 distinct states, 38 s |
 | TLA-LIVE-1 without fairness | violated, as required | seconds |
+| TLA-LIVE-1s (TLC, `MC_Liveness_SF`, `Live1Inf` under strong fairness; 2026-10-19, TLC 1.7.4) | no error | 199,145 distinct states, 36 s |
 | REF-5, core vs `tla.rs` | 60 traces × 80 calls equal on every step; every error except `TooManyPending` and `LogFull` produced; ≥ 5 revival attempts, ≥ 20 rejections and revocations | < 1 s |
 | REF-5, TLC `TraceCheck` | every trace accepted | 4,860 states, 7 s |
 
@@ -74,8 +75,9 @@ Plain mode runs the same refinement checks inside every `h_step_*` test.
 
 ## Not covered
 
-- Constants are small (strategy.md section 17.3); `ASM-TLA-SCOPE` and
-  `ASM-MODEL` carry the rest.
+- Constants are small (strategy.md section 17.3). The every-size
+  counterparts are Lean's: LEAN-IND/STEP/TR for safety and LEAN-LIVE for
+  TLA-LIVE-1/1s (strategy.md sections 18.3, 18.7).
 - A8 (each call is one atomic step) stays a runtime assumption (ASM-SEQ,
   ASM-ATOMIC).
 - `TooManyPending` with the real cap of 16 is covered by Kani (`h_raw_request`),
