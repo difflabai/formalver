@@ -180,9 +180,9 @@ observed = "ST-4: the real contract store, persisted and reloaded before every s
 status = "in-progress"
 
 [assumptions.ASM-IDENT]
-statement = "PartialEq on AccountId/PublicKey is an equivalence matching Borsh-byte equality; the core uses A/K only via Clone and PartialEq (parametricity justifies small identities); harnesses use opaque newtypes so a new trait bound breaks the build"
+statement = "PartialEq on AccountId/PublicKey is an equivalence matching Borsh-byte equality; the core uses A/K only via Clone and PartialEq (parametricity: a footprint maps injectively into the harness identities, ST-8W); harnesses use opaque newtypes so a new trait bound breaks the build. Which views LINK covers is no longer part of it (LEAN-COVER, K-LINK-T)"
 level = "high"
-checked_by = ["ST-7"]
+checked_by = ["ST-7", "ST-8"]
 source = ["https://docs.rs/near-sdk/5.29.1/near_sdk/struct.PublicKey.html", "https://nomicon.io/DataStructures/Account.html"]
 observed = "ST-7: on near-sdk 5.29.1 / near-sdk-core 4.2.3 / near-account-id 2.6.0, == on AccountId and PublicKey equals Borsh-byte equality, is reflexive and symmetric, and survives clone and a Borsh round trip, over edge identities (64-char and implicit accounts, keys of all three curves differing in one byte) and 200k random pairs. Parametricity half: the Kani harnesses instantiate A/K with opaque newtypes (Acct, Key) implementing only Clone, PartialEq, Debug and Arbitrary, so a new trait bound in the core breaks the build"
 status = "in-progress"
@@ -239,8 +239,8 @@ status = "in-progress"
 [assumptions.ASM-MODEL]
 statement = "Until M5 path A: a core step on a state larger than the Kani bound behaves like one within it (strategy section 6.3)"
 level = "med"
-checked_by = ["MC-2", "ST-8", "LINK", "LEAN-DELTA"]
-observed = "L2 chain (strategy section 18.6): ST-8 shows the code's result and store calls equal ghost::expect / ghost::protocol at every store size; LINK shows expect/protocol equal the Lean cstep on all 736,500 footprint views of its bounded domain; LEAN-DELTA proves cstep refines the model's step on concrete stores of every size. The state bound is gone; what remains trusted is ASM-IDENT and the argument that LINK's domain covers every observable view"
+checked_by = ["MC-2", "ST-8", "LINK", "LEAN-DELTA", "LEAN-COVER", "K-LINK-T"]
+observed = "L2 chain (strategy section 18.6): ST-8 shows the code's result and store calls equal ghost::expect / ghost::protocol at every store size (8 accounts, ST-8W); LINK shows expect/protocol equal the Lean cstep on the 14,310 representative views; LEAN-COVER and K-LINK-T show every view's step is its representative's step transported back, in Lean and in Rust (section 18.6.1); LEAN-DELTA proves cstep refines the model's step on concrete stores of every size. The state bound and the domain argument are gone; what remains trusted is ASM-IDENT parametricity, ASM-NU and ASM-LEAN-TLA"
 status = "in-progress"
 
 [assumptions.ASM-TLA-SCOPE]
@@ -286,6 +286,13 @@ statement = "Approver UIs render the action text faithfully (the approve tx comm
 level = "policy"
 checked_by = []
 status = "unverified"
+
+[assumptions.ASM-NU]
+statement = "The Rust (kani/src/norm.rs) and Lean (lean/ApprovalLean/Ident.lean) transcriptions of LINK's class, representative and transport functions agree (strategy section 18.6.1)"
+level = "high"
+checked_by = ["LINK"]
+observed = "LINK pins the representative half: the views link.rs writes equal Lean's allCls.map rep as a set (14,310). The class and transport halves are short tables read side by side"
+status = "in-progress"
 
 [assumptions.ASM-STRLEN]
 statement = "(M5 only) String::len is the UTF-8 byte length; is_empty <=> len == 0"
@@ -383,7 +390,7 @@ prolog_requirements = "prolog/model/approval_machine.pl"
   ST-1 = { status = "in-progress", layer = "kani", evidence = "bounded-proof", harness = "h_store_laws_mem_law_*, h_store_laws_sparse, h_store_laws_sparse_reg, h_store_laws_arr", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS"], description = "Store laws for MemStore and Sparse (map/sequence semantics; removing an absent key is a no-op)" }
   ST-2 = { status = "in-progress", layer = "kani", evidence = "bounded-proof", harness = "h_proto_*, h_refine_*", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Store protocol: exact mutator call sequence per op; makes contract-store differences from MemStore unreachable" }
   ST-3 = { status = "in-progress", layer = "kani", evidence = "bounded-proof", harness = "h_refine_*", depends_on = ["core/src/lib.rs", "contract/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-MODEL", "ASM-TOOLS"], description = "Sparse (transliteration of the contract Store impl) refines ArrStore under Kani (h_refine_*) and MemStore in plain mode; ST-1 laws tie ArrStore and MemStore to the same observations" }
-  ST-8 = { status = "in-progress", layer = "kani", evidence = "bounded-proof", harness = "h_oracle_approve, h_oracle_reject (with h_proto_add/revoke/request)", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-TOOLS"], description = "Store protocol at any store size (K-ORACLE): on a Sparse holding the step's footprint at any keys and positions, with every field and counter free, approve and reject return exactly expect() and make exactly the protocol() calls; add, revoke and request read no request, so h_proto_* already covers them at every size" }
+  ST-8 = { status = "in-progress", layer = "kani", evidence = "bounded-proof", harness = "h_oracle_approve, h_oracle_reject (with h_proto_add/revoke/request)", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-TOOLS"], description = "Store protocol at any store size (K-ORACLE): on a Sparse holding the step's footprint at any keys and positions, with every field and counter free, approve and reject return exactly expect() and make exactly the protocol() calls, with accounts from 8 values (ST-8W, src::Wide: every footprint maps injectively); add, revoke and request read no request, so h_proto_* already covers them at every size" }
 
 # ---------------------------------------------------------------------------
 [modules.tla_model]
@@ -417,7 +424,11 @@ lean_model = "lean/ApprovalLean/Machine.lean"
   LEAN-WIT = { status = "in-progress", layer = "lean", evidence = "model-proof", harness = "Witness.lean", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-TOOLS"], description = "Non-vacuity: reachable states with an approved, a rejected, a void and a revoked-re-added-still-void request and a key at the pending cap, checked by evaluation" }
   REF-5L = { status = "in-progress", layer = "plain", evidence = "test", cross = ["lean"], harness = "run-lean.sh replay (approval-lean replay)", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-TOOLS"], description = "The real core's MC-2 traces (2000 x 120 calls) replayed on the Lean machine: every result and post-store equal" }
   LEAN-DELTA = { status = "in-progress", layer = "lean", evidence = "model-proof", harness = "delta_refines (Delta.lean)", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-LEAN-TLA", "ASM-TOOLS"], description = "Lean: on every concrete store of every size whose request ids equal their positions and whose counters are below u64::MAX, the transcribed expect error is the model's err and running the transcribed protocol calls lands on the model's step, up to map equality of principals and set equality of revocations" }
-  LINK = { status = "in-progress", layer = "lean", evidence = "model-check", cross = ["kani"], harness = "run-lean.sh link (kani link::link_cases, approval-lean link)", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-IDENT", "ASM-TOOLS"], description = "ghost::expect / ghost::protocol (Rust) equal the Lean cstep on every footprint view of a bounded domain covering every identity equality pattern and counter boundary the code observes (736,500 views); the real core on a Sparse holding each view agrees too" }
+  LINK = { status = "in-progress", layer = "lean", evidence = "model-check", cross = ["kani"], harness = "run-lean.sh link (kani link::link_cases, approval-lean link)", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-NU", "ASM-TOOLS"], description = "ghost::expect / ghost::protocol (Rust) equal the Lean cstep on the representative view of every class (14,310 views, Lean's allCls.map rep exactly, as a set); the real core on a Sparse holding each view agrees too" }
+  LEAN-COVER = { status = "in-progress", layer = "lean", evidence = "model-proof", harness = "Ident.cover, Ident.cls_mem, Ident.wfv_of_store (Ident.lean)", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-NU", "ASM-TOOLS"], description = "Lean: for every footprint view of every concrete store (any identity types, any Nat counters, request at i has id i and a pay action), cls v is in allCls and cstep v op = (sub v op).out (cstep (rep (cls v op))): every view steps like its LINK representative, transported back" }
+  LEAN-FRAME = { status = "in-progress", layer = "lean", evidence = "model-proof", harness = "Ident.frame (Ident.lean)", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-TOOLS"], description = "Lean: cstep depends only on the footprint (owner, call key's principal, request at the id, its key's principal, decision ids, counters): stores agreeing there step the same" }
+  LEAN-REN = { status = "in-progress", layer = "lean", evidence = "model-proof", harness = "Ident.rename (Ident.lean)", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-TOOLS"], description = "Lean: cstep commutes with renaming accounts, keys and payloads, for any renaming injective on the footprint" }
+  K-LINK-T = { status = "in-progress", layer = "kani", evidence = "bounded-proof", harness = "h_link_t_add, h_link_t_revoke, h_link_t_request(_empty, _long), h_link_t_approve(_empty, _long), h_link_t_reject", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-NU", "ASM-TOOLS"], description = "Rust side of LEAN-COVER: on a symbolic footprint view (any u8 accounts and keys, free u64/u32 counters and times), ghost::expect / ghost::protocol on the view equal the transported result of the same functions on its representative" }
   MC-4 = { status = "verified-with-assumptions", layer = "lean", evidence = "model-check", cross = ["tla"], harness = "run-lean.sh graph (approval-lean graph, mc3.py)", depends_on = ["core/src/lib.rs"], assumptions = ["ASM-TOOLS"], description = "Graph equivalence: the Lean machine and TLC export the full labelled reachable graph of the MC_Graph universe; stores, rejected calls and edges are equal (with MC-3: Prolog = TLC = Lean)" }
 
 # ---------------------------------------------------------------------------

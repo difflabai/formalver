@@ -2,7 +2,7 @@
 //! Bounds are in section 6.3 of strategy.md; covers are listed in section 6.2.
 
 use crate::checks;
-use crate::src::Sym;
+use crate::src::{Sym, Wide};
 
 #[kani::proof]
 fn h_init() {
@@ -352,17 +352,18 @@ fn h_proto_reject() {
 }
 
 // K-ORACLE: approve and reject at any store size (requests and log slots at
-// any positions, counters free); see `ghost_checks::sparse_free`.
+// any positions, counters free); see `ghost_checks::sparse_free`. ST-8W:
+// accounts from `NA_WIDE` values, enough for any footprint.
 #[kani::proof]
 #[kani::unwind(5)]
 fn h_oracle_approve() {
-    g2::oracle_approve(&mut Sym(None, checks::PART_ALL, false));
+    g2::oracle_approve(&mut Wide(&mut Sym(None, checks::PART_ALL, false)));
 }
 
 #[kani::proof]
 #[kani::unwind(5)]
 fn h_oracle_reject() {
-    g2::oracle_reject(&mut Sym(None, checks::PART_ALL, false));
+    g2::oracle_reject(&mut Wide(&mut Sym(None, checks::PART_ALL, false)));
 }
 
 // ROB-4: `Counting` over `MemStore`, state shape `MEM_SHAPE`.
@@ -524,4 +525,61 @@ fn h_action_len() {
 #[kani::unwind(2051)]
 fn h_action_len_multi() {
     g2::action_len_cases(&mut Sym(None, checks::PART_ALL, false), g2::N_CASES - 1, g2::N_CASES);
+}
+
+// K-LINK-T: every footprint view (any u8 identities, counters, times) steps
+// like its LINK representative, carried back (`norm.rs`, Ident.lean).
+// The action kind is fixed per harness so string lengths stay concrete.
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_link_t_add() {
+    crate::norm::link_t(&mut Sym(None, checks::PART_ALL, false), 0, 0);
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_link_t_revoke() {
+    crate::norm::link_t(&mut Sym(None, checks::PART_ALL, false), 1, 0);
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_link_t_request() {
+    crate::norm::link_t(&mut Sym(None, checks::PART_ALL, false), 2, 0);
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_link_t_request_empty() {
+    crate::norm::link_t(&mut Sym(None, checks::PART_ALL, true), 2, 1);
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_link_t_request_long() {
+    crate::norm::link_t(&mut Sym(None, checks::PART_ALL, false), 2, 2);
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_link_t_approve() {
+    crate::norm::link_t(&mut Sym(None, checks::PART_ALL, false), 3, 0);
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_link_t_approve_empty() {
+    crate::norm::link_t(&mut Sym(None, checks::PART_ALL, true), 3, 1);
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_link_t_approve_long() {
+    crate::norm::link_t(&mut Sym(None, checks::PART_ALL, false), 3, 2);
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_link_t_reject() {
+    crate::norm::link_t(&mut Sym(None, checks::PART_ALL, false), 4, 0);
 }

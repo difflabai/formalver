@@ -32,7 +32,7 @@ unmechanised steps listed under "Next".
 | Kani bounds | §6.3 | CUT-1 (`h_cut_*`), U-1 (`kani-loops.py`, job `loops`). The size bound is closed by L2 (§18.6); CUT-2 (`kani/CUTOFF.md`) stays on paper. |
 | TLA+ refined by Kani | M1.5 | TLC safety and liveness, Apalache inductive step, witnesses, REF-1..5, 15 spec mutants killed (§17). TLC pinned to 1.7.4. |
 | Lean | M1.6 | `Inv`, the step properties and TR-1/2/3 proved for states and runs of every size; MC-4 and REF-5L tie it to TLC and the core (§18). |
-| Lean L2 (oracle store) | §18.6 | ST-8, LINK (736,500 views) and LEAN-DELTA: the core steps like the model at every store size. ST-7 and RT-TIME added. |
+| Lean L2 (oracle store) | §18.6 | ST-8, LINK and LEAN-DELTA: the core steps like the model at every store size. ST-7 and RT-TIME added. LINK's domain is mechanised (§18.6.1): LEAN-COVER and K-LINK-T prove its 14,310 views cover every view; ST-8W runs ST-8 over enough accounts for any footprint. |
 | Prolog requirements oracle | M4 | C-1..C-10 and C-2t pass; MC-1 51,568 states; MC-2 agrees both ways; MC-3 (Prolog graph = TLC graph) nightly (§8). |
 | Ghost-store harnesses | M2 | `h_page_arith`, `h_proto_*`, `h_count_*`, `h_refine_*`, `h_store_laws_*`, `h_oracle_*`, `h_action_len(_multi)` green; nightly mutants job. |
 | Shell and store | M3 | `near-tests/` (`store_diff.rs`, `shell.rs`, `ident.rs`, golden Borsh), shell mutants killed, `wasm-surface.sh` clean, `api_facts.pl` generated; job `near-unit`. |
@@ -49,9 +49,8 @@ named spec reviewer (`[review] spec_reviewer`), and none is recorded. The
 review of SH-9/RD-6), the testnet deployment for M7 (needs an archival
 RPC for VER-2/3), OQ-4, OQ-5, OQ-8, the Verus path A spike, and what (if
 anything) to submit to near-proof-arena. Buildable without a decision:
-mechanising the ASM-IDENT/LINK domain argument (§18.6, the one step of the
-L2 chain that is argued, not checked) and narrowing ASM-TLA-SCOPE for
-liveness. ASM-FINAL, ASM-TOOLS, ASM-OWNER and ASM-DISPLAY stay trusted.
+narrowing ASM-TLA-SCOPE for liveness. The ASM-IDENT/LINK domain argument is
+mechanised (§18.6.1); what it leaves trusted is ASM-NU. ASM-FINAL, ASM-TOOLS, ASM-OWNER and ASM-DISPLAY stay trusted.
 
 *Planning history.* The plan was written before any tool could be installed;
 the `[conf: …]` tags in this document date from then. Against the original
@@ -217,19 +216,20 @@ scope exclusions that keep a machine-checked model of it out of reach; see
 | ASM-CODE | Code changes only through `DeployContract` or `UseGlobalContract` on `C` (both need a full-access key on `C`). If `C` uses a NEP-591 global contract referenced by account id, it also changes through `DeployGlobalContract` by that account. `DeleteAccount` erases state, and a recreated account starts empty. | med | RT-RESET, DEP-1 |
 | ASM-SDK | `#[init]` panics if state exists. `#[private]` requires predecessor = current account. Non-payable change methods reject deposits. `&self` methods never write. Only `#[near]` impl methods are exported. `PanicOnDefault` blocks default init. | high | SH-9, SH-10, SH-11, `cargo expand` review |
 | ASM-STORE | `store::LookupMap` is a map keyed by `prefix ‖ borsh(key)`. Its writes are flushed when the contract struct drops after `state_write`. | high (semantics); med (flush) | ST-4, ST-5, ST-6 |
-| ASM-IDENT | `PartialEq` on `AccountId` and `PublicKey` is an equivalence matching equality of their Borsh bytes, and `clone` preserves it. The core uses `A`/`K` only via `Clone` and `PartialEq` (`#![forbid(unsafe_code)]`, no `Ord`/`Hash`). This **parametricity** justifies small identities in harnesses. | high | Harnesses instantiate `A`/`K` with opaque newtypes (`Acct(u8)`, `Key(u8)`) implementing only `Clone`, `PartialEq`, `Debug` and a hand-written `kani::Arbitrary`, so any new trait bound upstream breaks the harness build. ST-7 checks the equality half on the locked near-sdk |
+| ASM-IDENT | `PartialEq` on `AccountId` and `PublicKey` is an equivalence matching equality of their Borsh bytes, and `clone` preserves it. The core uses `A`/`K` only via `Clone` and `PartialEq` (`#![forbid(unsafe_code)]`, no `Ord`/`Hash`). This **parametricity** justifies small identities in harnesses: any footprint (at most 8 accounts, 4 keys) maps injectively into the harness identities (ST-8W, §18.6.1), so which identities the code compares needs no argument. | high | Harnesses instantiate `A`/`K` with opaque newtypes (`Acct(u8)`, `Key(u8)`) implementing only `Clone`, `PartialEq`, `Debug` and a hand-written `kani::Arbitrary`, so any new trait bound upstream breaks the harness build. ST-7 checks the equality half on the locked near-sdk |
 | ASM-STAKE | The account must hold `storage_usage × 10^19` yocto, with about 40 bytes of overhead per record. | med (rule high, constants med-high) | RES-1 |
 | ASM-LIMITS | `max_total_log_length` 16384 B. 100 logs. 4 MiB return data. 300 TGas per call. The view gas cap is set per node. | med | RES-2, RES-3 |
 | ASM-META | NEP-366: the inner receipt has signer = relayer, so relayed calls fail `IndirectCall`. The same holds for NEP-518 eth-implicit accounts. | med | RT-METATX |
 | ASM-FCKEY | Function-call keys restrict receiver and methods, can't attach a deposit, and have an allowance. Function-call keys can't add keys. | high | RT-FCKEY |
 | ASM-COMPILE | rustc/LLVM/wasm-opt preserve core semantics from host to wasm32. The release profile keeps `overflow-checks = true`. The only on-chain `usize` use is `action.len() > MAX_ACTION_LEN`; every value is far below 2³², so host and wasm32 agree (`MemStore` is off-chain). `cfg(feature = "borsh")` gates only `use` and `derive` items, so Kani (borsh off) and the wasm (borsh on) compile the same logic. | n/a | RT-CODEHASH, RT-TRACE, `check-pin.sh` grep |
-| ASM-MODEL | *Until M5 (code-level Verus):* a core step on a state larger than the Kani bound behaves like one within it (the §6.3 small-scope argument). | med | Plain-mode random traces of ≤200 steps, MC-2. Discharged at every store size by the L2 chain (§18.6): ST-8 (code = `expect`/`protocol`), LINK (`expect`/`protocol` = Lean `cstep` on every footprint view of a bounded domain), LEAN-DELTA (`cstep` = the model's step). What stays trusted is ASM-IDENT and LINK's domain argument. Removed by M5 path A. |
+| ASM-MODEL | *Until M5 (code-level Verus):* a core step on a state larger than the Kani bound behaves like one within it (the §6.3 small-scope argument). | med | Plain-mode random traces of ≤200 steps, MC-2. Discharged at every store size by the L2 chain (§18.6): ST-8 (code = `expect`/`protocol`), LINK (`expect`/`protocol` = Lean `cstep` on every footprint view of a finite domain), LEAN-DELTA (`cstep` = the model's step). LINK's domain covers every view by LEAN-COVER and K-LINK-T (§18.6.1). What stays trusted is ASM-IDENT (parametricity), ASM-NU and ASM-LEAN-TLA. Removed by M5 path A. |
 | ASM-SPEC | The specs (`spec.rs`, Verus, Prolog) state the intended behaviour. | n/a | Independent authorship, signed off by a **named human who did not write `approval-core`** (`[review] spec_reviewer`), required before any K/V property is `verified*`. Also traceability (C-7), mutants and three-way trace replay. |
 | ASM-TOOLS | Kani (CBMC, unwinding assertions on), Verus with Z3, and scryer-prolog are sound at the pinned versions. | n/a | `tools/versions.env`, the canary lemma must fail, mutants must be caught |
 | ASM-OWNER | The owner registers keys honestly. It could otherwise register two accounts it controls and approve anything. | policy | DEP-1 (multisig/DAO), VER-4 |
 | ASM-DEPLOY | The deployed code is the reproducible build of the pin, locked at deploy. | policy | DEP-1, VER-2, VER-3 |
 | ASM-DISPLAY | The approver UI renders `action` faithfully (escaped). The approver's tx commits to the text (TX-5); this assumption covers only its rendering. | policy | none |
 | ASM-STRLEN | *(M5 only.)* `String::len` is the UTF-8 byte length, and `is_empty ⇔ len = 0`. | high | none |
+| ASM-NU | The Rust (`kani/src/norm.rs`) and Lean (`lean/ApprovalLean/Ident.lean`) transcriptions of LINK's class, representative and transport functions agree (§18.6.1). | high | LINK checks the representative half exactly: the views `link.rs` writes must equal Lean's `allCls.map rep` as a set. The class and transport tables are short, line-by-line, and every K-LINK-T and LEAN-COVER proof uses them. |
 
 ---
 
@@ -418,7 +418,7 @@ within bounds), VC/VM (unbounded), PM and Kp.
 | ST-1 | **Store laws** that every `Store` must satisfy: map semantics for principals (with L-REMOVE-ABSENT); `push_request` appends at `request_count()`; `replace_request` overwrites at `r.id`; the log is a sequence; reads are pure. | K (`MemStore`, `Sparse`) |
 | ST-2 | **Store protocol (the correspondence hinge).** The core's mutating `Store` calls are exactly: <br>• add → `[increment_registration_count(), insert_principal(k)]`, with `k ∉ dom P` and `G < MAXU`; <br>• revoke → `[remove_principal(k), insert_revocation(P(k).reg, t)]`, the first also on failure with `k ∉ dom P` (F-6), the second with `P(k).reg ∉ dom V` (F-16); <br>• request → `[insert_principal(c.key, pend+1), push_request(r)]`, with `r.id = #R < MAXU`; <br>• approve → `[insert_principal(R[i].ak, pend−1), replace_request(r), push_approval(i)]`, with `r.id = i < #R`, `r` equal to `R[i]` except `ap` going from `None` to `Some`, and `#L < MAXU`; <br>• reject → `[insert_principal(R[i].ak, pend−1), replace_request(r)]`, with `r.id = i < #R` and `r` equal to `R[i]` except `rj` going from `None` to `Some`; <br>• any other failure → no calls. <br>This makes the on-chain impl's differences from `MemStore` unreachable: `replace_request` inserts unconditionally (`MemStore` drops an out-of-range write), and `+= 1` at `u64::MAX` panics under overflow-checks instead of returning `LogFull`. | K (recording `Sparse`) |
 | ST-3 | `Sparse`, a line-by-line transliteration of `impl Store for ApprovalContract` with each `LookupMap` replaced by an association list, refines `MemStore`: same results, same abstraction `α`. | K (`h_refine_*`) |
-| ST-8 | **Store protocol at any store size (K-ORACLE).** For a store of any size, keep only the entries a step reads, at their own keys and positions: every read answers as on the full store, so the step makes the same calls and returns the same result (the core reaches state only through `Store`, `#![forbid(unsafe_code)]`). `h_oracle_approve`/`h_oracle_reject` check `expect`/`protocol` on such restrictions: a `Sparse` with up to 3 requests and log slots at any `u64` positions, every field and counter free. Add, revoke and request read no request, so `h_proto_*` already covers them at every size. Removes the state bound from the code side of ASM-MODEL; identities stay small (ASM-IDENT). | K |
+| ST-8 | **Store protocol at any store size (K-ORACLE).** For a store of any size, keep only the entries a step reads, at their own keys and positions: every read answers as on the full store, so the step makes the same calls and returns the same result (the core reaches state only through `Store`, `#![forbid(unsafe_code)]`). `h_oracle_approve`/`h_oracle_reject` check `expect`/`protocol` on such restrictions: a `Sparse` with up to 3 requests and log slots at any `u64` positions, every field and counter free. Add, revoke and request read no request, so `h_proto_*` already covers them at every size. Removes the state bound from the code side of ASM-MODEL. ST-8W: the oracle harnesses draw accounts from 8 values (`src::Wide`), enough for every account term of a footprint, so a real footprint maps injectively into the harness identities (ASM-IDENT parametricity). | K |
 | ST-4 | **The real store refines `MemStore`:** `ApprovalContract` and `MemStore<AccountId,PublicKey>` run random op sequences (10k × 50) through the core and through the public methods. **Before each step the contract is persisted and reloaded** (`state_write`, drop, `state_read`), so every step reads Borsh from cold storage. After every step, results and `α` are equal. | D (`store_diff.rs`) |
 | ST-5 | Storage layout: prefixes `p` (principals), `r` (requests), `a` (approval log) and `v` (revocations) are pairwise distinct, none is a prefix of another, and none overlaps `STATE`. After every step of the random runs, the storage keys are **exactly** `STATE` and `p\|r\|a\|v ‖ borsh(key)` for the entries `α` lists. | D / R |
 | ST-6 | Layout stability: golden Borsh bytes (key and value) for `STATE` (fresh and after a run) and one entry of each map: principals with an ed25519 and a secp256k1 key; requests pending, approved and rejected; a log entry; a revocation. A diff must be flagged as storage-breaking in the pin-bump PR. | D |
@@ -615,7 +615,7 @@ more than 15 GB once PR #15's state was added. They form one cover family.
 
 | Dimension | Bound | Justification |
 |---|---|---|
-| Accounts | 4 (owner = 0) | ASM-IDENT parametricity. `approve` reads 5 account terms: predecessor, signer, `P(c.key).acct`, `R[i].aa`, `P(R[i].ak).acct`. The guard order forces predecessor = signer = `P(c.key).acct` before the last two comparisons, so at most 3 values plus the owner are ever distinguished, and 4 values realize every reachable pattern. |
+| Accounts | 4 (owner = 0); 8 in `h_oracle_*` (ST-8W) | ASM-IDENT parametricity. Since §18.6.1 the claim below is not needed for ST-8, whose 8 values cover every footprint injectively. `approve` reads 5 account terms: predecessor, signer, `P(c.key).acct`, `R[i].aa`, `P(R[i].ak).acct`. The guard order forces predecessor = signer = `P(c.key).acct` before the last two comparisons, so at most 3 values plus the owner are ever distinguished, and 4 values realize every reachable pattern. |
 | Keys | 4 | ≤ 3 stored keys plus one "absent" value. |
 | Principals / requests / log / revocations | ≤ 3 each | A step touches ≤ 2 principals (caller, agent), ≤ 1 request, ≤ 1 log slot, ≤ 1 revocation. Any one-step violation of an INV involves the touched elements plus ≤ 1 witness. |
 | Registration ids, `G` | `Inv` states: ids from `0..8`, `G = #P + #V`; raw states: any `u64` | INV-15 forces `G = #P + #V ≤ 6` and INV-11/12/14 put every id below `G`, so `0..8` loses nothing within the other bounds. Ids are only compared for equality and with `G`. `G = MAXU` (add's `LogFull`) needs a raw state. |
@@ -1363,8 +1363,8 @@ checks it against `lean/lean-toolchain`. Core library only, no Mathlib.
 CI job `lean` runs all of it on every PR: a clean build takes about 15 s,
 the mutants about 3 min and MC-4 about 4 min (TLC's two runs and
 `mc3.py`; the Lean export itself takes under a second). LINK takes about
-10 s (736,500 views written by the kani crate's `link_cases`, then checked
-by `approval-lean link`).
+a few seconds (14,310 views, the representatives of `Ident.allCls`, written
+by the kani crate's `link_cases`, then checked by `approval-lean link`).
 
 ### 18.6 L2: the code steps like the model at every size
 
@@ -1380,7 +1380,7 @@ core step  =  expect/protocol  =  Lean cstep  ⊑  model step    (every store si
 | ID | What | How |
 |---|---|---|
 | ST-8 | The core's result and `Store` calls are `ghost::expect` and `ghost::protocol` on any store | Kani (§ ST-8): a `Sparse` holding the step's footprint at any keys and positions, all fields and counters free. A real store of any size restricted to that footprint is such a `Sparse`. |
-| LINK | `expect`/`protocol` equal the Lean transcription `cstep` | `kani/src/link.rs` enumerates every footprint view of a bounded domain (accounts `o`, `a1`, `a2`; keys `k0`, `k1`, `k2`; `active_from` at or above the id; `pending` at the boundaries; ids and counters small, `u64::MAX - 1` and `u64::MAX`; every request decision state), runs `expect`, `protocol` and the real core on a `Sparse` holding exactly that view, and writes 736,500 lines; `approval-lean link` recomputes each with `cstep` and must agree on the error and every call. The domain covers every equality pattern the code can observe among the identities it compares and every relation of the counters with the constants they are compared to, so under ASM-IDENT it is exhaustive for the view; this is the one argument in the chain that is not mechanised. |
+| LINK | `expect`/`protocol` equal the Lean transcription `cstep` | `kani/src/link.rs` writes one representative footprint view per class of views (`norm::all_cls` through `norm::rep`: 14,310 views), runs `expect`, `protocol` and the real core on a `Sparse` holding exactly that view, and writes the error and calls; `approval-lean link` requires the views to be exactly Lean's `Ident.allCls.map Ident.rep` and recomputes each with `cstep`, which must agree on the error and every call. That this finite domain covers every view is proved (§18.6.1). |
 | LEAN-DELTA | `cstep` refines the model's `step` | `Delta.lean`, `delta_refines`: for every `CStore` of any size whose request ids equal their positions (INV-1) and whose counters are below `u64::MAX` (A6), `cstep`'s error equals `err` on `α s`, and applying its calls gives `step`'s state, up to map equality of principals and set equality of revocations. Axiom audit as 18.4. |
 
 `cstep` reads the store only through `Rd`, the getters `Store` offers
@@ -1388,5 +1388,53 @@ core step  =  expect/protocol  =  Lean cstep  ⊑  model step    (every store si
 it the same view the Rust side gets. Block times are not modelled (A7); the
 revocation time and the request and decision times are checked by RT-TIME.
 With L1 (LEAN-IND, LEAN-STEP, LEAN-TR), the safety properties then hold for
-the code at every state size, given ASM-IDENT, ASM-LEAN-TLA and the
+the code at every state size, given ASM-IDENT, ASM-NU, ASM-LEAN-TLA and the
 tool assumptions.
+
+#### 18.6.1 LINK's domain, mechanised
+
+LINK compares Rust and Lean on finitely many views; the chain needs them
+equal on every view. Until 2026-10-19 that rested on an argument (the
+domain realises every equality pattern and counter relation the code
+observes). It is now proved on both sides against one shared normal form:
+
+- `cls v op` maps a footprint view (any accounts, keys, payloads, counters)
+  to its class: the equalities and comparisons the step's guards can see
+  (caller = owner, predecessor = signer, the key's role and account, the
+  request's state, `activeFrom ≤ id`, `pending` at the cap or at 0, the
+  counters at `u64::MAX`, the action's kind and whether it is the request's).
+- `rep c` is the class's representative view and call: accounts `o`, `a1`,
+  `a2`, keys `k0`, `k1`, payloads `t1`, `t2`, and counters at distinct
+  values (1000, 2000, ..., 10000) away from every constant the code uses.
+- `sub v op` is a table from the representative's values to `v`'s:
+  identities and payloads by value, each counter `d` also at `d ± 1`
+  (saturating). `out` applies it to the representative's calls.
+
+| ID | What | How |
+|---|---|---|
+| LEAN-COVER | `cstep v op = (sub v op).out (cstep (rep (cls v op)))` and `cls v op ∈ allCls`, for every view of any `A`, `K`, `P` whose request at `i` has id `i` and a payload action | `Ident.cover` (all five operations by case analysis on the guards), `Ident.cls_mem`; `wfv_of_store` derives the premise from `WF` and `TypeOK`, so it holds on every store LEAN-DELTA covers whose abstraction is reachable. |
+| LEAN-FRAME | `cstep` reads only the owner, the call key's principal, the request at `i`, its key's principal and the counters it compares | `Ident.frame` |
+| LEAN-REN | `cstep` commutes with injective renaming of accounts, keys and payloads | `Ident.rename` |
+| K-LINK-T | The same equation for `expect`/`protocol`: errors equal, calls equal after `sub` (and the times, which only Rust has) | `h_link_t_{add,revoke,request,approve,reject}` and the `_empty`/`_long` action instances: a footprint `Sparse` with any `u8` accounts and keys, any counters, positions and times (`norm::link_t`) |
+| ST-8W | ST-8 over enough accounts for every footprint | `h_oracle_approve`, `h_oracle_reject` with `src::Wide` (8 accounts; keys already 4) |
+
+Chain for one step on a real store `s` (identities `AccountId`/`PublicKey`):
+the core on `s` equals the core on its footprint (the core reaches state
+only through `Store`); rename the footprint injectively into the harness
+identities (ASM-IDENT parametricity, ST-8W makes the range large enough);
+ST-8 gives `expect`/`protocol` there; K-LINK-T moves to the representative;
+LINK equates Rust and Lean on it; LEAN-COVER moves back; LEAN-REN and
+LEAN-FRAME return to `s`'s identities and full store; LEAN-DELTA reaches the
+model. Every link is a Kani or Lean proof, or LINK's exhaustive check.
+
+What stays trusted: ASM-IDENT (the core is generic in `A` and `K` and uses
+them only through `Clone` and `PartialEq`, so it commutes with injective
+renaming; ST-7 checks the `PartialEq` half), and ASM-NU (the Rust and Lean
+transcriptions of `cls`, `rep` and `sub` agree; LINK's set check pins `rep`
+exactly). Actions on the Rust side stay the harness alphabet plus `""` and a
+2,049-byte string, as everywhere in the Kani layer (ASM-STRLEN for M5).
+
+Mutation: a class that reads `activeFrom < id`, a representative counter
+that collides with another's `± 1`, and a transport row with the wrong
+account each break `cover`; a wrong counter row or class in `norm.rs` fails
+`h_link_t` in plain mode.

@@ -3,7 +3,7 @@
 //! plain-mode counterpart of Kani's cover check.
 
 use crate::checks;
-use crate::src::{take_covers, Rng};
+use crate::src::{take_covers, Rng, Wide};
 
 fn run(name: &str, seed: u64, iters: u32, body: fn(&mut Rng)) {
     let _ = take_covers();
@@ -143,8 +143,8 @@ fn h_proto() {
     run("h_proto_request", 0x9B05_688C, 40_000, g2::proto_request);
     run("h_proto_approve", 0x1F83_D9AB, 80_000, g2::proto_approve);
     run("h_proto_reject", 0x5BE0_CD19, 40_000, g2::proto_reject);
-    run("h_oracle_approve", 0x0AC1_E001, 40_000, g2::oracle_approve);
-    run("h_oracle_reject", 0x0AC1_E002, 40_000, g2::oracle_reject);
+    run("h_oracle_approve", 0x0AC1_E001, 40_000, |s| g2::oracle_approve(&mut Wide(s)));
+    run("h_oracle_reject", 0x0AC1_E002, 40_000, |s| g2::oracle_reject(&mut Wide(s)));
 }
 
 #[test]
@@ -294,4 +294,19 @@ fn sha256_known_answer() {
         sha256_hex(b"abc"),
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
     );
+}
+
+// K-LINK-T: every footprint view steps like its LINK representative.
+#[test]
+fn h_link_t() {
+    use crate::norm::link_t;
+    run("h_link_t_add", 0x11A7_0001, 20_000, |s| link_t(s, 0, 0));
+    run("h_link_t_revoke", 0x11A7_0002, 20_000, |s| link_t(s, 1, 0));
+    run("h_link_t_request", 0x11A7_0003, 40_000, |s| link_t(s, 2, 0));
+    run("h_link_t_request_empty", 0x11A7_0004, 5_000, |s| link_t(s, 2, 1));
+    run("h_link_t_request_long", 0x11A7_0005, 5_000, |s| link_t(s, 2, 2));
+    run("h_link_t_approve", 0x11A7_0006, 80_000, |s| link_t(s, 3, 0));
+    run("h_link_t_approve_empty", 0x11A7_0007, 5_000, |s| link_t(s, 3, 1));
+    run("h_link_t_approve_long", 0x11A7_0008, 5_000, |s| link_t(s, 3, 2));
+    run("h_link_t_reject", 0x11A7_0009, 80_000, |s| link_t(s, 4, 0));
 }

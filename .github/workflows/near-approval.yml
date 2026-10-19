@@ -266,6 +266,12 @@ jobs:
           - "h_proto_add h_proto_revoke h_proto_request h_proto_request_empty"
           - "h_proto_approve h_proto_reject"
           - "h_oracle_approve h_oracle_reject"
+          # K-LINK-T: LINK's representatives stand for every view (strategy.md
+          # section 18.6.1).
+          - "h_link_t_add h_link_t_revoke h_link_t_reject"
+          - "h_link_t_request h_link_t_request_empty h_link_t_request_long"
+          - "h_link_t_approve"
+          - "h_link_t_approve_empty h_link_t_approve_long"
           - "h_count_add h_count_revoke h_count_request h_count_approve h_count_reject"
           - "h_refine_add"
           - "h_refine_revoke"

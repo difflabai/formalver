@@ -36,3 +36,9 @@ import ApprovalLean
 #print axioms Approval.Witness.witness_cap_refused
 -- LEAN-DELTA
 #print axioms Approval.delta_refines
+-- LEAN-COVER, LEAN-FRAME, LEAN-REN (Ident.lean)
+#print axioms Approval.Ident.cover
+#print axioms Approval.Ident.cls_mem
+#print axioms Approval.Ident.wfv_of_store
+#print axioms Approval.Ident.frame
+#print axioms Approval.Ident.rename
