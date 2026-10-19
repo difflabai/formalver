@@ -25,8 +25,11 @@ else
     case "$f" in
       # Docs: no script, test or proof reads a Markdown file.
       *.md) add="" ;;
+      # status.toml also holds run-verus.sh's floor (verus_min_verified), so
+      # an edit to it re-runs the verus gate; pin and status-lint check the rest.
+      $p/status.toml) add="verus" ;;
       # Checked by the pin job alone (pin and status-lint).
-      $p/status.toml | $s/check-pin.sh | $s/check-status.sh | $s/test-check-status.sh) add="" ;;
+      $s/check-pin.sh | $s/check-status.sh | $s/test-check-status.sh) add="" ;;
       # The weekly upstream watch.
       $s/upstream-watch.sh | tools/upstream-watch.toml) add="" ;;
       # M5: the verified twin, its canary, mutants and erasure check.

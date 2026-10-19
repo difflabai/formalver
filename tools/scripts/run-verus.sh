@@ -94,7 +94,7 @@ else
 fi
 
 # Hygiene: trusted constructs live in src/trusted.rs only (TRUSTED.toml).
-if grep -nE '\b(assume|admit)\(|external_body|assume_specification' \
+if grep -nE '\b(assume|admit)\(|external_(body|type_specification|fn_specification)|assume_specification' \
     $(find "$VERUS_DIR/src" -name '*.rs' ! -name trusted.rs) > "$LOG_DIR/hygiene.log"; then
     cat "$LOG_DIR/hygiene.log"
     echo "::error::verus: trusted construct outside src/trusted.rs"
