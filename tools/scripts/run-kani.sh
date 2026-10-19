@@ -5,8 +5,8 @@
 #
 # A harness split into instances forms a family: the parts of a step
 # harness (_tx, _post, _hist, _inv, _reg) and its _empty and _long
-# instances; h_read, h_read_page and h_read_find; h_bmc_from_init and its
-# _witness. A cover must be SATISFIED in at least one instance of its
+# instances; the _part_* splits of a harness; h_read, h_read_page and
+# h_read_find; h_bmc_from_init and its _witness. A cover must be SATISFIED in at least one instance of its
 # family, and may be UNREACHABLE or UNSATISFIABLE in the others.
 #
 # usage: tools/scripts/run-kani.sh near-approval [harness...]
@@ -45,7 +45,7 @@ for h in "$@"; do
   rc=$?
   secs=$(( $(date +%s) - start ))
   covers=$(grep -oE '[0-9]+ of [0-9]+ cover properties satisfied' "$log" | tail -1)
-  family=${h%_tx}; family=${family%_post}; family=${family%_hist}; family=${family%_inv}; family=${family%_reg}
+  family=${h%_part_*}; family=${family%_tx}; family=${family%_post}; family=${family%_hist}; family=${family%_inv}; family=${family%_reg}
   family=${family%_empty}; family=${family%_long}; family=${family%_page}; family=${family%_find}; family=${family%_witness}
   family=${family%_law_*}
   awk -v fam="$family" '/^Check [0-9]+: .*\.cover\./ {c=1; next}

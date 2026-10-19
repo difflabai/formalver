@@ -2,6 +2,7 @@
 //! Bounds are in section 6.3 of strategy.md; covers are listed in section 6.2.
 
 use crate::checks;
+use crate::norm;
 use crate::src::{Sym, Wide};
 
 #[kani::proof]
@@ -530,56 +531,126 @@ fn h_action_len_multi() {
 // K-LINK-T: every footprint view (any u8 identities, counters, times) steps
 // like its LINK representative, carried back (`norm.rs`, Ident.lean).
 // The action kind is fixed per harness so string lengths stay concrete.
+// Approve checks its error, each call slot and, for the ReplaceRequest
+// slot, each group of request fields (the stored action one side at a
+// time) in separate harnesses (`_part_*`, one cover family in
+// run-kani.sh): together they assert what one harness would, and each
+// fits in memory.
 #[kani::proof]
 #[kani::unwind(9)]
 fn h_link_t_add() {
-    crate::norm::link_t(&mut Sym(None, checks::PART_ALL, false), 0, 0);
+    let src = &mut Sym(None, checks::PART_ALL, false);
+    norm::link_t(src, 0, 0, norm::CHK_ALL, norm::F_ALL);
 }
 
 #[kani::proof]
 #[kani::unwind(9)]
 fn h_link_t_revoke() {
-    crate::norm::link_t(&mut Sym(None, checks::PART_ALL, false), 1, 0);
+    let src = &mut Sym(None, checks::PART_ALL, false);
+    norm::link_t(src, 1, 0, norm::CHK_ALL, norm::F_ALL);
 }
 
 #[kani::proof]
 #[kani::unwind(9)]
 fn h_link_t_request() {
-    crate::norm::link_t(&mut Sym(None, checks::PART_ALL, false), 2, 0);
+    let src = &mut Sym(None, checks::PART_ALL, false);
+    norm::link_t(src, 2, 0, norm::CHK_ALL, norm::F_ALL);
 }
 
 #[kani::proof]
 #[kani::unwind(9)]
 fn h_link_t_request_empty() {
-    crate::norm::link_t(&mut Sym(None, checks::PART_ALL, true), 2, 1);
+    let src = &mut Sym(None, checks::PART_ALL, true);
+    norm::link_t(src, 2, 1, norm::CHK_ALL, norm::F_ALL);
 }
 
 #[kani::proof]
 #[kani::unwind(9)]
 fn h_link_t_request_long() {
-    crate::norm::link_t(&mut Sym(None, checks::PART_ALL, false), 2, 2);
+    let src = &mut Sym(None, checks::PART_ALL, false);
+    norm::link_t(src, 2, 2, norm::CHK_ALL, norm::F_ALL);
 }
 
 #[kani::proof]
 #[kani::unwind(9)]
-fn h_link_t_approve() {
-    crate::norm::link_t(&mut Sym(None, checks::PART_ALL, false), 3, 0);
+fn h_link_t_approve_part_err() {
+    let src = &mut Sym(None, checks::PART_ALL, false);
+    norm::link_t(src, 3, 0, norm::CHK_ERR, norm::F_ALL);
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_link_t_approve_part_c0() {
+    let src = &mut Sym(None, checks::PART_ALL, false);
+    norm::link_t(src, 3, 0, norm::chk_slot(0), norm::F_ALL);
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_link_t_approve_part_c1_ids() {
+    let src = &mut Sym(None, checks::PART_ALL, false);
+    norm::link_t(src, 3, 0, norm::chk_slot(1), norm::F_IDS);
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_link_t_approve_part_c1_act_v() {
+    let src = &mut Sym(None, checks::PART_ALL, false);
+    norm::link_t(src, 3, 0, norm::chk_slot(1), norm::F_ACT_V);
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_link_t_approve_part_c1_act_s() {
+    let src = &mut Sym(None, checks::PART_ALL, false);
+    norm::link_t(src, 3, 0, norm::chk_slot(1), norm::F_ACT_S);
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_link_t_approve_part_c1_appr() {
+    let src = &mut Sym(None, checks::PART_ALL, false);
+    norm::link_t(src, 3, 0, norm::chk_slot(1), norm::F_APPR);
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_link_t_approve_part_c1_rej() {
+    let src = &mut Sym(None, checks::PART_ALL, false);
+    norm::link_t(src, 3, 0, norm::chk_slot(1), norm::F_REJ);
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_link_t_approve_part_c2() {
+    let src = &mut Sym(None, checks::PART_ALL, false);
+    norm::link_t(src, 3, 0, norm::chk_slot(2), norm::F_ALL);
+}
+
+#[kani::proof]
+#[kani::unwind(9)]
+fn h_link_t_approve_part_c3() {
+    let src = &mut Sym(None, checks::PART_ALL, false);
+    norm::link_t(src, 3, 0, norm::chk_slot(3), norm::F_ALL);
 }
 
 #[kani::proof]
 #[kani::unwind(9)]
 fn h_link_t_approve_empty() {
-    crate::norm::link_t(&mut Sym(None, checks::PART_ALL, true), 3, 1);
+    let src = &mut Sym(None, checks::PART_ALL, true);
+    norm::link_t(src, 3, 1, norm::CHK_ALL, norm::F_ALL);
 }
 
 #[kani::proof]
 #[kani::unwind(9)]
 fn h_link_t_approve_long() {
-    crate::norm::link_t(&mut Sym(None, checks::PART_ALL, false), 3, 2);
+    let src = &mut Sym(None, checks::PART_ALL, false);
+    norm::link_t(src, 3, 2, norm::CHK_ALL, norm::F_ALL);
 }
 
 #[kani::proof]
 #[kani::unwind(9)]
 fn h_link_t_reject() {
-    crate::norm::link_t(&mut Sym(None, checks::PART_ALL, false), 4, 0);
+    let src = &mut Sym(None, checks::PART_ALL, false);
+    norm::link_t(src, 4, 0, norm::CHK_ALL, norm::F_ALL);
 }

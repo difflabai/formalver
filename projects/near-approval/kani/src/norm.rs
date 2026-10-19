@@ -890,6 +890,153 @@ impl Sub {
         }
         o
     }
+
+    /// `x == self.out(rec)`, field by field and without building `out`:
+    /// under Kani the transported copy (fresh strings and records for
+    /// every call kind of every slot) cost several times the rest of
+    /// K-LINK-T. Plain mode checks the two agree on every case.
+    pub fn same(&self, x: &Rec, rec: &Rec) -> bool {
+        if x.n != rec.n {
+            return false;
+        }
+        let mut i = 0;
+        while i < CAP_CALLS {
+            if !self.same_slot(x, rec, i, F_ALL) {
+                return false;
+            }
+            i += 1;
+        }
+        true
+    }
+
+    /// Slot `i` of `x` is slot `i` of `self.out(rec)`, on the request
+    /// fields `f` selects.
+    pub fn same_slot(&self, x: &Rec, rec: &Rec, i: usize, f: u8) -> bool {
+        match (&x.c[i], &rec.c[i]) {
+            (None, None) => true,
+            (Some(a), Some(b)) => self.same_call(a, b, f),
+            _ => false,
+        }
+    }
+
+    /// `a == self.call(b)`.
+    fn same_call(&self, a: &Call, b: &Call, f: u8) -> bool {
+        match (a, b) {
+            (Call::IncrementRegistrationCount, Call::IncrementRegistrationCount) => true,
+            (Call::InsertPrincipal(ka, pa), Call::InsertPrincipal(kb, pb)) => {
+                *ka == self.k(kb) && *pa == self.prin(pb)
+            }
+            (Call::RemovePrincipal(ka), Call::RemovePrincipal(kb)) => *ka == self.k(kb),
+            (Call::PushRequest(ra), Call::PushRequest(rb))
+            | (Call::ReplaceRequest(ra), Call::ReplaceRequest(rb)) => self.same_req(ra, rb, f),
+            (Call::PushApproval(ia), Call::PushApproval(ib)) => *ia == self.n(*ib),
+            (Call::InsertRevocation(ga, ta), Call::InsertRevocation(gb, tb)) => {
+                *ga == self.n(*gb) && *ta == self.t(tb)
+            }
+            _ => false,
+        }
+    }
+
+    /// `a == self.req(b)` on the fields `f` selects.
+    fn same_req(&self, a: &Req, b: &Req, f: u8) -> bool {
+        (f & F_IDS == 0
+            || a.id == self.n(b.id)
+                && a.agent_account_id == self.a(&b.agent_account_id)
+                && a.agent_key == self.k(&b.agent_key)
+                && a.agent_registration_id == self.n(b.agent_registration_id)
+                && a.requested_at == self.t(&b.requested_at))
+            && (f & F_ACT == 0 || self.same_act(&a.action, &b.action))
+            && (f & F_APPR == 0
+                || match (&a.approval, &b.approval) {
+                (None, None) => true,
+                (Some(x), Some(d)) => {
+                    x.approval_index == self.n(d.approval_index)
+                        && x.approver_account_id == self.a(&d.approver_account_id)
+                        && x.approver_key == self.k(&d.approver_key)
+                        && x.approver_registration_id == self.n(d.approver_registration_id)
+                        && x.approved_at == self.t(&d.approved_at)
+                }
+                    _ => false,
+                })
+            && (f & F_REJ == 0
+                || match (&a.rejection, &b.rejection) {
+                (None, None) => true,
+                (Some(x), Some(d)) => {
+                    x.approver_account_id == self.a(&d.approver_account_id)
+                        && x.approver_key == self.k(&d.approver_key)
+                        && x.approver_registration_id == self.n(d.approver_registration_id)
+                        && x.rejected_at == self.t(&d.rejected_at)
+                }
+                    _ => false,
+                })
+    }
+
+    /// `a == self.act(x)`.
+    fn same_act(&self, a: &str, x: &str) -> bool {
+        if x.is_empty() || x.len() > MAX_ACTION_LEN {
+            return eq_str(a, x);
+        }
+        let b = x.as_bytes();
+        let mut i = 0;
+        while i < TP {
+            if let Some((j, v)) = &self.pay.e[i] {
+                if b.len() == 2 && b[0] == ACTION_BYTES[*j][0] && b[1] == ACTION_BYTES[*j][1] {
+                    return eq_str(a, v);
+                }
+            }
+            i += 1;
+        }
+        a.is_empty()
+    }
+}
+
+/// `F_ACT_D` on every representative: each operation of every class of
+/// `all_cls`, on its representative view, keeps the stored action.
+#[cfg(not(kani))]
+pub fn keeps_action_all() -> usize {
+    let mut n = 0;
+    for c in all_cls() {
+        let (dv, dop) = rep(&c);
+        let d = dv.store();
+        let ed = expect(&d, &dop);
+        let pd = protocol(&d, &dop, &ed);
+        let mut i = 0;
+        while i < CAP_CALLS {
+            assert!(keeps_action(&pd, i, &d, &dop), "F_ACT_D on {c:?}");
+            i += 1;
+        }
+        n += 1;
+    }
+    n
+}
+
+/// A request call in slot `i` carries the action stored at its id.
+fn keeps_action<T: Store<Acct, Key>>(rec: &Rec, i: usize, s: &T, op: &Op) -> bool {
+    match (&rec.c[i], op) {
+        (Some(Call::ReplaceRequest(x)), Op::Appr { id, .. }) => match s.request(*id) {
+            Some(r) => eq_str(&x.action, &r.action),
+            None => false,
+        },
+        _ => true,
+    }
+}
+
+/// `a == b`, byte by byte up to the alphabet's two bytes (as
+/// `spec::act_code`): `str` equality's `memcmp` alone ran K-LINK-T approve
+/// out of memory. Longer strings fall back to `==`.
+fn eq_str(a: &str, b: &str) -> bool {
+    let (x, y) = (a.as_bytes(), b.as_bytes());
+    if x.len() != y.len() {
+        false
+    } else if x.len() == 0 {
+        true
+    } else if x.len() == 1 {
+        x[0] == y[0]
+    } else if x.len() == 2 {
+        x[0] == y[0] && x[1] == y[1]
+    } else {
+        a == b
+    }
 }
 
 /// `Ident.pRows`, for a principal that may be absent.
@@ -1050,11 +1197,43 @@ fn action(src: &mut impl Src, xk: u8) -> String {
     }
 }
 
+/// What a K-LINK-T harness asserts: `CHK_ERR` the error and the number
+/// of calls, `chk_slot(i)` call slot `i`. Approve checks one at a time in
+/// separate harnesses: the whole comparison does not fit in memory, while
+/// each part's cone does. The parts of a family together assert
+/// `ev.err() == ed.err()` and `sub.same(pv, pd)`.
+pub const CHK_ERR: u8 = 1;
+pub const CHK_ALL: u8 = u8::MAX;
+
+pub const fn chk_slot(i: usize) -> u8 {
+    2 << i
+}
+
+/// Which fields of a request call a slot check compares (`F_ALL` every
+/// one). Approve's `ReplaceRequest` slot is checked a group at a time.
+pub const F_IDS: u8 = 1;
+pub const F_ACT: u8 = 2;
+pub const F_APPR: u8 = 4;
+pub const F_REJ: u8 = 8;
+pub const F_ALL: u8 = u8::MAX;
+
+/// Approve's stored action alone still does not fit: both views' strings
+/// flow through two runs of the core. `F_ACT` is checked in three parts
+/// that each follow one side, and together give `same_act` on the slot:
+/// `F_ACT_V` the view's call carries its stored action, `F_ACT_D` the
+/// representative's carries its own, `F_ACT_S` the two stored actions
+/// correspond under `sub`. `F_ACT_D` is about the representatives alone,
+/// a finite set, so `keeps_action_all` checks it on every one in plain
+/// mode rather than in a Kani harness (which also ran out of memory).
+pub const F_ACT_V: u8 = 16;
+pub const F_ACT_D: u8 = 32;
+pub const F_ACT_S: u8 = 64;
+
 /// One footprint view of any identities, counters and times, and one
 /// operation of kind `kind` (0 add .. 4 reject) on it: `expect`/`protocol`
 /// on the view equal those on its representative, carried back by `sub`.
 // PROP: K-LINK-T
-pub fn link_t(src: &mut impl Src, kind: u8, xk: u8) {
+pub fn link_t(src: &mut impl Src, kind: u8, xk: u8, chk: u8, f: u8) {
     let owner = Acct(ident(src));
     let signer = Acct(ident(src));
     let k = Key(ident(src));
@@ -1167,11 +1346,43 @@ pub fn link_t(src: &mut impl Src, kind: u8, xk: u8) {
     let pv = protocol(&s, &op, &ev);
     let ed = expect(&d, &dop);
     let pd = protocol(&d, &dop, &ed);
-    assert!(ev.err() == ed.err(), "K-LINK-T: the representative's error");
-    assert!(pv == sub(&s, &op).out(&pd), "K-LINK-T: the representative's calls, carried back");
-    // An empty or too-long action never passes request or approve.
     if xk == 0 {
         cover!(ev.is_ok(), "link_t: Ok");
     }
     cover!(!ev.is_ok(), "link_t: an error");
+    let tr = sub(&s, &op);
+    if chk & CHK_ERR != 0 {
+        assert!(ev.err() == ed.err(), "K-LINK-T: the representative's error");
+        assert!(pv.n == pd.n, "K-LINK-T: the representative's number of calls");
+    }
+    // An empty or too-long action fails request and approve (it is never
+    // a stored payload) and makes no call, on both views: so every slot
+    // is `None` on both sides and the slot checks below hold.
+    if xk != 0 {
+        assert!(!ev.is_ok(), "K-LINK-T: a non-payload action fails");
+        assert!(pv == Rec::new() && pd == Rec::new(), "K-LINK-T: no calls on failure");
+        return;
+    }
+    let mut i = 0;
+    while i < CAP_CALLS {
+        if chk & chk_slot(i) != 0 {
+            assert!(tr.same_slot(&pv, &pd, i, f), "K-LINK-T: the representative's call, carried back");
+            if f & F_ACT_V != 0 {
+                assert!(keeps_action(&pv, i, &s, &op), "K-LINK-T: the view's request keeps its action");
+            }
+            if f & F_ACT_D != 0 {
+                assert!(keeps_action(&pd, i, &d, &dop), "K-LINK-T: the representative's request keeps its action");
+            }
+        }
+        i += 1;
+    }
+    if f & F_ACT_S != 0 {
+        if let (Op::Appr { id, .. }, Op::Appr { id: did, .. }) = (&op, &dop) {
+            if let (Some(r), Some(dr)) = (s.request(*id), d.request(*did)) {
+                assert!(tr.same_act(&r.action, &dr.action), "K-LINK-T: the stored actions correspond");
+            }
+        }
+    }
+    #[cfg(not(kani))]
+    assert_eq!(tr.same(&pv, &pd), pv == tr.out(&pd), "Sub::same is out, then ==");
 }

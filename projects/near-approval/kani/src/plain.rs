@@ -299,14 +299,17 @@ fn sha256_known_answer() {
 // K-LINK-T: every footprint view steps like its LINK representative.
 #[test]
 fn h_link_t() {
-    use crate::norm::link_t;
-    run("h_link_t_add", 0x11A7_0001, 20_000, |s| link_t(s, 0, 0));
-    run("h_link_t_revoke", 0x11A7_0002, 20_000, |s| link_t(s, 1, 0));
-    run("h_link_t_request", 0x11A7_0003, 40_000, |s| link_t(s, 2, 0));
-    run("h_link_t_request_empty", 0x11A7_0004, 5_000, |s| link_t(s, 2, 1));
-    run("h_link_t_request_long", 0x11A7_0005, 5_000, |s| link_t(s, 2, 2));
-    run("h_link_t_approve", 0x11A7_0006, 80_000, |s| link_t(s, 3, 0));
-    run("h_link_t_approve_empty", 0x11A7_0007, 5_000, |s| link_t(s, 3, 1));
-    run("h_link_t_approve_long", 0x11A7_0008, 5_000, |s| link_t(s, 3, 2));
-    run("h_link_t_reject", 0x11A7_0009, 80_000, |s| link_t(s, 4, 0));
+    use crate::norm::{link_t, CHK_ALL, F_ALL};
+    run("h_link_t_add", 0x11A7_0001, 20_000, |s| link_t(s, 0, 0, CHK_ALL, F_ALL));
+    run("h_link_t_revoke", 0x11A7_0002, 20_000, |s| link_t(s, 1, 0, CHK_ALL, F_ALL));
+    run("h_link_t_request", 0x11A7_0003, 40_000, |s| link_t(s, 2, 0, CHK_ALL, F_ALL));
+    run("h_link_t_request_empty", 0x11A7_0004, 5_000, |s| link_t(s, 2, 1, CHK_ALL, F_ALL));
+    run("h_link_t_request_long", 0x11A7_0005, 5_000, |s| link_t(s, 2, 2, CHK_ALL, F_ALL));
+    run("h_link_t_approve", 0x11A7_0006, 80_000, |s| link_t(s, 3, 0, CHK_ALL, F_ALL));
+    run("h_link_t_approve_empty", 0x11A7_0007, 5_000, |s| link_t(s, 3, 1, CHK_ALL, F_ALL));
+    run("h_link_t_approve_long", 0x11A7_0008, 5_000, |s| link_t(s, 3, 2, CHK_ALL, F_ALL));
+    run("h_link_t_reject", 0x11A7_0009, 80_000, |s| link_t(s, 4, 0, CHK_ALL, F_ALL));
+    // F_ACT_D, the part of K-LINK-T about the representatives alone, on
+    // every one of them.
+    assert_eq!(crate::norm::keeps_action_all(), 14_380); // classes: 14,310 distinct views
 }
