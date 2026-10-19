@@ -9,3 +9,5 @@ import ApprovalLean.Guard
 import ApprovalLean.Text
 import ApprovalLean.Witness
 import ApprovalLean.Delta
+import ApprovalLean.Liveness
+import ApprovalLean.LivenessWitness
