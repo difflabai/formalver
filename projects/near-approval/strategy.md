@@ -20,33 +20,38 @@ dependencies, so Kani and Verus can target **the deployed logic itself**
 rather than a model of it. The shell is thin enough to cover with tests,
 review and wasm inspection.
 
-**Status (2026-10-14).** The core is covered by four mechanically linked
-layers; the shell, the runtime assumptions and deployment have no checked
-property yet.
+**Status (2026-10-19, formalver main `519528c`, pin `081a3a6`).** Every
+milestone except M5 is built and green in CI. What keeps the contract short
+of "fully verified" is the spec sign-off, the testnet deployment and the
+unmechanised steps listed under "Next".
 
 | Layer | Milestone | State |
 |---|---|---|
-| Bootstrap, pin job, CI | M0 | Done. CI runs on self-hosted macOS runners (`vars.CI_RUNNER`); the full Kani matrix takes about 2 runner-hours. |
-| Kani on the real core | M1 | `h_init`, `h_step_*` (5 parts each), `h_raw_*`, `h_read`, `h_bmc_*`, `h_ref_*`, `h_cut_*` green; `h_canary` fails; every cover satisfied; 34 core mutants killed and the 2 equivalent ones survive, in plain mode and under Kani (§6). |
-| Kani bounds | §6.3 | CUT-1 (`h_cut_*`), CUT-2 (`kani/CUTOFF.md`, on paper), U-1 (`kani-loops.py`, job `loops`). Open: request/approve `LogFull` needs the M2 `Sparse` harnesses. |
+| Bootstrap, pin job, CI | M0 | Done. CI runs on self-hosted macOS runners (`vars.CI_RUNNER`), path-aware on PRs (`ci-areas.sh`). |
+| Kani on the real core | M1 | `h_init`, `h_step_*` (5 parts each), `h_raw_*`, `h_read`, `h_bmc_*`, `h_ref_*`, `h_cut_*` green; `h_canary` fails; every cover satisfied; core mutants killed and the 2 equivalent ones survive, in plain mode and under Kani (§6). |
+| Kani bounds | §6.3 | CUT-1 (`h_cut_*`), U-1 (`kani-loops.py`, job `loops`). The size bound is closed by L2 (§18.6); CUT-2 (`kani/CUTOFF.md`) stays on paper. |
 | TLA+ refined by Kani | M1.5 | TLC safety and liveness, Apalache inductive step, witnesses, REF-1..5, 15 spec mutants killed (§17). TLC pinned to 1.7.4. |
 | Lean | M1.6 | `Inv`, the step properties and TR-1/2/3 proved for states and runs of every size; MC-4 and REF-5L tie it to TLC and the core (§18). |
-| Prolog requirements oracle | M4 | C-1..C-5, C-2t, C-7..C-10 pass; MC-1 51,568 states; MC-2 agrees both ways; MC-3 (Prolog graph = TLC graph) nightly. C-6 waits on M3 (§8). |
-| Ghost-store harnesses | M2 | Not started. |
-| Shell and store | M3 | Not started. F-15 rows to rewrite first. |
+| Lean L2 (oracle store) | §18.6 | ST-8, LINK (736,500 views) and LEAN-DELTA: the core steps like the model at every store size. ST-7 and RT-TIME added. |
+| Prolog requirements oracle | M4 | C-1..C-10 and C-2t pass; MC-1 51,568 states; MC-2 agrees both ways; MC-3 (Prolog graph = TLC graph) nightly (§8). |
+| Ghost-store harnesses | M2 | `h_page_arith`, `h_proto_*`, `h_count_*`, `h_refine_*`, `h_store_laws_*`, `h_oracle_*`, `h_action_len(_multi)` green; nightly mutants job. |
+| Shell and store | M3 | `near-tests/` (`store_diff.rs`, `shell.rs`, `ident.rs`, golden Borsh), shell mutants killed, `wasm-surface.sh` clean, `api_facts.pl` generated; job `near-unit`. |
 | Verus | M5 | Not started. Path B superseded by §18; path A spike is a pending decision. |
-| Sandbox | M6 | Not started. Every `ASM-*` is `unverified`. |
-| Deployment | M7 | Not started. |
+| Sandbox | M6 | RT-*, RT-TRACE, SH-9/10, RES-1, RES-3 and the reproducible-wasm surface diff pass on near-sandbox 2.13.4; job `sandbox`. Assumptions move to `in-progress` as their tests land. |
+| Deployment | M7 | `check_deployment.sh` and `verifier_rules.pl` pass against a sandbox deployment; job `deploy-check`. No testnet deployment. |
 
 **Statuses.** No K or V property has left `in-progress`: §12 requires a
 named spec reviewer (`[review] spec_reviewer`), and none is recorded. The
-proofs above pass in CI; `status.toml` will say so once that sign-off lands.
+`status-lint` job enforces this. The proofs above pass in CI;
+`status.toml` will say so once that sign-off lands.
 
-**Next, in blocking order.** Spec
-reviewer sign-off plus the `status-lint` job; M2; M3 (fixes the F-15 drift,
-unblocks C-6); M6; M7. Lean L2 is done by the oracle route (§18.6).
-Decisions still open: who reviews the spec, the Verus path A spike, the testnet deployment for
-M7, OQ-4, OQ-5, OQ-8, and what (if anything) to submit to near-proof-arena.
+**Next.** Decisions: the spec reviewer (also signs off the `cargo expand`
+review of SH-9/RD-6), the testnet deployment for M7 (needs an archival
+RPC for VER-2/3), OQ-4, OQ-5, OQ-8, the Verus path A spike, and what (if
+anything) to submit to near-proof-arena. Buildable without a decision:
+mechanising the ASM-IDENT/LINK domain argument (§18.6, the one step of the
+L2 chain that is argued, not checked) and narrowing ASM-TLA-SCOPE for
+liveness. ASM-FINAL, ASM-TOOLS, ASM-OWNER and ASM-DISPLAY stay trusted.
 
 *Planning history.* The plan was written before any tool could be installed;
 the `[conf: …]` tags in this document date from then. Against the original
@@ -1079,8 +1084,7 @@ runners (`vars.CI_RUNNER`). On a PR, `pin` always runs and each other job
 runs only when the diff touches its inputs (`tools/scripts/ci-areas.sh`;
 Markdown changes run none). Push to `main`, nightly and manual runs run
 every job.
-Not yet built: `verus` (M5), `near-unit` (M3), `sandbox` (M6), `status-lint`,
-`deploy-check` (M7).
+Not yet built: `verus` (M5).
 
 ## 15. Risks
 
