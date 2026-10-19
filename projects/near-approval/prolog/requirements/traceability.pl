@@ -71,6 +71,8 @@ trace_row('D6',  ['LEAN-IND', 'LEAN-STEP', 'LEAN-TR']).
 trace_row('D7',  ['LEAN-IND', 'LEAN-STEP', 'LEAN-TR']).
 trace_row('D8',  ['LEAN-IND', 'LEAN-STEP']).
 trace_row('D9',  ['LEAN-IND']).
+% Strategy 18.7: TLA-LIVE-1 (and 1s) at every size.
+trace_row('D9',  ['LEAN-LIVE']).
 trace_row('D15', ['LEAN-GUARD', 'LEAN-WIT', 'REF-5L', 'MC-4']).
 % Strategy 18.6 (L2): the code steps like the model at every store size.
 trace_row('D12', ['LEAN-DELTA', 'LINK', 'LEAN-COVER', 'LEAN-FRAME', 'LEAN-REN', 'K-LINK-T']).
@@ -176,6 +178,7 @@ property('LEAN-STEP', lean, "Lean: every call from an Inv state satisfies StepPr
 property('LEAN-TR', lean, "Lean: over every run from a reachable state, decisions are final (TR-2), Void is terminal (TR-3), request content, log prefix, registration counter and revocations only grow; TR-1 provenance").
 property('LEAN-GUARD', lean, "Lean: each error operator returns the first failing guard of a list whose codes are TLA+'s GuardOrder; LogFull never returned").
 property('LEAN-WIT', lean, "Non-vacuity: approved, rejected, void, revived-still-void and pending-cap states reachable in the Lean machine").
+property('LEAN-LIVE', lean, "Lean: TLA-LIVE-1 for every behaviour at every size and any step relation (Next and BNext); TLA-LIVE-1s under strong fairness; an unfair behaviour violates Live1 and a fair one satisfies its premise").
 property('REF-5L', plain, "The real core's MC-2 traces replayed on the Lean machine: every result and post-store equal").
 property('LEAN-DELTA', lean, "Lean: on every concrete store of every size with ids at their positions and counters below u64::MAX, the transcribed expect/protocol step refines the model's step").
 property('LINK', lean, "Rust expect/protocol equal the Lean cstep on the representative view of every class (14,310 views, Lean's allCls.map rep exactly)").
