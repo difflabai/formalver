@@ -55,6 +55,52 @@ pub trait Src {
     }
 }
 
+/// Accounts of the wide source: at least as many as the account terms one
+/// step's footprint can hold (approve: owner, predecessor, signer, the
+/// signer key's account, the request's agent, its agent key's account and
+/// the approver of a recorded approval and rejection: 8).
+pub const NA_WIDE: u8 = 8;
+
+/// ST-8W: `T` with accounts from `NA_WIDE` values, so every footprint fits
+/// injectively in the harness's identities (ASM-IDENT's parametricity then
+/// needs no argument about which accounts the code compares). Keys stay at
+/// `NK` = 4: a footprint holds at most the call key, the request's key and
+/// the keys of a recorded approval and rejection.
+pub struct Wide<'a, T: Src>(pub &'a mut T);
+
+impl<T: Src> Src for Wide<'_, T> {
+    fn u64(&mut self) -> u64 {
+        self.0.u64()
+    }
+    fn u32(&mut self) -> u32 {
+        self.0.u32()
+    }
+    fn bool(&mut self) -> bool {
+        self.0.bool()
+    }
+    fn below(&mut self, n: u8) -> u8 {
+        self.0.below(n)
+    }
+    fn hint(&mut self, percent: u8) -> bool {
+        self.0.hint(percent)
+    }
+    fn reach(&mut self) -> Option<(S, Ghost)> {
+        self.0.reach()
+    }
+    fn shape(&mut self) -> Shape {
+        self.0.shape()
+    }
+    fn part(&self) -> u8 {
+        self.0.part()
+    }
+    fn empty_action(&mut self) -> bool {
+        self.0.empty_action()
+    }
+    fn acct(&mut self) -> Acct {
+        Acct(self.0.below(NA_WIDE))
+    }
+}
+
 /// Prune the current path (Kani) or abandon the current sample (plain).
 #[macro_export]
 macro_rules! assume {

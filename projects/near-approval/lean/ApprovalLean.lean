@@ -11,3 +11,4 @@ import ApprovalLean.Witness
 import ApprovalLean.Delta
 import ApprovalLean.Liveness
 import ApprovalLean.LivenessWitness
+import ApprovalLean.Ident

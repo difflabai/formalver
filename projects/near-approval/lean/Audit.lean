@@ -45,3 +45,9 @@ import ApprovalLean
 #print axioms Approval.live1_of_live1Inf
 #print axioms Approval.LiveWitness.unfair_violates
 #print axioms Approval.LiveWitness.fair_witness
+-- LEAN-COVER, LEAN-FRAME, LEAN-REN (Ident.lean)
+#print axioms Approval.Ident.cover
+#print axioms Approval.Ident.cls_mem
+#print axioms Approval.Ident.wfv_of_store
+#print axioms Approval.Ident.frame
+#print axioms Approval.Ident.rename

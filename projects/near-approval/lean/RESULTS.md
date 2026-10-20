@@ -15,17 +15,21 @@ with `tools/scripts/run-lean.sh near-approval`.
 | LEAN-WIT | `witness_approved`, `witness_rejected`, `witness_void`, `witness_revival`, `witness_cap`, `witness_cap_refused` | proved by evaluation |
 | LEAN-LIVE | `approveReq_not_pending`, `enabled_of_pending`, `live1_wf`, `live1`, `live1_sf`, `live1_of_live1Inf`, `unfair_violates`, `fair_witness` (2026-10-19) | proved, every behaviour at every size |
 | LEAN-DELTA | `delta_add`, `delta_revoke`, `delta_request`, `delta_approve`, `delta_reject`, `delta_refines` (2026-10-17) | proved, concrete stores of every size |
+| LEAN-COVER | `Ident.cover` (per entry point `cover_add` … `cover_reject`), `Ident.cls_mem`, `Ident.wfv_of_store` (2026-10-19) | proved, every view of every concrete store, any identity types |
+| LEAN-FRAME | `Ident.frame` (2026-10-19) | proved |
+| LEAN-REN | `Ident.rename` (2026-10-19) | proved, any renaming injective on the footprint |
 
 No invariant needed strengthening: `Inv` exactly as `ApprovalProps.tla`
 states it is inductive at every size, which TLA-IND had shown only from
 states with at most 3 requests. The step properties follow from the guards
 alone; `stepProps_next` does not use `Inv`.
 
-Axiom audit: all 33 theorems in `Audit.lean` (25 before LEAN-LIVE) depend only on `propext`,
+Axiom audit: all 38 theorems in `Audit.lean` (25 before LEAN-LIVE and `Ident.lean`) depend only on `propext`,
 `Classical.choice` and `Quot.sound`. Both canaries fail to compile.
 
 Size: 3,478 lines (machine and properties 549, lemmas 315, proofs 2,097,
-guard order and witnesses 260, tools 257). Clean build: 14 s.
+guard order and witnesses 260, tools 257). Clean build: 14 s. `Ident.lean`
+(LEAN-COVER, LEAN-FRAME, LEAN-REN, 2026-10-19) adds 825 lines.
 
 ## Links to the other layers
 
@@ -33,7 +37,7 @@ guard order and witnesses 260, tools 257). Clean build: 14 s.
 |---|---|
 | LEAN-GUARD vs `tla_facts.pl` (C-2t) | equal for all five entry points |
 | REF-5L | 2,000 core traces × 120 calls = 240,000 steps, every result and post-store equal (5 s with trace generation) |
-| LINK (2026-10-17) | 736,500 footprint views (add 504, revoke 84, request 912, approve 490,000, reject 245,000; 164 Ok): Lean `cstep` = Rust `expect`/`protocol` on every one, and the real core on each view agrees with both. About 2 s to generate, 7 s to check |
+| LINK (2026-10-19) | 14,310 views, one per class of `Ident.allCls` (add 48, revoke 4, request 108, approve 12,540, reject 1,610; 12 Ok): Lean `cstep` = Rust `expect`/`protocol` on every one, the real core on each view agrees with both, and the set of views equals Lean's `allCls.map rep`. With LEAN-COVER and K-LINK-T (strategy §18.6.1) these stand for every view. Under 1 s to generate and check. The earlier hand-built domain (736,500 views, 2026-10-17) is retired |
 | MC-4 | TLC and Lean: 21,670 stores, 6,298,932 rejected calls, 41,706 edges, all equal. TLC about 40 s for both runs, Lean export 0.9 s, `mc3.py` 150 s |
 
 With MC-3 (2026-10-11), the Prolog, TLC and Lean graphs of the MC_Graph
