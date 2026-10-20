@@ -14,9 +14,10 @@
 #            Lean machine, every result and post-store equal
 #   graph    MC-4: the Lean machine's reachable graph of the MC_Graph
 #            universe equals TLC's (tools/scripts/mc3.py)
-#   link     LINK: on every footprint view of kani/src/link.rs's domain, the
-#            Lean cstep (Delta.lean) gives the Rust ghost::expect error and
-#            ghost::protocol calls
+#   link     LINK: kani/src/link.rs writes exactly LINK's domain
+#            (Ident.allCls mapped through Ident.rep, which Ident.cover proves
+#            complete), and on each view the Lean cstep (Delta.lean) gives the
+#            Rust ghost::expect error and ghost::protocol calls
 #   mutants  every lean/mutants/*.patch must be killed by build (a proof
 #            breaks), replay or guards
 #

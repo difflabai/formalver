@@ -139,6 +139,7 @@ assumption('ASM-TOOLS',   "Kani, Verus with Z3, scryer-prolog, TLC, Apalache and
 assumption('ASM-OWNER',   "The owner registers keys honestly.", policy).
 assumption('ASM-DEPLOY',  "The deployed code is the reproducible build of the pin, locked at deploy.", policy).
 assumption('ASM-DISPLAY', "The approver UI renders action faithfully (escaped).", policy).
+assumption('ASM-NU',      "The Rust (norm.rs) and Lean (Ident.lean) transcriptions of LINK's class, representative and transport functions agree (strategy 18.6.1).", high).
 assumption('ASM-STRLEN',  "(M5 only) String::len is the UTF-8 byte length and is_empty <=> len = 0.", high).
 
 assumption_checked_by('ASM-SIGNER', 'RT-KEY').
@@ -163,6 +164,7 @@ assumption_checked_by('ASM-FCKEY', 'RT-FCKEY').
 assumption_checked_by('ASM-COMPILE', 'RT-CODEHASH').
 assumption_checked_by('ASM-COMPILE', 'RT-TRACE').
 assumption_checked_by('ASM-MODEL', 'MC-2').
+assumption_checked_by('ASM-NU', 'LINK').
 assumption_checked_by('ASM-TLA-SCOPE', 'TLA-IND').
 assumption_checked_by('ASM-TLA-SCOPE', 'REF-5').
 assumption_checked_by('ASM-TLA-SCOPE', 'LEAN-IND').

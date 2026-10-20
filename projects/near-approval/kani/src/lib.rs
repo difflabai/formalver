@@ -11,6 +11,7 @@ pub mod cutoff;
 pub mod gen;
 pub mod ghost;
 pub mod ghost_checks;
+pub mod norm;
 pub mod spec;
 pub mod store;
 pub mod tla;
