@@ -7,9 +7,11 @@ last_reviewed = "2026-10-20"
 verus_min_verified = 95     # M5 path A (2026-10-20): twin + property lemmas; run-verus.sh fails below it
 mc1_state_floor = 51568     # recorded at M4 (2026-10-11); MC-1 fails below it
 # RT-CODEHASH: `cargo near build reproducible-wasm` of the pin (sandbox job
-# asserts it; recompute on every pin bump).
-reproducible_wasm_sha256 = "f7476faf3592ee36167a8ba1a1f5b05fea6d46e886fef04d53da0ca61bfb9990"
-reproducible_code_hash = "HeGt38cghP1ejWqkhbZFHGpRRzMGzcPWBbgamYfBVheF"
+# asserts it; recompute on every pin bump). Take it from trust-framework's
+# `reproducible wasm` job on the pinned main commit: the build metadata names
+# the commit, so a PR-head build of the same source hashes differently.
+reproducible_wasm_sha256 = "a0f02b21e7013aeb8496a57923611181bf7842e008f9b7600ade4904c6d288f7"
+reproducible_code_hash = "BqEdznmvQiCG6XKTgpXbzEptV3GuL3VF274uUqkoseCv"
 release_overflow_checks = true  # ASM-COMPILE: check-pin.sh fails unless upstream [profile.release] sets overflow-checks = true
 
 # Status values: unverified | in-progress | verified | verified-with-assumptions | stale
