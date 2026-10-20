@@ -70,6 +70,7 @@ jobs:
       prolog: ${{ steps.areas.outputs.prolog }}
       near_unit: ${{ steps.areas.outputs.near_unit }}
       sandbox: ${{ steps.areas.outputs.sandbox }}
+      verus: ${{ steps.areas.outputs.verus }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -462,6 +463,52 @@ jobs:
         with:
           name: lean-logs
           path: ${{ runner.temp }}/lean-logs
+          retention-days: 14
+
+  verus:
+    # Verus path A (strategy.md section 7, M5): the verified twin of
+    # approval-core refines the spec machine at every store size; the canary
+    # must fail, the erasure check ties the twin to the pinned upstream file,
+    # and every mutant in verus/mutants.toml must be rejected. About 1 min.
+    needs: pin
+    if: needs.pin.outputs.verus == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out trust-framework at the pin
+        env:
+          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+        run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
+      - name: Python >= 3.11 (tomllib)
+        if: runner.os == 'macOS'
+        run: |
+          python3 -c 'import tomllib' 2>/dev/null && exit 0
+          for py in python3.13 python3.12 python3.11; do
+            if p=$(command -v "$py"); then
+              mkdir -p "$RUNNER_TEMP/python-bin"
+              ln -sf "$p" "$RUNNER_TEMP/python-bin/python3"
+              echo "$RUNNER_TEMP/python-bin" >> "$GITHUB_PATH"
+              exit 0
+            fi
+          done
+          echo "::error::no python3 >= 3.11 on PATH"; exit 1
+      - name: Verus from versions.env
+        env:
+          VERUS_CACHE: ${{ runner.environment != 'github-hosted' && format('{0}/formalver-verus', runner.tool_cache) || '' }}
+        run: tools/scripts/get-verus.sh >> "$GITHUB_PATH"
+      - name: Twin, canary, erasure check and mutants
+        env:
+          VERUS_LOG_DIR: ${{ runner.temp }}/verus-logs
+        run: tools/scripts/run-verus.sh near-approval
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verus-logs
+          path: ${{ runner.temp }}/verus-logs
           retention-days: 14
 
   prolog:

@@ -131,7 +131,7 @@ assumption('ASM-LIMITS',  "max_total_log_length 16384 B, 100 logs, 4 MiB return 
 assumption('ASM-META',    "NEP-366: the inner receipt has signer = relayer, so relayed calls fail IndirectCall; same for NEP-518 eth-implicit accounts.", med).
 assumption('ASM-FCKEY',   "Function-call keys restrict receiver and methods, can't attach a deposit, have an allowance and can't add keys.", high).
 assumption('ASM-COMPILE', "rustc/LLVM/wasm-opt preserve core semantics from host to wasm32; overflow-checks stay on in release.", 'n/a').
-assumption('ASM-MODEL',   "Until M5: a core step on a state larger than the Kani bound behaves like one within it (small scope).", med).
+assumption('ASM-MODEL',   "Kani-layer properties only: a core step on a state larger than the Kani bound behaves like one within it (small scope).", med).
 assumption('ASM-TLA-SCOPE', "TLA+ model bounds: behaviours with more requests, keys or accounts than TLC and Apalache explore add no new violations (since strategy 18, needed for liveness only).", med).
 assumption('ASM-LEAN-TLA', "The Lean machine transcribes ApprovalCore.tla and ApprovalProps.tla.", high).
 assumption('ASM-SPEC',    "The specs (spec.rs, Verus, Prolog) state the intended behaviour.", 'n/a').
@@ -141,6 +141,8 @@ assumption('ASM-DEPLOY',  "The deployed code is the reproducible build of the pi
 assumption('ASM-DISPLAY', "The approver UI renders action faithfully (escaped).", policy).
 assumption('ASM-NU',      "The Rust (norm.rs) and Lean (Ident.lean) transcriptions of LINK's class, representative and transport functions agree (strategy 18.6.1).", high).
 assumption('ASM-STRLEN',  "(M5 only) String::len is the UTF-8 byte length and is_empty <=> len = 0.", high).
+assumption('ASM-DERIVE',  "(M5 only) derive(Clone) clones field-wise and derive(PartialEq) on Role compares variants.", high).
+assumption('ASM-IDTYPE',  "(M5 only) On AccountId and PublicKey, == is structural and clone returns an equal value (eq_laws, clone_laws).", high).
 
 assumption_checked_by('ASM-SIGNER', 'RT-KEY').
 assumption_checked_by('ASM-PRED', 'RT-RELAY').

@@ -1,0 +1,26 @@
+# Executable differences between the verified twin (src/lib.rs) and upstream
+# approval-core/src/lib.rs that tools/scripts/erasure-check.py allows
+# (strategy.md §7, path A). Everything else must match token for token once
+# ghost code is stripped.
+#
+# Deployed code may not be rewritten: run-verus.sh rejects any entry with
+# `deployed = true`. A deployed function Verus can't handle as written is
+# changed upstream instead (as `approvals` was, trust-framework PR #20).
+# MemStore is test-only (the contract's Store impl is in the contract crate),
+# so its rewrites only change the satisfiability witness, not the proof of
+# the deployed path.
+
+[[rewrite]]
+fn = "replace_request"
+deployed = false
+why = "MemStore: Verus closures can't capture &mut self (and_then(|i| self.requests.get_mut(i)))"
+
+[[rewrite]]
+fn = "insert_principal"
+deployed = false
+why = "MemStore: iter_mut().find leaves the skipped elements' mutable borrows unresolved, so Verus can't show them unchanged"
+
+[[attribute]]
+upstream = "# ! [ forbid ( unsafe_code ) ]"
+twin = "# ! [ deny ( unsafe_code ) ]"
+why = "assume_specification expands to unsafe code, and forbid can't be relaxed for trusted.rs"

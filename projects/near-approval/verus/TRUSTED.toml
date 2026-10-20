@@ -1,0 +1,58 @@
+# What the verified twin takes on trust (strategy.md §7 hygiene gate). Every
+# `assume_specification`, `external_type_specification` and trusted impl in
+# src/trusted.rs has an entry here, and each entry maps to an ASM ID.
+# run-verus.sh fails if `assume`, `admit`, `external_body` or
+# `assume_specification` appears anywhere else in src/.
+
+[[trusted]]
+item = "external_type_specification for Role, Principal, Caller, BlockTime, Approval, Rejection, ActionRequest, RequestStatus, ApprovalProof, ProofRevocations, ApprovalError, MemStore"
+asm = "ASM-DERIVE"
+why = "The data types stay outside verus! verbatim so their #[derive]s are untouched; this only tells Verus their (public) fields."
+
+[[trusted]]
+item = "impl PartialEqSpecImpl for Role (eq_spec = structural)"
+asm = "ASM-DERIVE"
+why = "#[derive(PartialEq)] on a fieldless enum compares variants."
+
+[[trusted]]
+item = "assume_specification <Principal<A> as Clone>::clone, <ActionRequest<A, K> as Clone>::clone"
+asm = "ASM-DERIVE"
+why = "#[derive(Clone)] clones field-wise; with clone_laws on A and K the clone equals the original. Verus gives derived Clone no spec unless the type is Copy."
+
+[[trusted]]
+item = "assume_specification String::len"
+asm = "ASM-STRLEN"
+why = "String::len is the UTF-8 byte length of its characters (vstd specifies str::len this way but not String::len)."
+
+[[trusted]]
+item = "assume_specification <String as PartialEq<&str>>::ne"
+asm = "ASM-TOOLS"
+why = "std spec missing from vstd: String != &str compares characters."
+
+[[trusted]]
+item = "assume_specification Option::filter"
+asm = "ASM-TOOLS"
+why = "std spec missing from vstd: keeps the value iff the predicate returns true."
+
+[[trusted]]
+item = "assume_specification Option<&T>::copied, <slice::Iter as Iterator>::position"
+asm = "ASM-TOOLS"
+why = "std specs missing from vstd; used by MemStore only (not deployed)."
+
+# Hypotheses, not assumptions: the core functions `require` these, so they
+# are discharged per instantiation (on-chain: near_sdk::AccountId and
+# near_sdk::PublicKey).
+[[hypothesis]]
+item = "eq_laws::<A>(), clone_laws::<A>(), clone_laws::<K>()"
+asm = "ASM-IDTYPE"
+why = "== is structural equality and clone returns an equal value. Both near-sdk types derive PartialEq and Clone over String / Vec<u8> fields."
+
+[[hypothesis]]
+item = "Store::wf / Store contract (the trait's requires/ensures)"
+asm = "ASM-STORE"
+why = "The contract crate's NEAR Store impl obeys the trait's specs. Verified for MemStore here (the satisfiability witness); for the on-chain store it is what M3 near-unit and M6 sandbox test."
+
+[[hypothesis]]
+item = "inv(store.view()) for revoke_key, approve, reject"
+asm = "none (proved)"
+why = "Holds on the empty store (lemma_init_inv) and is preserved by every operation (lemma_inv), so it holds on every store the core can produce."

@@ -1,6 +1,6 @@
 {
-  "bytes": 167622,
-  "code_hash": "5G334oPHzjDvPLXKUSstbaf3BzUPaj1sWZnDhy5Baauv",
+  "bytes": 167226,
+  "code_hash": "BqEdznmvQiCG6XKTgpXbzEptV3GuL3VF274uUqkoseCv",
   "function_exports": [
     "__contract_abi",
     "add_agent",
@@ -24,5 +24,5 @@
   "near_sandbox": "2.13.4 (near-sandbox 0.3.16 default)",
   "reproducible": true,
   "wasm_kind": "reproducible",
-  "wasm_sha256": "3f48c2f2b121d359507ebc696c8a402e2ae7cba1c57552a5e18c49a65761bde9"
+  "wasm_sha256": "a0f02b21e7013aeb8496a57923611181bf7842e008f9b7600ade4904c6d288f7"
 }

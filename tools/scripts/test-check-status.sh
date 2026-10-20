@@ -25,16 +25,21 @@ expect() {
 expect 0 "current status.toml" "pass"
 # A Kani property at verified-with-assumptions with no spec reviewer.
 expect 1 "K property past in-progress without sign-off" \
-  "import re; s=re.sub(r'(TX-1 = \{ status = )\"[a-z-]+\"', r'\1\"verified-with-assumptions\"', s, count=1)"
+  "import re; s=re.sub(r'(ROB-1 = \{ status = )\"[a-z-]+\"', r'\1\"verified-with-assumptions\"', s, count=1)"
 # ...and above the Kani ceiling even with a reviewer.
 expect 1 "Kani at verified" \
-  "import re; s=re.sub(r'spec_reviewer = \"\"', 'spec_reviewer = \"someone\"', s, count=1); s=re.sub(r'(TX-1 = \{ status = )\"[a-z-]+\"', r'\1\"verified\"', s, count=1)"
+  "import re; s=re.sub(r'spec_reviewer = \"\"', 'spec_reviewer = \"someone\"', s, count=1); s=re.sub(r'(ROB-1 = \{ status = )\"[a-z-]+\"', r'\1\"verified\"', s, count=1)"
 # Sign-off present: verified-with-assumptions is fine.
 expect 0 "K property with sign-off" \
-  "import re; s=re.sub(r'spec_reviewer = \"\"', 'spec_reviewer = \"someone\"', s, count=1); s=re.sub(r'(TX-1 = \{ status = )\"[a-z-]+\"', r'\1\"verified-with-assumptions\"', s, count=1)"
+  "import re; s=re.sub(r'spec_reviewer = \"\"', 'spec_reviewer = \"someone\"', s, count=1); s=re.sub(r'(ROB-1 = \{ status = )\"[a-z-]+\"', r'\1\"verified-with-assumptions\"', s, count=1)"
 # Evidence a layer can't give.
 expect 1 "evidence not allowed for layer" \
-  "import re; s=re.sub(r'(TX-1 = \{[^}]*evidence = )\"bounded-proof\"', r'\1\"proof\"', s, count=1)"
+  "import re; s=re.sub(r'(ROB-1 = \{[^}]*evidence = )\"bounded-proof\"', r'\1\"proof\"', s, count=1)"
+# Verus path A: `verified` only with no assumptions left.
+expect 1 "Verus verified with assumptions" \
+  "import re; s=re.sub(r'spec_reviewer = \"\"', 'spec_reviewer = \"someone\"', s, count=1); s=re.sub(r'(TX-1 = \{ status = )\"[a-z-]+\"', r'\1\"verified\"', s, count=1)"
+expect 0 "Verus verified-with-assumptions with sign-off" \
+  "import re; s=re.sub(r'spec_reviewer = \"\"', 'spec_reviewer = \"someone\"', s, count=1); s=re.sub(r'(TX-1 = \{ status = )\"[a-z-]+\"', r'\1\"verified-with-assumptions\"', s, count=1)"
 # A property claimed with no artifact behind it.
 expect 1 "claimed without PROP tag" \
   "import re; s=s.replace('[modules.requirements.properties]', '[modules.requirements.properties]\n  ZZ-1 = { status = \"in-progress\", layer = \"kani\", evidence = \"bounded-proof\", description = \"x\" }', 1)"

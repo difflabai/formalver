@@ -98,60 +98,60 @@ property('C-10', prolog, "Warn when a verified* property depends on an assumptio
 property('MC-1', prolog, "Bounded model check of reference step/4 at depth 6 with real constants: no INV, separation-of-duties, double-approval, pending-count or revival violation; reaches approved and void states and every error except both LogFull and TooManyPending; MC-1s (max_pending=2, max_u=2) also reaches TooManyPending and request LogFull; state counts >= mc1_state_floor").
 property('MC-2', prolog, "Generated traces replayed on the real core, on spec.rs and (RT-TRACE) on the wasm; all agree").
 % [modules.core_state_machine]
-property('TX-0', kani, "Atomic failure: Err => state unchanged; no Store mutator on failure except remove_principal of an absent key (F-6, no-op)").
-property('TX-1', kani, "add_principal: Ok(principal) <=> caller = owner, key unregistered and G != MAXU; errors NotOwner, KeyAlreadyRegistered, LogFull; P' = P[k -> (acct, role, G, #R, 0)], G' = G + 1").
-property('TX-2', kani, "revoke_key: Ok(P(k)) <=> caller = owner and key registered; errors NotOwner, KeyNotRegistered; P' = P minus k, V' = V[P(k).reg -> t]").
-property('TX-3', kani, "authenticate: Ok <=> predecessor = signer and key registered to signer with role; errors IndirectCall, UnknownKey, WrongRole, KeyAccountMismatch; read-only").
-property('TX-4', kani, "request_action: exact result, error order (auth, EmptyAction, ActionTooLong, TooManyPending, LogFull), appended request recording the caller's registration id, caller key pend+1").
-property('TX-5', kani, "approve: exact result, error order (auth, RequestNotFound, AlreadyApproved, AlreadyRejected, AgentRevoked, ActionMismatch, SelfApproval, LogFull), approval recorded with the approver's registration id, log appended, agent key pend-1, proof = approval(s', i)").
-property('TX-7', kani, "reject: exact result, error order (auth, RequestNotFound, AlreadyApproved, AlreadyRejected, AgentRevoked, SelfApproval), rejection recorded with the approver's registration id, agent key pend-1, log unchanged; Ok(R'[i])").
+property('TX-0', verus, "Atomic failure: Err => state unchanged; no Store mutator on failure except remove_principal of an absent key (F-6, no-op)").
+property('TX-1', verus, "add_principal: Ok(principal) <=> caller = owner, key unregistered and G != MAXU; errors NotOwner, KeyAlreadyRegistered, LogFull; P' = P[k -> (acct, role, G, #R, 0)], G' = G + 1").
+property('TX-2', verus, "revoke_key: Ok(P(k)) <=> caller = owner and key registered; errors NotOwner, KeyNotRegistered; P' = P minus k, V' = V[P(k).reg -> t]").
+property('TX-3', verus, "authenticate: Ok <=> predecessor = signer and key registered to signer with role; errors IndirectCall, UnknownKey, WrongRole, KeyAccountMismatch; read-only").
+property('TX-4', verus, "request_action: exact result, error order (auth, EmptyAction, ActionTooLong, TooManyPending, LogFull), appended request recording the caller's registration id, caller key pend+1").
+property('TX-5', verus, "approve: exact result, error order (auth, RequestNotFound, AlreadyApproved, AlreadyRejected, AgentRevoked, ActionMismatch, SelfApproval, LogFull), approval recorded with the approver's registration id, log appended, agent key pend-1, proof = approval(s', i)").
+property('TX-7', verus, "reject: exact result, error order (auth, RequestNotFound, AlreadyApproved, AlreadyRejected, AgentRevoked, SelfApproval), rejection recorded with the approver's registration id, agent key pend-1, log unchanged; Ok(R'[i])").
 property('TX-6', kani, "Owner never changes; owner checks compare the caller account passed by the shell (predecessor: SH-1)").
-property('INV-0', kani, "Registry is a function: one registration and role per key (MemStore has no duplicate keys)").
-property('INV-1', kani, "Dense request ids: R[i].id = i").
-property('INV-2', kani, "Stored actions are 1..=2048 bytes").
-property('INV-3', kani, "Log -> request: L[j] < #R and R[L[j]] approved with index j").
-property('INV-4', kani, "Request -> log: approved R[i] has index < #L and L[index] = i").
-property('INV-5', kani, "Separation of duties: approver account != agent account, on every approval and rejection").
-property('INV-6', kani, "Approver key != agent key on every approval and rejection").
-property('INV-7', kani, "Registration bound: P(k).active_from <= #R").
-property('INV-8', kani, "Registration provenance: R[i].ak = k and i >= P(k).active_from => R[i].aa = P(k).account, role Agent and R[i].agent_registration_id = P(k).registration_id").
-property('INV-9', kani, "Pending count: P(k).pending equals undecided (neither approved nor rejected) requests of k under its registration, <= 16 (0 for approvers); the cap bound is stepped in h_raw_request").
-property('INV-10', kani, "Time order (non-decreasing time inputs): approved_at and rejected_at >= requested_at component-wise").
-property('INV-11', kani, "Live registration ids are issued (< G), pairwise distinct and not revoked").
-property('INV-12', kani, "Revoked registration ids are issued (< G) and each is revoked once (insert_revocation's write-once law holds)").
-property('INV-13', kani, "At most one decision per request: never both approved and rejected").
-property('INV-14', kani, "Recorded registration ids (request agent, approver, rejecter) are issued (< G)").
-property('INV-15', kani, "Registration accounting: #P + #V = G, so with INV-11/12 every issued registration is exactly one of live or revoked").
-property('INV-16', kani, "Registration binding: a live registration id recorded on a request or decision belongs to the key, account and role it was recorded with").
-property('LEM-1', kani, "Approval log has no duplicates").
-property('LEM-2', kani, "#L = number of approved requests <= #R").
-property('LEM-3', kani, "An unapproved request exists => #L < #R <= MAXU, so approve's LogFull is unreachable (F-7)").
-property('LEM-4', kani, "Under INV-8, liveness reduces to active_from <= id; role/account checks are redundant (F-14, the 2 equivalent mutants)").
-property('HIST-1', kani, "Request content immutable and never removed").
-property('HIST-2', kani, "Decisions immutable once recorded: approvals and rejections").
-property('HIST-3', kani, "Approval log append-only").
-property('HIST-4', kani, "#R grows by 1 exactly on a successful request, #L by 1 exactly on a successful approval; otherwise unchanged").
-property('HIST-5', kani, "Proof stability: a published proof never changes").
-property('HIST-6', kani, "Registry discipline: owner fixed; P changes only by owner Add/Revoke or the pending field on request/approve/reject").
+property('INV-0', verus, "Registry is a function: one registration and role per key (MemStore has no duplicate keys)").
+property('INV-1', verus, "Dense request ids: R[i].id = i").
+property('INV-2', verus, "Stored actions are 1..=2048 bytes").
+property('INV-3', verus, "Log -> request: L[j] < #R and R[L[j]] approved with index j").
+property('INV-4', verus, "Request -> log: approved R[i] has index < #L and L[index] = i").
+property('INV-5', verus, "Separation of duties: approver account != agent account, on every approval and rejection").
+property('INV-6', verus, "Approver key != agent key on every approval and rejection").
+property('INV-7', verus, "Registration bound: P(k).active_from <= #R").
+property('INV-8', verus, "Registration provenance: R[i].ak = k and i >= P(k).active_from => R[i].aa = P(k).account, role Agent and R[i].agent_registration_id = P(k).registration_id").
+property('INV-9', verus, "Pending count: P(k).pending equals undecided (neither approved nor rejected) requests of k under its registration, <= 16 (0 for approvers); the cap bound is stepped in h_raw_request").
+property('INV-10', verus, "Time order (non-decreasing time inputs): approved_at and rejected_at >= requested_at component-wise").
+property('INV-11', verus, "Live registration ids are issued (< G), pairwise distinct and not revoked").
+property('INV-12', verus, "Revoked registration ids are issued (< G) and each is revoked once (insert_revocation's write-once law holds)").
+property('INV-13', verus, "At most one decision per request: never both approved and rejected").
+property('INV-14', verus, "Recorded registration ids (request agent, approver, rejecter) are issued (< G)").
+property('INV-15', verus, "Registration accounting: #P + #V = G, so with INV-11/12 every issued registration is exactly one of live or revoked").
+property('INV-16', verus, "Registration binding: a live registration id recorded on a request or decision belongs to the key, account and role it was recorded with").
+property('LEM-1', verus, "Approval log has no duplicates").
+property('LEM-2', verus, "#L = number of approved requests <= #R").
+property('LEM-3', verus, "An unapproved request exists => #L < #R <= MAXU, so approve's LogFull is unreachable (F-7)").
+property('LEM-4', verus, "Under INV-8, liveness reduces to active_from <= id; role/account checks are redundant (F-14, the 2 equivalent mutants)").
+property('HIST-1', verus, "Request content immutable and never removed").
+property('HIST-2', verus, "Decisions immutable once recorded: approvals and rejections").
+property('HIST-3', verus, "Approval log append-only").
+property('HIST-4', verus, "#R grows by 1 exactly on a successful request, #L by 1 exactly on a successful approval; otherwise unchanged").
+property('HIST-5', verus, "Proof stability: a published proof never changes").
+property('HIST-6', verus, "Registry discipline: owner fixed; P changes only by owner Add/Revoke or the pending field on request/approve/reject").
 property('HIST-7', kani, "Owner operations never change requests or the log, and reject never changes the log, from any state").
-property('HIST-8', kani, "Void is terminal").
-property('HIST-9', kani, "Rejected is terminal").
-property('HIST-10', kani, "Registrations and revocations: G grows by 1 exactly on a successful Add, V gains one entry exactly on a successful Revoke, and a recorded revocation never changes").
-property('TR-1', kani, "Provenance: every proof has a prior successful request by a registered agent key and a successful approval restating the action by a registered approver key of a different account, with the agent registration continuous in between; the proof's registration ids are the registrations in force at request and approval").
-property('TR-2', kani, "Each request decided (approved or rejected) at most once in any trace").
-property('TR-3', kani, "Durable revocation: a request whose agent registration is revoked while pending is never approved, even after re-registration").
-property('TR-4', kani, "Approval times non-decreasing along the log").
+property('HIST-8', verus, "Void is terminal").
+property('HIST-9', verus, "Rejected is terminal").
+property('HIST-10', verus, "Registrations and revocations: G grows by 1 exactly on a successful Add, V gains one entry exactly on a successful Revoke, and a recorded revocation never changes").
+property('TR-1', verus, "Provenance: every proof has a prior successful request by a registered agent key and a successful approval restating the action by a registered approver key of a different account, with the agent registration continuous in between; the proof's registration ids are the registrations in force at request and approval").
+property('TR-2', verus, "Each request decided (approved or rejected) at most once in any trace").
+property('TR-3', verus, "Durable revocation: a request whose agent registration is revoked while pending is never approved, even after re-registration").
+property('TR-4', verus, "Approval times non-decreasing along the log").
 property('TR-5', kani, "Non-vacuity: approved, rejected and void states reachable; every error reachable except approve LogFull; request LogFull only at #R = MAXU").
-property('TR-6', kani, "Agent storage bound as a potential: Phi = sum over agent keys of (16 - pending) >= 0 drops by 1 per successful request and rises only on a successful approval or rejection or agent Add").
-property('TR-7', kani, "Revocation record: V lists exactly the successful Revokes, in order, each with the registration id it removed (as issued, fresh, by Add) and its time").
-property('RD-1', kani, "approval(s,i) = Some(proof(R[i])) iff approved; None for pending, void or unknown").
-property('RD-2', kani, "Exact page: approvals(f,l) = proofs of L[f..min(f saturating_add min(l,100), #L)], no drops").
+property('TR-6', verus, "Agent storage bound as a potential: Phi = sum over agent keys of (16 - pending) >= 0 drops by 1 per successful request and rises only on a successful approval or rejection or agent Add").
+property('TR-7', verus, "Revocation record: V lists exactly the successful Revokes, in order, each with the registration id it removed (as issued, fresh, by Add) and its time").
+property('RD-1', verus, "approval(s,i) = Some(proof(R[i])) iff approved; None for pending, void or unknown").
+property('RD-2', verus, "Exact page: approvals(f,l) = proofs of L[f..min(f saturating_add min(l,100), #L)], no drops").
 property('RD-3', kani, "Page arithmetic over any u64 (from, limit, count): no overflow; reads only approval_count, approved_request_id(j) in the page and request(id) for returned ids; no writes").
-property('RD-4', plain, "Client loop (stop on empty page or from >= count) enumerates the log exactly once, in order").
-property('RD-5', kani, "Per-request and paged views agree; proof findable by request_id or approval_index").
+property('RD-4', verus, "Client loop (stop on empty page or from >= count) enumerates the log exactly once, in order").
+property('RD-5', verus, "Per-request and paged views agree; proof findable by request_id or approval_index").
 property('RD-6', kani, "Core reads are pure (Window store panics on writes); every get_* takes &self").
-property('RD-7', kani, "request_status = Approved / Rejected / Pending (live) / Void; None for unknown ids").
-property('RD-8', kani, "proof_revocations(proof) = (V(agent registration), V(approver registration)); under Inv each is None exactly when that registration is still the key's current one").
+property('RD-7', verus, "request_status = Approved / Rejected / Pending (live) / Void; None for unknown ids").
+property('RD-8', verus, "proof_revocations(proof) = (V(agent registration), V(approver registration)); under Inv each is None exactly when that registration is still the key's current one").
 property('ROB-1', kani, "No panics, overflows or OOB indexing for any arguments and any MemStore within the bounds (beyond: ASM-MODEL), including non-Inv states").
 property('ROB-2', kani, "LogFull guards: count = MAXU with all earlier guards passing => Err(LogFull), no writes, before the shell's += 1 (which would panic under overflow-checks); approve's case needs a non-Inv state").
 property('ROB-3', kani, "Action length boundaries in bytes: 0, 1 (a space), 2048, 2049 and a multi-byte 2050").
