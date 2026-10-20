@@ -31,7 +31,7 @@ unmechanised steps listed under "Next".
 | Kani on the real core | M1 | `h_init`, `h_step_*` (5 parts each), `h_raw_*`, `h_read`, `h_bmc_*`, `h_ref_*`, `h_cut_*` green; `h_canary` fails; every cover satisfied; core mutants killed and the 2 equivalent ones survive, in plain mode and under Kani (§6). |
 | Kani bounds | §6.3 | CUT-1 (`h_cut_*`), U-1 (`kani-loops.py`, job `loops`). The size bound is closed by L2 (§18.6); CUT-2 (`kani/CUTOFF.md`) stays on paper. |
 | TLA+ refined by Kani | M1.5 | TLC safety and liveness, Apalache inductive step, witnesses, REF-1..5, 15 spec mutants killed (§17). TLC pinned to 1.7.4. |
-| Lean | M1.6 | `Inv`, the step properties and TR-1/2/3 proved for states and runs of every size; MC-4 and REF-5L tie it to TLC and the core (§18). |
+| Lean | M1.6 | `Inv`, the step properties and TR-1/2/3 proved for states and runs of every size; MC-4 and REF-5L tie it to TLC and the core (§18). TLA-LIVE-1 proved over every behaviour at every size, with a strong-fairness strengthening (LEAN-LIVE, §18.7). |
 | Lean L2 (oracle store) | §18.6 | ST-8, LINK (736,500 views) and LEAN-DELTA: the core steps like the model at every store size. ST-7 and RT-TIME added. |
 | Prolog requirements oracle | M4 | C-1..C-10 and C-2t pass; MC-1 51,568 states; MC-2 agrees both ways; MC-3 (Prolog graph = TLC graph) nightly (§8). |
 | Ghost-store harnesses | M2 | `h_page_arith`, `h_proto_*`, `h_count_*`, `h_refine_*`, `h_store_laws_*`, `h_oracle_*`, `h_action_len(_multi)` green; nightly mutants job. |
@@ -50,8 +50,8 @@ review of SH-9/RD-6), the testnet deployment for M7 (needs an archival
 RPC for VER-2/3), OQ-4, OQ-5, OQ-8, the Verus path A spike, and what (if
 anything) to submit to near-proof-arena. Buildable without a decision:
 mechanising the ASM-IDENT/LINK domain argument (§18.6, the one step of the
-L2 chain that is argued, not checked) and narrowing ASM-TLA-SCOPE for
-liveness. ASM-FINAL, ASM-TOOLS, ASM-OWNER and ASM-DISPLAY stay trusted.
+L2 chain that is argued, not checked). ASM-TLA-SCOPE no longer backs any
+every-size claim (§18.7). ASM-FINAL, ASM-TOOLS, ASM-OWNER and ASM-DISPLAY stay trusted.
 
 *Planning history.* The plan was written before any tool could be installed;
 the `[conf: …]` tags in this document date from then. Against the original
@@ -1198,7 +1198,7 @@ real core  ⊑  tla.rs  ≡  ApprovalCore.tla  ⊨  Inv at every depth  (Apalach
 | `ApprovalCore.tla` | The state machine. Variables `principals` (total over `Keys`, `reg = FALSE` for absent keys; with registration id `rid`), `requests` (with agent, approver and rejecter registration ids), `log`, `regs` (the registration counter `G`) and `revoked` (the revocation map's keys): the image of a store under the abstraction map α. Ghost `ghost` (per request: was the agent registration unbroken at the decision, was the decider an Approver) for TR-1. One error operator per entry point (`AddErr`, `RevokeErr`, `RequestErr`, `ApproveErr`, `RejectErr`; the last two share `DecideErr`, the core's `decidable_request`), the first failing guard in the core's order, and one action enabled exactly when it is `"Ok"`. A rejected call is a stutter (TX-0). `GuardOrder` lists each entry point's errors in order. |
 | `ApprovalProps.tla` | `TypeOK` (as predicates), INV-3..9, INV-11..16 (registration ids, revocations, one decision per request), INV-5/6 for rejections, LEM-1/2, `Provenance` (TR-1), `RidLive` (the `active_from` check agrees with the registration ids), `Approvable` (TLA-LIVE-2, approve and reject): together `Inv`. Action properties HIST-1/2/3/7/8/9/10 (`StepProperty`). `Witness_*` invariants that must be violated (TR-5). |
 | `MC_Safety.{tla,cfg}` | TLC: accounts `{o, a1, a2}`, keys `{k1, k2}`, one storable payload `x` plus `Empty` and `TooLong`, `MaxPending = 2` (scaled), at most 3 requests. Symmetry on accounts and keys; a `VIEW` replaces registration ids by their rank among the ids the state refers to. The core only copies ids and the properties compare them only for order and equality, so this is a bisimulation quotient and the unbounded add/revoke cycles stay finite. |
-| `MC_Liveness.{tla,cfg}`, `MC_Liveness_Unfair.cfg` | TLC: `Live1` under weak fairness of approvers; bounds inside the actions (`MaxReg` registrations), no symmetry or view. Without fairness `Live1` must fail. |
+| `MC_Liveness.{tla,cfg}`, `MC_Liveness_Unfair.cfg`, `MC_Liveness_SF.cfg` | TLC: `Live1` under weak fairness of approvers; bounds inside the actions (`MaxReg` registrations), no symmetry or view. Without fairness `Live1` must fail. `Live1Inf` under strong fairness (TLA-LIVE-1s). |
 | `MC_Apalache.tla` | Apalache: `Init ⇒ Inv`, `Inv ∧ Next ⇒ Inv'` and `Inv ∧ Next ⇒ StepProps` from any state with at most 3 requests, all integers symbolic, `MaxPending = 2` (scaled so the cap binds; Kani covers the real 16). |
 | `TraceCheck.{tla,cfg}` | REF-5: replays traces of the real core (`build/TraceData.tla`, generated). |
 | `mutants/*.patch` | Spec mutants; each must be killed by trace, apalache or liveness. |
@@ -1238,6 +1238,7 @@ Plain mode runs the refinement checks inside every step test.
 | TLA-SAFE | `Inv` and `StepProperty` (HIST-1/2/3/7/8, TR-2, TR-3 as `□(Void ⇒ □Void)`) in every reachable state and step | TLC, `MC_Safety` | ≤ 3 requests, 3 accounts, 2 keys, 1 storable payload, `MaxPending = 2`, any number of add/revoke |
 | TLA-IND | `Inv` is inductive, and every step from an `Inv` state satisfies `StepProps`: both hold at every depth | Apalache, `MC_Apalache` | arrays ≤ 3 before the step; integers unbounded; `MaxPending = 2` |
 | TLA-LIVE-1 | `<>[]Eligible(i) ⇒ □(Pending(i) ⇒ ◇¬Pending(i))` under `WF(ApproveReq(i))`: if an eligible approver eventually always exists and approvers are fair, no request stays pending (it ends approved, rejected or void; fairness is on approval only, so progress never relies on a rejection) | TLC, `MC_Liveness` (must fail without fairness) | ≤ 2 requests, 2 keys, ≤ 4 registrations |
+| TLA-LIVE-1s | `□◇Eligible(i) ⇒ □(Pending(i) ⇒ ◇¬Pending(i))` under `SF(ApproveReq(i))`: an eligible approver infinitely often is enough (a key revoked and re-added, say); implies TLA-LIVE-1 | TLC, `MC_Liveness_SF` | as above; at these bounds registrations run out, so it adds little over TLA-LIVE-1 (LEAN-LIVE covers the unbounded case) |
 | TLA-LIVE-2 | `Approvable`: a pending request is approvable and rejectable by every Approver key of another account | in `Inv` (TLC and Apalache) | as above |
 | TLA-WIT | Approved, rejected, void, revival-attempt and pending-cap states are reachable | TLC, inverted invariants | as TLA-SAFE |
 | REF-1..4 | §17.2 | Kani `h_ref_*`, plain mode | Kani step bounds (§6.3) |
@@ -1246,13 +1247,16 @@ Plain mode runs the refinement checks inside every step test.
 `Live1` needs its premise. Weak fairness alone is not enough when the owner
 can revoke every approver key: then no approval is ever enabled, and that is
 the contract working as designed, not a liveness bug. Strong fairness would
-not help either, for the same reason.
+not help either, for the same reason. What strong fairness does add
+(TLA-LIVE-1s) is the case where approver keys come and go: if an eligible
+approver exists infinitely often, the request still ends.
 
 **What this does not give.** TLC and Apalache use small constants, and Kani
 proves REF only within its step bounds. The chain is "bounded model plus
 parametricity" (ASM-IDENT, ASM-MODEL), not an unbounded proof; M5 (Verus)
 removes the small-scope step for the code, not for the TLA+ constants. §18
-(Lean) removes it for the TLA+ model's safety properties.
+(Lean) removes it for the TLA+ model's safety properties, and §18.7 for
+TLA-LIVE-1.
 
 ### 17.4 Running and CI
 
@@ -1337,6 +1341,7 @@ real core ⊑ tla.rs ≡ ApprovalCore.tla ≡ Lean machine ⊨ Inv, StepProps, T
 | `ApprovalLean/Trace.lean` | LEAN-TR: `reach_run`, `tr1_provenance`, `tr2_decision_final`, `tr3_void_terminal`, `hist1_run`, `hist3_run`, `hist10_run` |
 | `ApprovalLean/Guard.lean` | LEAN-GUARD: `guardOrder` (TLA+'s `GuardOrder`), `err_eq_firstFail`, `guards_order`, `err_mem_guardOrder`, `err_ne_logFull` |
 | `ApprovalLean/Witness.lean` | LEAN-WIT: reachable approved, rejected, void, revived-still-void and pending-cap states (TR-5), by evaluation |
+| `ApprovalLean/Liveness.lean`, `LivenessWitness.lean` | LEAN-LIVE (§18.7): TLA+'s temporal operators over behaviours `Nat → State`; `live1`, `live1_sf`; `unfair_violates`, `fair_witness` |
 | `ApprovalLean/Delta.lean` | LEAN-DELTA (§18.6): `cstep`, `expect`/`protocol` transcribed over `Store`'s getters; `delta_refines` |
 | `ApprovalLean/Text.lean`, `DeltaText.lean`, `Main.lean` | the `approval-lean` executable: `replay` (REF-5L), `graph` (MC-4), `guards`, `link` (LINK) |
 | `Audit.lean`, `canary/`, `mutants/` | the hygiene gate (18.4) |
@@ -1377,10 +1382,13 @@ every error fires, and REF-5L runs the real core's own traces.
 | LEAN-TR | over `run cfg s ops` for any `ops` from a reachable `s`: TR-2 (`tr2_decision_final`), TR-3 (`tr3_void_terminal`), TR-1 (`tr1_provenance`), HIST-1/3/10 transitively | TLC's finite depth |
 | LEAN-GUARD | `err cfg s op = (firstFail (guards cfg s op)).getD .ok` and `(guards cfg s op).map Prod.fst = guardOrder op.kind` | C-2t, REF-1 |
 | LEAN-WIT | witnesses for approved, rejected, void, revival and the pending cap | TLA-WIT |
+| LEAN-LIVE | `live1 : LiveSpec cfg R σ → Live1 cfg σ` for every step relation `R`; `live1_sf` under strong fairness; non-vacuity both ways (§18.7) | TLA-LIVE-1 and TLA-LIVE-1s (TLC, ≤ 2 requests, 2 keys, ≤ 4 registrations) |
 | LEAN-DELTA | `delta_refines`: on every concrete store of every size with ids at their positions and counters below `u64::MAX`, `cstep`'s error is `err` and its calls land on `step` (§18.6) | none (REF-1..3 within the Kani bound) |
 
-Net effect on assumptions: **ASM-TLA-SCOPE is needed only for liveness
-(TLA-LIVE-1)**; the safety half is retired, given ASM-LEAN-TLA. ASM-MODEL
+Net effect on assumptions: **ASM-TLA-SCOPE backs no every-size claim**:
+L1 retired the safety half and LEAN-LIVE (§18.7) the liveness half, given
+ASM-LEAN-TLA. It remains only as the scope of the TLC and Apalache rows
+themselves. ASM-MODEL
 (the Kani bound on the code) is discharged by §18.6 rather than by
 mechanising CUTOFF.md, which stays as the explanation of why small identity
 domains suffice.
@@ -1399,7 +1407,10 @@ domains suffice.
   in `Lemmas.lean` that spells out the mutated effect, so that the kill
   comes from an invariant or step-property proof, not from that lemma.
   All 15 are killed by `Inv/*.lean`, `StepProps.lean` or `Guard.lean`
-  (`lean/RESULTS.md`).
+  (`lean/RESULTS.md`). Mutants 16 (approve also checks the agent's pending
+  cap) and 17 (approve does not mark the request approved) are liveness
+  mutants: each must break LEAN-LIVE's chain (`approvable_all`,
+  `approveReq_not_pending`), and both do.
 - No `Inv` conjunct is a step property, and no theorem assumes its
   conclusion: hypotheses are `Inv cfg s`, `Reach cfg s` or an error
   operator returning `ok`.
@@ -1440,3 +1451,47 @@ revocation time and the request and decision times are checked by RT-TIME.
 With L1 (LEAN-IND, LEAN-STEP, LEAN-TR), the safety properties then hold for
 the code at every state size, given ASM-IDENT, ASM-LEAN-TLA and the
 tool assumptions.
+
+### 18.7 Liveness at every size (LEAN-LIVE)
+
+TLC checks TLA-LIVE-1 only at `MC_Liveness`'s bounds. `Liveness.lean`
+proves the same formula for every behaviour of the Lean machine, with no
+bound on keys, accounts, requests, registrations or `MaxPending`.
+
+**Encoding.** A behaviour is `σ : Nat → State`. Each TLA+ operator the
+property uses is a one-line definition beside the formula it encodes, for
+the spec reviewer to check against TLA+'s semantics: `[][R]_vars` is
+`Steps R σ` (each step an `R` step or a stutter), `<>[]F` is `EvAlways`,
+`[]<>F` is `InfOften`, `ENABLED <<A>>_vars` is `Enabled` (a
+state-changing `A` step exists), and `WF_vars`/`SF_vars` are `WeakFair`/
+`StrongFair`. `ApproveReq`, `Eligible`, `Live1` and `LiveSpec` transcribe
+`MC_Liveness.tla`. This encoding joins ASM-LEAN-TLA; MC-4 does not cover
+it, since it compares state graphs, not temporal formulas. The cross-check
+is that TLC and Lean agree on the verdicts: both prove `Live1` under
+fairness, and both refute it without (`MC_Liveness_Unfair`,
+`unfair_violates`).
+
+| Theorem | Statement |
+|---|---|
+| `live1` | `LiveSpec cfg R σ → Live1 cfg σ` for every step relation `R`, so for `Next` and for `MC_Liveness`'s bounded `BNext` |
+| `live1_sf` | under `SF(ApproveReq(i))` for every `i`, `[]<>Eligible(i) ⇒ [](Pending(i) ⇒ <>¬Pending(i))` (TLA-LIVE-1s) |
+| `live1_of_live1Inf` | TLA-LIVE-1s implies TLA-LIVE-1 |
+| `unfair_violates` | a concrete `UnfairSpec` behaviour (request pending, eligible approver, then stutter) violates `Live1` |
+| `fair_witness` | a concrete `LiveSpec` behaviour has the request pending with an eligible approver from instant 3 on, so `Live1`'s premise is satisfiable; the approval ends it |
+
+**Why it is short.** The proof needs no invariant, no reachability and no
+property of `R`: TLA-LIVE-2 holds in every state (`approvable_all`), so a
+pending request with an eligible approver always enables `ApproveReq(i)`,
+and one approval leaves `Pending` (`approveReq_not_pending`). Fairness then
+forces that step. So TLA-LIVE-1 is a weak property: it says the core never
+blocks an eligible approver. It says nothing about the approver acting,
+having gas, or the runtime including the transaction; no assumption in
+`status.toml` covers inclusion. With unbounded registrations, weak fairness
+does not give TLA-LIVE-1s (approver keys can come and go forever); no Lean
+witness of that separation is built.
+
+**Mutants.** 13 of the 15 safety mutants leave LEAN-LIVE intact (07 and 11
+break only its witnesses), as expected of a property this weak; mutants 16
+and 17 (§18.4) target it.
+
+With LEAN-LIVE, ASM-TLA-SCOPE backs no every-size claim.

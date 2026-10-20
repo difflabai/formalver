@@ -42,4 +42,12 @@ LiveSpec == Init /\ [][BNext]_vars /\ \A i \in ReqIds: WF_vars(ApproveReq(i))
 UnfairSpec == Init /\ [][BNext]_vars
 
 Live1 == \A i \in ReqIds: (<>[]Eligible(i)) => [](Pending(i) => <>~Pending(i))
+
+\* TLA-LIVE-1s: under strong fairness an eligible approver infinitely often
+\* is enough (a key revoked and re-added, say). Live1Inf implies Live1. At
+\* these bounds registrations run out, so eligibility cannot flicker
+\* forever and this adds little over Live1; the Lean proof (live1_sf)
+\* covers the unbounded case, where weak fairness is not enough.
+LiveSpecSF == Init /\ [][BNext]_vars /\ \A i \in ReqIds: SF_vars(ApproveReq(i))
+Live1Inf == \A i \in ReqIds: ([]<>Eligible(i)) => [](Pending(i) => <>~Pending(i))
 =============================================================================
