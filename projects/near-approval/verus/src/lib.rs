@@ -914,12 +914,15 @@ where
     let end = from_index
         .saturating_add(limit.min(MAX_PAGE_SIZE))
         .min(store.approval_count());
-    // A plain loop rather than an iterator chain: Verus (formalver M5) has
-    // no specification for `filter_map`, and this keeps the verified copy
-    // token-for-token identical to this code.
+    // A loop rather than an iterator chain: Verus (formalver M5) has no
+    // specification for `filter_map`. Each pass of the outer loop pushes one
+    // proof or ends the page, and the inner loop skips slots without one:
+    // under Kani (formalver), a pass that skips without pushing leaves the
+    // page length symbolic, and CBMC then writes each later proof at a
+    // symbolic offset, which ran the read harnesses out of memory.
     let mut out = Vec::new();
     let mut i = from_index;
-    while i < end
+    loop
         invariant
             store.wf(),
             clone_laws::<A>(),
@@ -929,18 +932,43 @@ where
             from_index <= i || end <= from_index,
             out@ + approvals_from(store.view(), i as int, end as int)
                 == approvals_spec(store.view(), from_index, limit),
+        ensures
+            out@ == approvals_spec(store.view(), from_index, limit),
         decreases end - i,
     {
-        if let Some(id) = store.approved_request_id(i) {
-            if let Some(p) = approval(store, id) {
+        let ghost i0 = i;
+        let mut found = None;
+        while found.is_none() && i < end
+            invariant
+                store.wf(),
+                clone_laws::<A>(),
+                clone_laws::<K>(),
+                end == page_end(store.view(), from_index, limit),
+                end <= store.view().log.len(),
+                from_index <= i || end <= from_index,
+                i0 <= i,
+                found is None ==> out@ + approvals_from(store.view(), i as int, end as int)
+                    == approvals_spec(store.view(), from_index, limit),
+                found is Some ==> i0 < i <= end && out@.push(found->Some_0)
+                    + approvals_from(store.view(), i as int, end as int)
+                    == approvals_spec(store.view(), from_index, limit),
+            decreases end - i,
+        {
+            if let Some(id) = store.approved_request_id(i) {
+                found = approval(store, id);
                 proof {
-                    assert(out@.push(p) + approvals_from(store.view(), i + 1, end as int)
-                        =~= out@ + approvals_from(store.view(), i as int, end as int));
+                    if found is Some {
+                        assert(out@.push(found->Some_0) + approvals_from(store.view(), i + 1, end as int)
+                            =~= out@ + approvals_from(store.view(), i as int, end as int));
+                    }
                 }
-                out.push(p);
             }
+            i += 1;
         }
-        i += 1;
+        match found {
+            Some(p) => out.push(p),
+            None => break,
+        }
     }
     out
 }

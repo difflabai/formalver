@@ -20,7 +20,7 @@ dependencies, so Kani and Verus can target **the deployed logic itself**
 rather than a model of it. The shell is thin enough to cover with tests,
 review and wasm inspection.
 
-**Status (2026-10-19, pin `293f4a6`).** Every
+**Status (2026-10-19, pin `18f57cb`).** Every
 milestone is built and green in CI (M5, Verus path A, since 2026-10-19). What keeps the contract short
 of "fully verified" is the spec sign-off, the testnet deployment and the
 unmechanised steps listed under "Next".
@@ -401,7 +401,7 @@ within bounds), VC/VM (unbounded), PM and Kp.
 | ID | Statement | Check |
 |---|---|---|
 | RD-1 | `approval(s,i) = Some(π) ⇔ i < #R ∧ R[i].ap ≠ None`, with `π = proof(R[i])` field by field and `L[π.approval_index] = i`. | K / VC |
-| RD-2 | **Exact page (under Inv):** for all `f, l ∈ u64`, `approvals(s,f,l) = [proof(R[L[j]]) | j ∈ f..e]` where `e = min(f ⊕ min(l,PG), #L)`. Its length is exactly `e ∸ f`: neither `filter_map` drops anything. | K / VC |
+| RD-2 | **Exact page (under Inv):** for all `f, l ∈ u64`, `approvals(s,f,l) = [proof(R[L[j]]) | j ∈ f..e]` where `e = min(f ⊕ min(l,PG), #L)`. Its length is exactly `e ∸ f`: the page drops nothing. | K / VC |
 | RD-3 | **Page arithmetic, any store:** for all `f, l, count ∈ u64`, including `MAXU`: no panic or overflow; reads only `approval_count()` once, `approved_request_id(j)` for `j ∈ [f,e)`, and `request(id)` for each id those calls return; no writes. | K (`Window` store) |
 | RD-4 | **Client enumeration:** with `l ≥ 1` and `from_{k+1} = from_k + len_k`, stopping at the first empty page (the documented rule), or at `from ≥ get_approval_count()`, yields `L` exactly once and in order. This holds at one `block_id`, or across states (HIST-3, HIST-5). | VC/VM / Kp, PM |
 | RD-5 | View consistency: `p ∈ approvals(s,f,l) ⇒ approval(s, p.request_id) = Some(p)`, and `approval(s,i) = Some(π) ⇒ approvals(s, π.approval_index, 1) = [π]`. So a proof is findable by `request_id` (from `approval_requested`) or by `approval_index` (from `action_approved`). | K / VC |
@@ -711,9 +711,11 @@ size (they stay `in-progress` until `spec_reviewer` is set; §12). See
   the pinned upstream file, modulo `verus/REWRITES.toml`, which may only
   list test-only `MemStore` helpers: `run-verus.sh` rejects a rewrite of
   deployed code. The one deployed function Verus could not take as written,
-  `approvals` (`filter_map` has no vstd spec), became a plain loop upstream
-  (trust-framework PR #20, pin `293f4a6`), so the deployed core is verified
-  token for token.
+  `approvals` (`filter_map` has no vstd spec), became a loop upstream
+  (trust-framework PR #20, then PR #22 for its Kani-friendly shape: each
+  outer pass pushes one proof or ends the page, since a pass that skips
+  without pushing ran the Kani read harnesses out of memory; pin
+  `18f57cb`), so the deployed core is verified token for token.
 - Mutants (`verus/mutants.toml`): spec mutants, code mutants, and paired
   mutants that change spec and code together (dropping separation of
   duties, `active_from <= id`, or the pending count) so only the property

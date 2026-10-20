@@ -2,9 +2,9 @@
 //!
 //! Upstream: difflabai/trust-framework `contracts/approval/contract/src/lib.rs`
 //!           and `contracts/approval/core/src/lib.rs`
-//! Pin:      293f4a6641ca9bf574b56e8d5f86fd55ca0fe554 (trust-framework PR #20: approvals as a plain loop)
+//! Pin:      18f57cb218f391d59d14f9db68dd2dd6951d71fb (trust-framework PR #22: approvals loop that Kani can check)
 //! sha256:   contract/src/lib.rs be9d35ba7a0cca151acf79882872eba18c6cf9078651fae94c35b55b389d0272
-//!           core/src/lib.rs     a3d77f6c26f5c759b7a941dbeb5361bc6225297cd6eda358e152e92e6ec722d3
+//!           core/src/lib.rs     b7528a6e54ce5f72bccf6cb3a40bf010f6b5a59b4627a1be6e1102396e5eefed
 //! Covers:   every `#[near]` method of `ApprovalContract`, its `Store` impl, `caller()`,
 //!           `now()`, `ok()`, the views and event payloads, run under near-sdk's
 //!           mocked runtime (`unit-testing`, real `VMLogic` from near-vm-runner).

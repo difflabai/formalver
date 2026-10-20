@@ -42,8 +42,10 @@ std::ptr::drop_glue::<\[	CAP_R + 1	drop of a store array or page (<= 4 elements)
 <std::slice::Iter<'_, \(ids::Key, approval_core::Principal	CAP_P + 1	iteration over principals()
 <std::ops::Range<usize> as std::iter::Iterator>::try_fold.*checks\.rs	CAP_R + 1	(0..pre.nl).all(..) over the log
 #
-# approval_core::approvals: the page loop runs from `from` to
-# min(from + min(limit, MAX_PAGE_SIZE), #L), so at most #L <= CAP_R times.
+# approval_core::approvals: the scan loop steps i from `from` to
+# min(from + min(limit, MAX_PAGE_SIZE), #L), and each pass of the outer loop
+# pushes one proof or ends the page, so each runs at most #L <= CAP_R times
+# plus the final pass.
 # Window (ghost.rs): Window<true> runs with limit <= PAGE_SMALL under Kani
 # (h_page_arith); Window<false> runs a full page (h_page_arith_empty). Each
 # page harness also instantiates the other Window, which its `part` never
