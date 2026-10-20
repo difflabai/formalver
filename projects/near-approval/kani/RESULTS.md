@@ -205,8 +205,11 @@ inflate it).
 | `h_proto_request_empty` | verified | 89 s | 1.9 GB | `""` instance |
 | `h_proto_approve` | verified, 2/2 covers | 456 s | 5.6 GB | ST-2, ROB-2, TR-5 (approve `LogFull`) |
 | `h_proto_reject` | verified, 1/1 cover | 202 s | 2.6 GB | ST-2 |
-| `h_oracle_approve` | verified, 3/3 covers | 616 s | | ST-8 (any store size) |
-| `h_oracle_reject` | verified, 3/3 covers | 347 s | | ST-8 (any store size) |
+| `h_oracle_approve` | verified, 3/3 covers | 616 s; 493 s with 8 accounts (ST-8W, 2026-10-19) | | ST-8 (any store size), ST-8W |
+| `h_oracle_reject` | verified, 3/3 covers | 347 s; 255 s with 8 accounts (ST-8W) | | ST-8 (any store size), ST-8W |
+| `h_link_t_add`, `_revoke`, `_request`, `_request_empty`, `_request_long`, `_reject` | verified (2026-10-19) | 31, 34, 178, 32, 32, 126 s | | K-LINK-T |
+| `h_link_t_approve_part_err`, `_c0`, `_c1_ids`, `_c1_act_v`, `_c1_act_s`, `_c1_appr`, `_c1_rej`, `_c2`, `_c3` | verified, family covers 2/2 | 266, 317, 226, 270, 277, 229, 212, 294, 263 s | | K-LINK-T (approve, one part each: unsplit it ran out of memory) |
+| `h_link_t_approve_empty`, `_long` | verified | 174, 539 s | | K-LINK-T |
 | `h_count_add`, `_revoke`, `_request`, `_approve`, `_reject` | verified | 40, 46, 49, 222, 115 s | 0.5-4.9 GB | ROB-4, TX-0 |
 | `h_refine_add`, `_revoke`, `_request` | verified | 841, 1078, 1177 s | 6.6, 6.7, 8.7 GB | ST-3, ST-2 |
 | `h_refine_approve_tx`, `_post` | verified | 588, 1398 s | 9.0, 11.2 GB | ST-3, ST-2 |
