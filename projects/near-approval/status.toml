@@ -10,6 +10,7 @@ mc1_state_floor = 51568     # recorded at M4 (2026-10-11); MC-1 fails below it
 # asserts it; recompute on every pin bump). Take it from trust-framework's
 # `reproducible wasm` job on the pinned main commit: the build metadata names
 # the commit, so a PR-head build of the same source hashes differently.
+# sandbox/results/RT-CODEHASH.json records the same build and moves with it.
 reproducible_wasm_sha256 = "a0f02b21e7013aeb8496a57923611181bf7842e008f9b7600ade4904c6d288f7"
 reproducible_code_hash = "BqEdznmvQiCG6XKTgpXbzEptV3GuL3VF274uUqkoseCv"
 release_overflow_checks = true  # ASM-COMPILE: check-pin.sh fails unless upstream [profile.release] sets overflow-checks = true
