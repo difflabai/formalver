@@ -3,6 +3,9 @@ name = "ironclaw-verify"
 version = "0.1.0"
 edition = "2021"
 description = "Verus formal verification models for ironclaw safety module"
+license = "MIT"
+repository = "https://github.com/difflabai/formalver"
+publish = false
 
 [features]
 # Enable when compiling with the Verus toolchain.
