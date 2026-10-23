@@ -40,8 +40,9 @@ The step, raw and read rows also ran green earlier on GitHub's 2-CPU, 7.9 GB Lin
 with 16 GB of swap (`2199a1e`), at 3 to 59 min per
 job.
 
-The full matrix runs on every pull request push, on main, nightly and on
-manual dispatch (about 110 runner-minutes on the Macs).
+The full matrix runs on every pull request push, on main, and on manual
+dispatch (about 110 runner-minutes on the Macs). Nightly only if
+`contracts/approval` moved past the pin.
 <!-- /KANI-TABLE -->
 
 ## Loop bounds (U-1)

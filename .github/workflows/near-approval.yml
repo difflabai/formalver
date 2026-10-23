@@ -18,8 +18,8 @@ on:
       - ".gitmodules"
       - ".github/workflows/near-approval.yml"
   schedule:
-    - cron: "17 3 * * *" # nightly: kani
-    - cron: "41 4 * * 0" # weekly: mutants
+    - cron: "17 3 * * *" # nightly: verify only if contracts/approval changed
+    - cron: "41 4 * * 0" # weekly: mutants, only if the contract changed
   workflow_dispatch:
     inputs:
       mutants:
@@ -56,8 +56,10 @@ env:
 #
 # On pull requests each job below pin runs only when the PR changes a path
 # it depends on (tools/scripts/ci-areas.sh); a skipped job reports as
-# skipped, which branch protection counts as passing. Pushes to main, the
-# schedules and manual dispatch run every job.
+# skipped, which branch protection counts as passing. Pushes to main and
+# manual dispatch run every job. A schedule runs verification only when
+# contracts/approval on trust-framework differs from the pin (*.md ignored);
+# it then verifies that upstream tip, not the stale pin.
 jobs:
   pin:
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
@@ -71,6 +73,8 @@ jobs:
       near_unit: ${{ steps.areas.outputs.near_unit }}
       sandbox: ${{ steps.areas.outputs.sandbox }}
       verus: ${{ steps.areas.outputs.verus }}
+      contract_changed: ${{ steps.contract.outputs.contract_changed }}
+      source_ref: ${{ steps.contract.outputs.source_ref }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -82,6 +86,7 @@ jobs:
         id: areas
         run: |
           tools/scripts/test-ci-areas.sh
+          tools/scripts/test-approval-changed.sh
           if [ "$GITHUB_EVENT_NAME" = pull_request ] && git rev-parse -q --verify HEAD^2 >/dev/null; then
             git diff --name-only HEAD^1 HEAD | CI_AREAS_EXPLAIN=1 tools/scripts/ci-areas.sh >"$RUNNER_TEMP/areas"
           else
@@ -89,9 +94,22 @@ jobs:
           fi
           cat "$RUNNER_TEMP/areas" >>"$GITHUB_OUTPUT"
           { echo '### Jobs this change needs'; sed 's/^/- /' "$RUNNER_TEMP/areas"; } >>"$GITHUB_STEP_SUMMARY"
-      - name: Check out trust-framework at the pin
+      - name: Approval contract since the pin
+        id: contract
         env:
           CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            tools/scripts/approval-changed.sh
+          else
+            echo contract_changed=true >>"$GITHUB_OUTPUT"
+            echo source_ref= >>"$GITHUB_OUTPUT"
+          fi
+      - name: Check out trust-framework at the pin
+        if: steps.contract.outputs.contract_changed == 'true'
+        env:
+          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+          SOURCE_REF: ${{ steps.contract.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Python >= 3.11 (tomllib)
         if: runner.os == 'macOS'
@@ -109,6 +127,10 @@ jobs:
           done
           echo "::error::no python3 >= 3.11 on PATH"; exit 1
       - name: Gitlink and source hashes match status.toml
+        # A schedule that found upstream drift verifies that tip. check-pin
+        # would fail on it and skip every proof job, which is the opposite
+        # of the point. PRs and pushes still require the pin.
+        if: github.event_name != 'schedule'
         run: tools/scripts/check-pin.sh near-approval
       # status-lint (strategy.md section 14): status.toml claims nothing the
       # repository doesn't back. Runs here because pin always runs.
@@ -119,7 +141,7 @@ jobs:
 
   plain:
     needs: pin
-    if: needs.pin.outputs.plain == 'true'
+    if: needs.pin.outputs.plain == 'true' && needs.pin.outputs.contract_changed == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
@@ -128,6 +150,7 @@ jobs:
       - name: Check out trust-framework at the pin
         env:
           CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+          SOURCE_REF: ${{ needs.pin.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Toolchain from versions.env
         run: |
@@ -158,6 +181,7 @@ jobs:
     # constant, at most its harness unwind (tools/scripts/kani-loops.py).
     needs: pin
     if: >-
+      needs.pin.outputs.contract_changed == 'true' &&
       needs.pin.outputs.loops == 'true' &&
       (github.event_name != 'schedule' || github.event.schedule == '17 3 * * *')
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
@@ -169,6 +193,7 @@ jobs:
       - name: Check out trust-framework at the pin
         env:
           CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+          SOURCE_REF: ${{ needs.pin.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Install Kani (and the CBMC it bundles)
         run: |
@@ -190,9 +215,10 @@ jobs:
 
   kani:
     needs: pin
-    # Every push to main, pull requests that change what it checks, and the
-    # nightly schedule.
+    # Every push to main, pull requests that change what it checks, and a
+    # nightly whose approval contract moved past the pin.
     if: >-
+      needs.pin.outputs.contract_changed == 'true' &&
       needs.pin.outputs.kani == 'true' &&
       (github.event_name != 'schedule' || github.event.schedule == '17 3 * * *')
     # CBMC peaks at 6.5 to 9.5 GB on the step harnesses; this repository's
@@ -300,6 +326,7 @@ jobs:
       - name: Check out trust-framework at the pin
         env:
           CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+          SOURCE_REF: ${{ needs.pin.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Install Kani (and the CBMC it bundles)
         run: |
@@ -360,7 +387,7 @@ jobs:
 
   tla:
     needs: pin
-    if: needs.pin.outputs.tla == 'true'
+    if: needs.pin.outputs.tla == 'true' && needs.pin.outputs.contract_changed == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 240
     steps:
@@ -370,6 +397,7 @@ jobs:
       - name: Check out trust-framework at the pin
         env:
           CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+          SOURCE_REF: ${{ needs.pin.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Toolchain from versions.env
         run: |
@@ -414,7 +442,7 @@ jobs:
     # audit and canaries, REF-5L (real-core traces on the Lean machine),
     # MC-4 (Lean graph = TLC graph) and the spec mutants. About 8 min.
     needs: pin
-    if: needs.pin.outputs.lean == 'true'
+    if: needs.pin.outputs.lean == 'true' && needs.pin.outputs.contract_changed == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 60
     steps:
@@ -424,6 +452,7 @@ jobs:
       - name: Check out trust-framework at the pin
         env:
           CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+          SOURCE_REF: ${{ needs.pin.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Toolchain from versions.env
         run: |
@@ -471,7 +500,7 @@ jobs:
     # must fail, the erasure check ties the twin to the pinned upstream file,
     # and every mutant in verus/mutants.toml must be rejected. About 1 min.
     needs: pin
-    if: needs.pin.outputs.verus == 'true'
+    if: needs.pin.outputs.verus == 'true' && needs.pin.outputs.contract_changed == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
@@ -481,6 +510,7 @@ jobs:
       - name: Check out trust-framework at the pin
         env:
           CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+          SOURCE_REF: ${{ needs.pin.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Python >= 3.11 (tomllib)
         if: runner.os == 'macOS'
@@ -517,7 +547,7 @@ jobs:
     # directions. MC-3 (the full graph comparison, about 30 min) runs
     # nightly and on manual dispatch.
     needs: pin
-    if: needs.pin.outputs.prolog == 'true'
+    if: needs.pin.outputs.prolog == 'true' && needs.pin.outputs.contract_changed == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 90
     steps:
@@ -530,6 +560,7 @@ jobs:
       - name: Check out trust-framework at the pin
         env:
           CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+          SOURCE_REF: ${{ needs.pin.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Toolchain from versions.env
         run: |
@@ -585,7 +616,7 @@ jobs:
   # api_facts.pl).
   near-unit:
     needs: pin
-    if: needs.pin.outputs.near_unit == 'true'
+    if: needs.pin.outputs.near_unit == 'true' && needs.pin.outputs.contract_changed == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 45
     steps:
@@ -595,6 +626,7 @@ jobs:
       - name: Check out trust-framework at the pin
         env:
           CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+          SOURCE_REF: ${{ needs.pin.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Toolchain from versions.env, with the wasm target
         run: |
@@ -622,14 +654,15 @@ jobs:
 
   # M6 (strategy.md sections 5.9 and 9): the reproducible wasm of the pin in a
   # local near-sandbox: RT-*, SH-9, SH-10, RES-1/3, the DEP-1/VER demo on the
-  # sandbox chain, and RT-TRACE. Nightly, on PRs that change what it runs,
-  # and on manual dispatch.
+  # sandbox chain, and RT-TRACE. Nightly only if the contract changed, on PRs
+  # that change what it runs, and on manual dispatch.
   sandbox:
     needs: pin
     if: >-
-      (github.event_name == 'schedule' && github.event.schedule == '17 3 * * *') ||
+      needs.pin.outputs.contract_changed == 'true' &&
+      ((github.event_name == 'schedule' && github.event.schedule == '17 3 * * *') ||
       inputs.sandbox ||
-      (github.event_name != 'schedule' && needs.pin.outputs.sandbox == 'true')
+      (github.event_name != 'schedule' && needs.pin.outputs.sandbox == 'true'))
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     # The reproducible build runs an amd64 image (emulated on the Mac) and
     # RT-TRACE replays 210 traces.
@@ -645,6 +678,7 @@ jobs:
       - name: Check out trust-framework at the pin
         env:
           CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+          SOURCE_REF: ${{ needs.pin.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Toolchain from versions.env, with the wasm target
         run: |
@@ -757,7 +791,7 @@ jobs:
 
   mutants:
     needs: pin
-    if: github.event.schedule == '41 4 * * 0' || inputs.mutants
+    if: (github.event.schedule == '41 4 * * 0' || inputs.mutants) && needs.pin.outputs.contract_changed == 'true'
     runs-on: ${{ vars.KANI_RUNNER || vars.CI_RUNNER || 'ubuntu-latest' }}
     # Up to 2 harnesses (6 for the must-survive mutants) of KANI_TIMEOUT
     # (60 min) each, plus builds.
@@ -778,6 +812,7 @@ jobs:
       - name: Check out trust-framework at the pin
         env:
           CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+          SOURCE_REF: ${{ needs.pin.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Toolchain from versions.env
         run: |
@@ -824,7 +859,7 @@ jobs:
   # shell suite fail.
   shell-mutants:
     needs: pin
-    if: github.event.schedule == '41 4 * * 0' || inputs.mutants
+    if: (github.event.schedule == '41 4 * * 0' || inputs.mutants) && needs.pin.outputs.contract_changed == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 90
     steps:
@@ -834,6 +869,7 @@ jobs:
       - name: Check out trust-framework at the pin
         env:
           CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+          SOURCE_REF: ${{ needs.pin.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Toolchain from versions.env
         run: |
