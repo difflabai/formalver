@@ -2,8 +2,8 @@
 name = "near-approval"
 upstream = "https://github.com/difflabai/trust-framework"
 upstream_path = "contracts/approval"
-pinned_commit = "18f57cb218f391d59d14f9db68dd2dd6951d71fb"   # trust-framework main (2026-10-20): PR #19, #20 and #22 (approvals as a loop the Verus twin and Kani both check; no behaviour change)
-last_reviewed = "2026-10-20"
+pinned_commit = "af2c704ecacdae809c18f27b0d645f771d45cdd3"   # trust-framework main (2026-10-21): MIT publication prep. core/src/lib.rs and contract/src/lib.rs identical to 18f57cb
+last_reviewed = "2026-10-21"
 verus_min_verified = 95     # M5 path A (2026-10-20): twin + property lemmas; run-verus.sh fails below it
 mc1_state_floor = 51568     # recorded at M4 (2026-10-11); MC-1 fails below it
 # RT-CODEHASH: `cargo near build reproducible-wasm` of the pin (sandbox job
@@ -11,8 +11,8 @@ mc1_state_floor = 51568     # recorded at M4 (2026-10-11); MC-1 fails below it
 # `reproducible wasm` job on the pinned main commit: the build metadata names
 # the commit, so a PR-head build of the same source hashes differently.
 # sandbox/results/RT-CODEHASH.json records the same build and moves with it.
-reproducible_wasm_sha256 = "a0f02b21e7013aeb8496a57923611181bf7842e008f9b7600ade4904c6d288f7"
-reproducible_code_hash = "BqEdznmvQiCG6XKTgpXbzEptV3GuL3VF274uUqkoseCv"
+reproducible_wasm_sha256 = "36683fb50050cda51e6831e837f40a442cbe767b03d45cae8ac92602b7d9ef95"
+reproducible_code_hash = "4fPDQYaQdSn6SkD7WYgD5pUrU1d6Ev8FQqE7iEYvUtyJ"
 release_overflow_checks = true  # ASM-COMPILE: check-pin.sh fails unless upstream [profile.release] sets overflow-checks = true
 
 # Status values: unverified | in-progress | verified | verified-with-assumptions | stale
@@ -31,7 +31,7 @@ release_overflow_checks = true  # ASM-COMPILE: check-pin.sh fails unless upstrea
 # The `evidence` value on each property is the TARGET evidence for that property.
 
 [review]
-spec_reviewer = ""          # a named human who did not write approval-core; required before any K/V property is verified*
+spec_reviewer = ""          # stays empty until a named human who did not write approval-core signs off. That review happens after the repos are public, and it is an approval recorded by the contract itself.
 spec_reviewed_at = ""
 
 [tools]
@@ -56,19 +56,19 @@ near_proof_arena = "cb16c4090a82a6179d8e1a23d6e83e74e9d5d017"  # contract v1; to
 [source_hashes]             # sha256 at pinned_commit; check-pin.sh recomputes
 "Cargo.toml" = "1cbed4b212bec393ad67cdd2179357355a6b137694c1b604638b2f3e6ee382af"
 "Cargo.lock" = "3ef5ab18d24eb2fb74fc3033c9d2fefa611568b6e401127de8eb91557791b939"
-"README.md" = "bca19d675be6ff2e22ab60d130c238b4ea39fdcef3953806e8914bbbadcd6db6"
-"core/Cargo.toml" = "0a872e27977c514a3e35cba2afd0c4b9945f4eb6fbbfe60dd731d04937d4484a"
+"README.md" = "7ce9c44210e8c8e743ae284a02f9c76b209a5e1035f37e73f730f6159d3fd75a"
+"core/Cargo.toml" = "86b3fe15cd85d92405c4896d53227132bdd9fa4d6510f6481b713b89748aeca0"
 "core/src/lib.rs" = "b7528a6e54ce5f72bccf6cb3a40bf010f6b5a59b4627a1be6e1102396e5eefed"
 "core/src/tests.rs" = "a5b29506a777012df246763a71d0d6bd7ac8f18c1927e341de766f8eab24c5b9"
-"contract/Cargo.toml" = "fcc73488270168cd81fa3a8da8cdc6ef4e87b5e31b195ac0b364a0aec571e736"
+"contract/Cargo.toml" = "e886b7274ffba149d970acf819c21e07617ea7fe3a156d70d9c0b0106b5093ca"
 "contract/src/lib.rs" = "be9d35ba7a0cca151acf79882872eba18c6cf9078651fae94c35b55b389d0272"
-"sandbox/Cargo.toml" = "6250ba551605a991a354e9d79f017bfe4bcae83741a17d7120248e04535967f6"
+"sandbox/Cargo.toml" = "662d563b240184cb781f563d8e0bd4fb3dee34b60cbcaee7e2c030d15e48e5cb"
 "sandbox/src/lib.rs" = "955bc6fe5ea34c92f70e479b618046f26ad37637ed96a59c6192982d45b7ce18"
 "sandbox/tests/sandbox.rs" = "6aee5fae9f0db89f2361aebd8e6069ae6f44a2de2652156132b7a69fd8773798"
 
 # deploy-checks/check_deployment.sh <net> reads [deployment.<net>] (keys: see
 # deploy-checks/check_deployment.py; CHECK_<KEY> environment variables override).
-[deployment.testnet]        # template: no testnet deployment yet (M7 decision pending)
+[deployment.testnet]        # empty on purpose. approvals.difflabai.testnet is a demonstration of 081a3a6 (code hash 5G334oPHzjDvPLXKUSstbaf3BzUPaj1sWZnDhy5Baauv), still unlocked, and not this pin. Do not point DEP-1 at it.
 contract_account = ""
 expected_code_hash = ""     # NEAR code_hash, base58(sha256) of the reproducible build
 wasm_sha256 = ""            # hex
@@ -280,7 +280,7 @@ status = "unverified"
 statement = "The deployed code is the reproducible build of the pin, locked at deploy"
 level = "policy"
 checked_by = ["DEP-1", "VER-2", "VER-3"]
-observed = "check_deployment.sh sandbox passes on a DEP-1 lock-batch deployment with DEP-1.4 keys and fails on a kept full-access key, a wrong code hash and a full-access agent key (sandbox/results/DEP-1.json). No testnet deployment"
+observed = "check_deployment.sh sandbox passes on a DEP-1 lock-batch deployment with DEP-1.4 keys and fails on a kept full-access key, a wrong code hash and a full-access agent key (sandbox/results/DEP-1.json). approvals.difflabai.testnet is a demonstration of 081a3a6, unlocked, and not this pin. DEP-1 has not been run against it"
 observed_on = "near-sandbox 2.13.4 (protocol 86), reproducible cargo-near 0.22.0 wasm (sourcescan/cargo-near:0.22.0-rust-1.97.0) sha256 3f48c2f2...5761bde9, code_hash 5G334oPHzjDvPLXKUSstbaf3BzUPaj1sWZnDhy5Baauv; every test also passed on the non-reproducible ffdbb5a7...0b90e1, 2026-10-15"
 status = "in-progress"
 
@@ -511,7 +511,7 @@ verus_model = ""
 prolog_requirements = "prolog/verification/verifier_rules.pl"
 
   [modules.deployment.properties]
-  DEP-1 = { status = "in-progress", layer = "deploy-check", evidence = "check", harness = "deploy-checks/check_deployment.py; sandbox/tests/deploy.rs::dep1_check_deployment_in_sandbox", depends_on = ["README.md", "contract/src/lib.rs"], assumptions = ["ASM-DEPLOY", "ASM-OWNER"], description = "Code hash = reproducible build, not a global contract referenced by account id; locked at deploy (deploy + new + full-access key deletion in one tx); owner is multisig/DAO; registered keys (rebuilt from an indexer) are FC keys scoped to C ([request_action]; [approve] or [approve, reject]) with finite allowance; balance buffer. Demonstrated on near-sandbox only: no testnet deployment" }
+  DEP-1 = { status = "in-progress", layer = "deploy-check", evidence = "check", harness = "deploy-checks/check_deployment.py; sandbox/tests/deploy.rs::dep1_check_deployment_in_sandbox", depends_on = ["README.md", "contract/src/lib.rs"], assumptions = ["ASM-DEPLOY", "ASM-OWNER"], description = "Code hash = reproducible build, not a global contract referenced by account id; locked at deploy (deploy + new + full-access key deletion in one tx); owner is multisig/DAO; registered keys (rebuilt from an indexer) are FC keys scoped to C ([request_action]; [approve] or [approve, reject]) with finite allowance; balance buffer. Demonstrated on near-sandbox only. approvals.difflabai.testnet is a demonstration of 081a3a6, unlocked, and not this pin" }
   VER-1 = { status = "in-progress", layer = "prolog", evidence = "check", cross = ["sandbox"], harness = "prolog/tests/test_verifier_rules.pl; sandbox/tests/runtime.rs::rt_spoof", depends_on = ["README.md"], assumptions = ["ASM-FINAL", "ASM-ATOMIC"], description = "Accept proofs only from get_approval at final, or action_approved logs of successful receipts with executor_id = C in final blocks" }
   VER-2 = { status = "in-progress", layer = "deploy-check", evidence = "check", harness = "deploy-checks/check_deployment.py; sandbox/tests/deploy.rs::dep1_check_deployment_in_sandbox", cross = ["prolog"], depends_on = ["README.md"], assumptions = ["ASM-CODE"], description = "code_hash(C) = expected at the proof's block (archival) and now" }
   VER-3 = { status = "in-progress", layer = "deploy-check", evidence = "check", harness = "deploy-checks/check_deployment.py; sandbox/tests/deploy.rs::dep1_check_deployment_in_sandbox", cross = ["prolog", "sandbox"], depends_on = ["README.md"], assumptions = ["ASM-CODE"], description = "No full-access key on C since b0, or an indexer scan finds no DeployContract/UseGlobalContract/AddKey/DeleteAccount" }

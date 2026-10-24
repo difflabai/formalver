@@ -2,7 +2,7 @@
 //!
 //! Upstream: difflabai/trust-framework `contracts/approval/contract/src/lib.rs`
 //!           and `contracts/approval/core/src/lib.rs`
-//! Pin:      18f57cb218f391d59d14f9db68dd2dd6951d71fb (trust-framework PR #22: approvals loop that Kani can check)
+//! Pin:      af2c704ecacdae809c18f27b0d645f771d45cdd3 (trust-framework main: MIT publication prep; core and contract sources identical to 18f57cb)
 //! sha256:   contract/src/lib.rs be9d35ba7a0cca151acf79882872eba18c6cf9078651fae94c35b55b389d0272
 //!           core/src/lib.rs     b7528a6e54ce5f72bccf6cb3a40bf010f6b5a59b4627a1be6e1102396e5eefed
 //! Covers:   every `#[near]` method of `ApprovalContract`, its `Store` impl, `caller()`,

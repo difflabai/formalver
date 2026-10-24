@@ -10,7 +10,7 @@ readable per request or as a paged log.
 
 | | |
 |---|---|
-| Pinned commit | `8635ca7b8b1d64bb226eb0b3b3a35779fcbf461b`, trust-framework `main` (2026-10-14). PR #15 (adds `reject`, registration ids and revocation times, key events) was squash-merged as `cbb16dd`; the later commits on `main` touch only CI and 3 lines of `README.md`, so `contracts/approval/` code is identical to the PR #15 head `3426c92` that every model and harness was written against. Previous pins: `3426c92`, `5736251`. |
+| Pinned commit | `af2c704ecacdae809c18f27b0d645f771d45cdd3`, trust-framework `main` (2026-10-21). Publication prep: MIT license, README, SECURITY.md. `core/src/lib.rs` and `contract/src/lib.rs` are identical to `18f57cb`. The `Cargo.toml` license fields and `README.md` changed, and the reproducible wasm hash changed because the build records the commit. Previous pins: `18f57cb`, `8635ca7`, `3426c92`, `5736251`. |
 | Crates | `approval-core` (`core/src/lib.rs`, 749 lines incl. docs). A dependency-free state machine, generic over account `A` and key `K`, holding *all* authorization and transition logic. `approval-contract` (`contract/src/lib.rs`, 976 lines incl. tests). A near-sdk 5.29 shell: env → `Caller`, `Store` over `LookupMap`, NEP-297 events, JSON views. |
 | In the TCB via `Cargo.lock` | near-sdk 5.29.1, near-sdk-macros 5.29.1, near-sdk-core 4.2.3, near-sdk-env 0.1.6, near-account-id 2.6.0, near-sys 0.2.14, borsh 1.8.1, serde_json 1.0.151 |
 | Mirror | git submodule `projects/near-approval/source-mirror` (same pattern as ironclaw) |
@@ -20,10 +20,9 @@ dependencies, so Kani and Verus can target **the deployed logic itself**
 rather than a model of it. The shell is thin enough to cover with tests,
 review and wasm inspection.
 
-**Status (2026-10-19, pin `18f57cb`).** Every
+**Status (2026-10-21, pin `af2c704`).** Every
 milestone is built and green in CI (M5, Verus path A, since 2026-10-19). What keeps the contract short
-of "fully verified" is the spec sign-off, the testnet deployment and the
-unmechanised steps listed under "Next".
+of "fully verified" is the spec sign-off. That review happens after the repos are public, and it is an approval recorded by the contract itself. A testnet demonstration exists (`approvals.difflabai.testnet`, deployed from `081a3a6`) but it is not this pin and it is not locked.
 
 | Layer | Milestone | State |
 |---|---|---|
@@ -38,17 +37,14 @@ unmechanised steps listed under "Next".
 | Shell and store | M3 | `near-tests/` (`store_diff.rs`, `shell.rs`, `ident.rs`, golden Borsh), shell mutants killed, `wasm-surface.sh` clean, `api_facts.pl` generated; job `near-unit`. |
 | Verus on the real core | M5 | Path A (§7): the twin refines the spec machine for every core function, and INV, LEM, HIST, TR-1/2/3/4/6/7 and RD-1/2/4/5/7/8 are Verus lemmas at every size (49 properties on `layer = "verus"`); erasure check, canary, spec, code and paired mutants; job `verus`. |
 | Sandbox | M6 | RT-*, RT-TRACE, SH-9/10, RES-1, RES-3 and the reproducible-wasm surface diff pass on near-sandbox 2.13.4; job `sandbox`. Assumptions move to `in-progress` as their tests land. |
-| Deployment | M7 | `check_deployment.sh` and `verifier_rules.pl` pass against a sandbox deployment; job `deploy-check`. No testnet deployment. |
+| Deployment | M7 | `check_deployment.sh` and `verifier_rules.pl` pass against a sandbox deployment; job `deploy-check`. Testnet demonstration `approvals.difflabai.testnet` is `081a3a6`, unlocked, not this pin. |
 
 **Statuses.** No K or V property has left `in-progress`: §12 requires a
 named spec reviewer (`[review] spec_reviewer`), and none is recorded. The
 `status-lint` job enforces this. The proofs above pass in CI;
 `status.toml` will say so once that sign-off lands.
 
-**Next.** Decisions: the spec reviewer (also signs off the `cargo expand`
-review of SH-9/RD-6), the testnet deployment for M7 (needs an archival
-RPC for VER-2/3), OQ-4, OQ-5, OQ-8, the Verus path A spike, and what (if
-anything) to submit to near-proof-arena. Buildable without a decision:
+**Next.** The spec reviewer signs off after the repos are public, using the approval contract itself (also the `cargo expand` review of SH-9/RD-6). M7's locked deployment is still open: the existing demonstration is not a DEP-1 lock and is not this pin (it needs an archival RPC for VER-2/3). OQ-4, OQ-5, OQ-8, and what (if anything) to submit to near-proof-arena. Buildable without a decision:
 nothing in this plan. The ASM-IDENT/LINK domain argument is mechanised
 (§18.6.1), leaving ASM-NU trusted, and ASM-TLA-SCOPE no longer backs any
 every-size claim (§18.7). ASM-FINAL, ASM-TOOLS, ASM-OWNER and ASM-DISPLAY stay trusted.
@@ -716,7 +712,7 @@ size (they stay `in-progress` until `spec_reviewer` is set; §12). See
   (trust-framework PR #20, then PR #22 for its Kani-friendly shape: each
   outer pass pushes one proof or ends the page, since a pass that skips
   without pushing ran the Kani read harnesses out of memory; pin
-  `18f57cb`), so the deployed core is verified token for token.
+  `18f57cb`, core unchanged at `af2c704`), so the deployed core is verified token for token.
 - Mutants (`verus/mutants.toml`): spec mutants, code mutants, and paired
   mutants that change spec and code together (dropping separation of
   duties, `active_from <= id`, or the pending count) so only the property
@@ -931,8 +927,8 @@ review).**
   `[deployment.<net>]`, with `CHECK_<KEY>` overrides. Its only indexer is
   `rpc-scan` (walk every block from `b0`), fit for a local chain; on a public
   net without an indexer DEP-1.4, VER-3's scan and VER-8 fail as unchecked.
-  `[deployment.sandbox]` drives the demo; `[deployment.testnet]` is an empty
-  template (no testnet deployment has been made).
+  `[deployment.sandbox]` drives the demo. `[deployment.testnet]` stays an empty
+  template: `approvals.difflabai.testnet` is a demonstration of `081a3a6`, still unlocked, and not this pin.
 - **`prolog/verification/verifier_rules.pl`** encodes VER-1..8;
   `tests/test_verifier_rules.pl` (run by `run-prolog.sh`) has accepting and
   rejecting cases for each. The sandbox feeds it real observations: RT-SPOOF
@@ -1099,8 +1095,8 @@ with the reproducible wasm (§9): every RT-* test, SH-9, SH-10, RES-1
 (measured), RES-3, RT-TRACE, the `check_deployment.sh sandbox` demo with its
 negative cases, and `verifier_rules.pl`. Not done: the `wasm-surface.sh` diff
 on the reproducible build (needs M3's script; RT-CODEHASH records the export
-list), the `cargo expand` review of SH-9/RD-6, the testnet deployment and
-`[deployment.testnet]`, the `sandbox` and `deploy-check` CI jobs, and
+list), the `cargo expand` review of SH-9/RD-6, a locked deployment of this pin
+(`[deployment.testnet]` is still empty; the `081a3a6` demonstration is not one), the `sandbox` and `deploy-check` CI jobs, and
 `docs/architecture.md`. Statuses stay `in-progress` (spec reviewer sign-off;
 M7 also needs the testnet decision). Remaining effort
 on the critical path (re-pin, review, M2, M3, M6) is about 6–10 days plus
@@ -1133,8 +1129,10 @@ the submodule (OQ-7, resolved in M0: secret `CROSS_REPO_BUILD_KEY` via
 `lean`, `prolog`, `mutants` and `upstream-watch`, on self-hosted macOS
 runners (`vars.CI_RUNNER`). On a PR, `pin` always runs and each other job
 runs only when the diff touches its inputs (`tools/scripts/ci-areas.sh`;
-Markdown changes run none). Push to `main`, nightly and manual runs run
-every job.
+Markdown changes run none). Push to `main` and manual runs run every job.
+A schedule (`approval-changed.sh`) runs verification only when
+`contracts/approval` on trust-framework differs from the pin (`*.md`
+ignored), and then verifies that upstream tip rather than the stale pin.
 `verus` (M5) since 2026-10-19.
 
 ## 15. Risks

@@ -1,7 +1,7 @@
 # Verus twin of approval-core (M5 path A)
 
 `src/lib.rs` is the pinned `contracts/approval/core/src/lib.rs` with Verus
-annotations added. `tools/scripts/erasure-check.py` strips the annotations and
+annotations added. The twin is a copy of upstream `approval-core` (MIT, copyright Differential AI Lab). The notice is `LICENSE` at the repo root. `tools/scripts/erasure-check.py` strips the annotations and
 requires the rest to equal the upstream file token for token, except the
 functions in `REWRITES.toml`.
 
