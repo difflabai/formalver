@@ -7,6 +7,7 @@ trap 'rm -rf "$work"' EXIT
 git -C "$work" init -q
 git -C "$work" config user.email test@example.com
 git -C "$work" config user.name test
+git -C "$work" config commit.gpgsign false
 mkdir -p "$work/contracts/approval/core/src"
 printf 'fn a() {}\n' >"$work/contracts/approval/core/src/lib.rs"
 printf '# readme\n' >"$work/contracts/approval/README.md"
