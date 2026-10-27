@@ -58,10 +58,15 @@ env:
 # it depends on (tools/scripts/ci-areas.sh); a skipped job reports as
 # skipped, which branch protection counts as passing. Pushes to main and
 # manual dispatch run every job. A schedule runs verification only when
-# contracts/approval on trust-framework differs from the pin (*.md ignored);
-# it then verifies that upstream tip, not the stale pin.
+# contracts/approval on trust-framework differs from .github/approval-seen
+# (*.md ignored). That file is the tip already checked, not the pin, so one
+# upstream move does not re-run the proofs every night.
 jobs:
   pin:
+    # write: a schedule that finds a new upstream tip records it on main,
+    # so the next night skips. GITHUB_TOKEN pushes do not start this workflow.
+    permissions:
+      contents: write
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     outputs:
       plain: ${{ steps.areas.outputs.plain }}
@@ -94,7 +99,7 @@ jobs:
           fi
           cat "$RUNNER_TEMP/areas" >>"$GITHUB_OUTPUT"
           { echo '### Jobs this change needs'; sed 's/^/- /' "$RUNNER_TEMP/areas"; } >>"$GITHUB_STEP_SUMMARY"
-      - name: Approval contract since the pin
+      - name: Approval contract since the last check
         id: contract
         env:
           CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
@@ -105,6 +110,28 @@ jobs:
             echo contract_changed=true >>"$GITHUB_OUTPUT"
             echo source_ref= >>"$GITHUB_OUTPUT"
           fi
+      - name: Record the upstream tip so the next night skips
+        if: github.event_name == 'schedule' && steps.contract.outputs.contract_changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SEEN: ${{ steps.contract.outputs.source_ref }}
+        run: |
+          echo "::add-mask::$GH_TOKEN"
+          [[ $SEEN =~ ^[0-9a-f]{40}$ ]] || { echo "bad source_ref: $SEEN"; exit 2; }
+          printf '%s\n' \
+            '# Upstream tip already checked by the scheduled near-approval run.' \
+            '# Not the verification pin. The pin stays until a human re-pins.' \
+            "$SEEN" > .github/approval-seen
+          git add .github/approval-seen
+          git -c user.email='github-actions[bot]@users.noreply.github.com' \
+              -c user.name='github-actions[bot]' \
+              -c commit.gpgsign=false \
+              commit -m "ci: approval contract seen $SEEN"
+          # persist-credentials is off, and a self-hosted HOME must not keep
+          # the token. One push, helper disabled.
+          git -c credential.helper= \
+              -c "http.extraheader=AUTHORIZATION: bearer ${GH_TOKEN}" \
+              push origin HEAD:main
       - name: Check out trust-framework at the pin
         if: steps.contract.outputs.contract_changed == 'true'
         env:
