@@ -1131,8 +1131,9 @@ runners (`vars.CI_RUNNER`). On a PR, `pin` always runs and each other job
 runs only when the diff touches its inputs (`tools/scripts/ci-areas.sh`;
 Markdown changes run none). Push to `main` and manual runs run every job.
 A schedule (`approval-changed.sh`) runs verification only when
-`contracts/approval` on trust-framework differs from the pin (`*.md`
-ignored), and then verifies that upstream tip rather than the stale pin.
+`contracts/approval` on trust-framework differs from `.github/approval-seen`
+(`*.md` ignored). That sha is the tip already checked, not the pin, and the
+job records the new tip before the proofs run.
 `verus` (M5) since 2026-10-19.
 
 ## 15. Risks

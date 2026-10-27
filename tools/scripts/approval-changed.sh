@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Has the approval contract changed since the pin?
+# Has the approval contract changed since the last scheduled check?
 #
-# Compares trust-framework's default branch to pinned_commit in
-# projects/near-approval/status.toml. A change is any file under
-# upstream_path (contracts/approval) other than *.md, the same cut
-# trust-framework's own CI uses: a doc edit does not change the wasm
-# or the proofs.
+# Compares trust-framework's default branch to the sha in
+# .github/approval-seen, not to the verification pin. The pin stays put
+# until a human re-pins, so comparing to it re-ran the proofs every night
+# after one upstream move. A change is any file under upstream_path
+# (contracts/approval) other than *.md, the same cut trust-framework's
+# own CI uses: a doc edit does not change the wasm or the proofs.
 #
 # Prints contract_changed=true|false and source_ref=<sha-or-empty>.
 # When the contract changed, source_ref is the upstream tip to verify.
@@ -57,10 +58,14 @@ if [ "${1:-}" = --repo ]; then
 fi
 
 status=projects/near-approval/status.toml
-pin=$(sed -n 's/^pinned_commit = "\([0-9a-f]\{40\}\)".*/\1/p' "$status")
 path=$(sed -n 's/^upstream_path = "\([^"]*\)".*/\1/p' "$status")
+pin=$(grep -E '^[0-9a-f]{40}$' .github/approval-seen | head -1 || true)
+if [ -z "$pin" ]; then
+  pin=$(sed -n 's/^pinned_commit = "\([0-9a-f]\{40\}\)".*/\1/p' "$status")
+  echo "approval-changed: no .github/approval-seen, falling back to the pin" >&2
+fi
 [ -n "$pin" ] && [ -n "$path" ] || {
-  echo "approval-changed: could not read pinned_commit or upstream_path from $status" >&2
+  echo "approval-changed: could not read a baseline sha or upstream_path" >&2
   exit 2
 }
 
@@ -109,7 +114,7 @@ if [ -n "$files" ]; then
   {
     echo "### Approval contract changed"
     echo
-    echo "Pin \`$pin_fetch\` -> upstream \`$head\`. Verifying \`$head\`, not the pin."
+    echo "Last check \`$pin_fetch\` -> upstream \`$head\`. Verifying \`$head\`."
     echo
     echo '```'
     echo "$files"
@@ -123,7 +128,7 @@ else
   {
     echo "### Approval contract unchanged"
     echo
-    echo "\`$path\` at upstream \`$head\` matches pin \`$pin_fetch\` (ignoring \`*.md\`). Skipping verification."
+    echo "\`$path\` at upstream \`$head\` matches the last check \`$pin_fetch\` (ignoring \`*.md\`). Skipping verification."
   } >>"${GITHUB_STEP_SUMMARY:-/dev/null}"
   echo "Approval contract unchanged ($pin_fetch). Skipping verification."
   emit contract_changed=false

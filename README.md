@@ -23,7 +23,7 @@ Nothing here is Production Ready.
 
 How the layers fit, and when to use Kani or Verus: [`docs/architecture.md`](docs/architecture.md).
 
-Tool versions are pinned in [`tools/versions.env`](tools/versions.env). CI (`.github/workflows/near-approval.yml`) runs the near-approval checks. On a PR, only the jobs whose inputs changed run (`tools/scripts/ci-areas.sh`). The nightly runs only when `contracts/approval` on trust-framework has changed since the pin. A README edit does not count.
+Tool versions are pinned in [`tools/versions.env`](tools/versions.env). CI (`.github/workflows/near-approval.yml`) runs the near-approval checks. On a PR, only the jobs whose inputs changed run (`tools/scripts/ci-areas.sh`). The nightly runs only when `contracts/approval` on trust-framework has changed since the last check (`.github/approval-seen`), not since the pin. A README edit does not count. One upstream move does not re-run the proofs every night.
 
 ## near-approval
 
