@@ -47,12 +47,16 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
 
-# GitHub-hosted runners are unavailable to the org (billing block), so every
-# job takes its label from the CI_RUNNER repository variable (the self-hosted
-# macOS arm64 runner) and falls back to its original hosted label. That host
-# keeps HOME between jobs and has no sudo: the steps below avoid
-# `rustup default`, ~/.gitconfig and ~/.ssh, and the hosted-only swap setup is
-# skipped there.
+# Every job takes its label from the CI_RUNNER repository variable (the
+# self-hosted macOS arm64 runners) and falls back to its original hosted label.
+# Those runners refuse Dependabot's runs and Claude Code cloud sessions'
+# (commits signed with Anthropic's shared key), so the parenthesised clause
+# that opens each runs-on sends those runs to ubuntu-latest instead, ahead of
+# CI_RUNNER and KANI_RUNNER. That clause is the canonical routing from
+# the shared CI routing policy: keep every copy byte-identical to it, and change
+# it there first. The Mac keeps HOME between jobs and has no sudo: the steps
+# below avoid `rustup default`, ~/.gitconfig and ~/.ssh, and the hosted-only
+# swap setup is skipped there.
 #
 # On pull requests each job below pin runs only when the PR changes a path
 # it depends on (tools/scripts/ci-areas.sh); a skipped job reports as
@@ -67,7 +71,7 @@ jobs:
     # so the next night skips. GITHUB_TOKEN pushes do not start this workflow.
     permissions:
       contents: write
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     outputs:
       plain: ${{ steps.areas.outputs.plain }}
       loops: ${{ steps.areas.outputs.loops }}
@@ -169,7 +173,7 @@ jobs:
   plain:
     needs: pin
     if: needs.pin.outputs.plain == 'true' && needs.pin.outputs.contract_changed == 'true'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -211,7 +215,7 @@ jobs:
       needs.pin.outputs.contract_changed == 'true' &&
       needs.pin.outputs.loops == 'true' &&
       (github.event_name != 'schedule' || github.event.schedule == '17 3 * * *')
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -252,8 +256,11 @@ jobs:
     # default runner has 2 CPUs and 7.9 GB. Set the KANI_RUNNER repository
     # variable to a larger runner label (and KANI_SWAP_GB to 0) to avoid
     # relying on swap. Without it, CI_RUNNER (the self-hosted Mac: 64 GB, no
-    # swap file needed) is next.
-    runs-on: ${{ vars.KANI_RUNNER || vars.CI_RUNNER || 'ubuntu-latest' }}
+    # swap file needed) is next. Routed runs (see above `jobs:`) skip both and
+    # get ubuntu-latest with the swap step: KANI_RUNNER can name a self-hosted
+    # label (today it is `kani`, on the Macs), which would refuse them. The
+    # timeouts here and on mutants assume that 2-CPU, swap-backed runner.
+    runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.KANI_RUNNER || vars.CI_RUNNER || 'ubuntu-latest' }}
     # A step part may need most of KANI_TIMEOUT (120 min) on swap.
     timeout-minutes: 300
     env:
@@ -415,7 +422,7 @@ jobs:
   tla:
     needs: pin
     if: needs.pin.outputs.tla == 'true' && needs.pin.outputs.contract_changed == 'true'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
@@ -470,7 +477,7 @@ jobs:
     # MC-4 (Lean graph = TLC graph) and the spec mutants. About 8 min.
     needs: pin
     if: needs.pin.outputs.lean == 'true' && needs.pin.outputs.contract_changed == 'true'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -528,7 +535,7 @@ jobs:
     # and every mutant in verus/mutants.toml must be rejected. About 1 min.
     needs: pin
     if: needs.pin.outputs.verus == 'true' && needs.pin.outputs.contract_changed == 'true'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -575,7 +582,7 @@ jobs:
     # nightly and on manual dispatch.
     needs: pin
     if: needs.pin.outputs.prolog == 'true' && needs.pin.outputs.contract_changed == 'true'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -644,7 +651,7 @@ jobs:
   near-unit:
     needs: pin
     if: needs.pin.outputs.near_unit == 'true' && needs.pin.outputs.contract_changed == 'true'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -690,7 +697,7 @@ jobs:
       ((github.event_name == 'schedule' && github.event.schedule == '17 3 * * *') ||
       inputs.sandbox ||
       (github.event_name != 'schedule' && needs.pin.outputs.sandbox == 'true'))
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     # The reproducible build runs an amd64 image (emulated on the Mac) and
     # RT-TRACE replays 210 traces.
     timeout-minutes: 120
@@ -767,7 +774,7 @@ jobs:
   deploy-check:
     needs: pin
     if: inputs.deploy_check != ''
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -804,7 +811,7 @@ jobs:
     # kani jobs (each uploads its covers.tsv with its logs).
     needs: kani
     if: ${{ !cancelled() && needs.kani.result != 'skipped' }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -819,7 +826,7 @@ jobs:
   mutants:
     needs: pin
     if: (github.event.schedule == '41 4 * * 0' || inputs.mutants) && needs.pin.outputs.contract_changed == 'true'
-    runs-on: ${{ vars.KANI_RUNNER || vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.KANI_RUNNER || vars.CI_RUNNER || 'ubuntu-latest' }}
     # Up to 2 harnesses (6 for the must-survive mutants) of KANI_TIMEOUT
     # (60 min) each, plus builds.
     timeout-minutes: 360
@@ -887,7 +894,7 @@ jobs:
   shell-mutants:
     needs: pin
     if: (github.event.schedule == '41 4 * * 0' || inputs.mutants) && needs.pin.outputs.contract_changed == 'true'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
