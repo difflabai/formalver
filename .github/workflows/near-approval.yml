@@ -47,12 +47,16 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
 
-# GitHub-hosted runners are unavailable to the org (billing block), so every
-# job takes its label from the CI_RUNNER repository variable (the self-hosted
-# macOS arm64 runner) and falls back to its original hosted label. That host
-# keeps HOME between jobs and has no sudo: the steps below avoid
-# `rustup default`, ~/.gitconfig and ~/.ssh, and the hosted-only swap setup is
-# skipped there.
+# Every job takes its label from the CI_RUNNER repository variable (the
+# self-hosted macOS arm64 runners) and falls back to its original hosted label.
+# Those runners refuse Dependabot's runs and Claude Code cloud sessions'
+# (commits signed with Anthropic's shared key), so the parenthesised clause
+# that opens each runs-on sends those runs to ubuntu-latest instead, ahead of
+# CI_RUNNER and KANI_RUNNER. That clause is the canonical routing from
+# difflabai/service-mesh#416: keep every copy byte-identical to it, and change
+# it there first. The Mac keeps HOME between jobs and has no sudo: the steps
+# below avoid `rustup default`, ~/.gitconfig and ~/.ssh, and the hosted-only
+# swap setup is skipped there.
 #
 # On pull requests each job below pin runs only when the PR changes a path
 # it depends on (tools/scripts/ci-areas.sh); a skipped job reports as
@@ -252,7 +256,10 @@ jobs:
     # default runner has 2 CPUs and 7.9 GB. Set the KANI_RUNNER repository
     # variable to a larger runner label (and KANI_SWAP_GB to 0) to avoid
     # relying on swap. Without it, CI_RUNNER (the self-hosted Mac: 64 GB, no
-    # swap file needed) is next.
+    # swap file needed) is next. Routed runs (see above `jobs:`) skip both and
+    # get ubuntu-latest with the swap step: KANI_RUNNER can name a self-hosted
+    # label (today it is `kani`, on the Macs), which would refuse them. The
+    # timeouts here and on mutants assume that 2-CPU, swap-backed runner.
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.KANI_RUNNER || vars.CI_RUNNER || 'ubuntu-latest' }}
     # A step part may need most of KANI_TIMEOUT (120 min) on swap.
     timeout-minutes: 300
