@@ -23,7 +23,7 @@ Nothing here is Production Ready.
 
 How the layers fit, and when to use Kani or Verus: [`docs/architecture.md`](docs/architecture.md).
 
-Tool versions are pinned in [`tools/versions.env`](tools/versions.env). CI (`.github/workflows/near-approval.yml`) runs the near-approval checks. On a PR, only the jobs whose inputs changed run (`tools/scripts/ci-areas.sh`). The nightly runs only when `contracts/approval` on trust-framework has changed since the last check (`.github/approval-seen`), not since the pin. A README edit does not count. One upstream move does not re-run the proofs every night.
+Tool versions are pinned in [`tools/versions.env`](tools/versions.env), and GitHub Actions use full commit SHAs. CI (`.github/workflows/near-approval.yml`) fetches public trust-framework without credentials. On a PR, only the jobs whose inputs changed run (`tools/scripts/ci-areas.sh`). The nightly runs only when non-Markdown files under `contracts/approval` have changed since `.github/approval-seen`, not since the verification pin. After all applicable checks succeed, a bot opens a PR recording the checked tip; it never pushes `main` or changes the verification pin. An open recording PR suppresses duplicate checks of the same tip while review is pending. Bot-created PR workflows may require a maintainer to select **Approve workflows to run**. In Settings → Actions → General, **Allow GitHub Actions to create and approve pull requests** must be enabled; only the scheduled recording job requests write permissions.
 
 ## near-approval
 

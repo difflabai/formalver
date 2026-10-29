@@ -1121,9 +1121,9 @@ the review; M7 adds 2 and needs a testnet decision.
 | `upstream-watch` | weekly (`.github/workflows/upstream-watch.yml`) | none; opens an issue when a path in `tools/upstream-watch.toml` changed (near-proof-arena specs and challenges; the Nomicon pages the assumptions cite) |
 | `deploy-check` | manual; weekly | any DEP or VER violation |
 
-trust-framework is private, so CI needs a deploy key or fine-grained token for
-the submodule (OQ-7, resolved in M0: secret `CROSS_REPO_BUILD_KEY` via
-`tools/scripts/ci-submodule.sh`).
+trust-framework is public. `tools/scripts/ci-submodule.sh` fetches its
+submodule anonymously; no cross-repository credential is required, including
+for fork pull requests.
 
 **Live (2026-10-14):** `pin`, `plain`, `loops`, `kani`, `covers`, `tla`,
 `lean`, `prolog`, `mutants` and `upstream-watch`, on self-hosted macOS
@@ -1133,7 +1133,10 @@ Markdown changes run none). Push to `main` and manual runs run every job.
 A schedule (`approval-changed.sh`) runs verification only when
 `contracts/approval` on trust-framework differs from `.github/approval-seen`
 (`*.md` ignored). That sha is the tip already checked, not the pin, and the
-job records the new tip before the proofs run.
+schedule proposes the new tip in a PR only after every applicable check
+succeeds. The recording job never pushes `main` or moves the verification
+pin. An open recording PR suppresses repeat checks of that upstream tip
+until its review is complete.
 `verus` (M5) since 2026-10-19.
 
 ## 15. Risks

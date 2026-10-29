@@ -23,6 +23,7 @@ all="plain loops kani tla lean prolog near_unit sandbox verus"
 expect "" $p/strategy.md $p/kani/RESULTS.md README.md
 expect "verus" $p/status.toml
 expect "" tools/scripts/check-pin.sh tools/scripts/check-status.sh tools/scripts/test-check-status.sh
+expect "" .github/approval-seen tools/scripts/record-approval-check.sh tools/scripts/test-record-approval-check.sh
 expect "" tools/upstream-watch.toml tools/scripts/upstream-watch.sh
 expect "verus" $p/verus/src/lib.rs $p/verus/mutants.toml tools/scripts/run-verus.sh tools/scripts/get-verus.sh tools/scripts/erasure-check.py
 expect "" # no changes
