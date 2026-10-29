@@ -1,6 +1,5 @@
 # near-approval CI (strategy.md section 14): the jobs M1 has artifacts for.
-# trust-framework is private; CROSS_REPO_BUILD_KEY (a token or an SSH deploy
-# key with read access to it) checks out the submodule (OQ-7).
+# trust-framework is public; all jobs fetch its submodule without a key.
 name: near-approval
 
 on:
@@ -10,6 +9,7 @@ on:
       - "tools/**"
       - ".gitmodules"
       - ".github/workflows/near-approval.yml"
+      - ".github/approval-seen"
   push:
     branches: [main]
     paths:
@@ -17,6 +17,7 @@ on:
       - "tools/**"
       - ".gitmodules"
       - ".github/workflows/near-approval.yml"
+      - ".github/approval-seen"
   schedule:
     - cron: "17 3 * * *" # nightly: verify only if contracts/approval changed
     - cron: "41 4 * * 0" # weekly: mutants, only if the contract changed
@@ -67,10 +68,10 @@ env:
 # upstream move does not re-run the proofs every night.
 jobs:
   pin:
-    # write: a schedule that finds a new upstream tip records it on main,
-    # so the next night skips. GITHUB_TOKEN pushes do not start this workflow.
+    # Read-only: check for an existing successful-check PR on schedules.
     permissions:
-      contents: write
+      contents: read
+      pull-requests: read
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     outputs:
       plain: ${{ steps.areas.outputs.plain }}
@@ -85,7 +86,7 @@ jobs:
       contract_changed: ${{ steps.contract.outputs.contract_changed }}
       source_ref: ${{ steps.contract.outputs.source_ref }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
           # The PR merge commit and its first parent (the base tip), for the
@@ -96,6 +97,7 @@ jobs:
         run: |
           tools/scripts/test-ci-areas.sh
           tools/scripts/test-approval-changed.sh
+          tools/scripts/test-record-approval-check.sh
           if [ "$GITHUB_EVENT_NAME" = pull_request ] && git rev-parse -q --verify HEAD^2 >/dev/null; then
             git diff --name-only HEAD^1 HEAD | CI_AREAS_EXPLAIN=1 tools/scripts/ci-areas.sh >"$RUNNER_TEMP/areas"
           else
@@ -106,7 +108,8 @@ jobs:
       - name: Approval contract since the last check
         id: contract
         env:
-          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = schedule ]; then
             tools/scripts/approval-changed.sh
@@ -114,32 +117,9 @@ jobs:
             echo contract_changed=true >>"$GITHUB_OUTPUT"
             echo source_ref= >>"$GITHUB_OUTPUT"
           fi
-      - name: Record the upstream tip so the next night skips
-        if: github.event_name == 'schedule' && steps.contract.outputs.contract_changed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SEEN: ${{ steps.contract.outputs.source_ref }}
-        run: |
-          echo "::add-mask::$GH_TOKEN"
-          [[ $SEEN =~ ^[0-9a-f]{40}$ ]] || { echo "bad source_ref: $SEEN"; exit 2; }
-          printf '%s\n' \
-            '# Upstream tip already checked by the scheduled near-approval run.' \
-            '# Not the verification pin. The pin stays until a human re-pins.' \
-            "$SEEN" > .github/approval-seen
-          git add .github/approval-seen
-          git -c user.email='github-actions[bot]@users.noreply.github.com' \
-              -c user.name='github-actions[bot]' \
-              -c commit.gpgsign=false \
-              commit -m "ci: approval contract seen $SEEN"
-          # persist-credentials is off, and a self-hosted HOME must not keep
-          # the token. One push, helper disabled.
-          git -c credential.helper= \
-              -c "http.extraheader=AUTHORIZATION: bearer ${GH_TOKEN}" \
-              push origin HEAD:main
       - name: Check out trust-framework at the pin
         if: steps.contract.outputs.contract_changed == 'true'
         env:
-          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
           SOURCE_REF: ${{ steps.contract.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Python >= 3.11 (tomllib)
@@ -175,12 +155,11 @@ jobs:
     if: needs.pin.outputs.plain == 'true' && needs.pin.outputs.contract_changed == 'true'
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - name: Check out trust-framework at the pin
         env:
-          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
           SOURCE_REF: ${{ needs.pin.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Toolchain from versions.env
@@ -190,7 +169,7 @@ jobs:
           # For this job only: `rustup default` would outlive it on a
           # self-hosted runner.
           echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         # Hosted runners only: a self-hosted runner's CARGO_HOME persists and
         # is shared by every repository's jobs, so caching it would only copy
         # other repositories' crates into this one's cache quota.
@@ -218,12 +197,11 @@ jobs:
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - name: Check out trust-framework at the pin
         env:
-          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
           SOURCE_REF: ${{ needs.pin.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Install Kani (and the CBMC it bundles)
@@ -354,12 +332,11 @@ jobs:
           - "h_store_laws_mem_law_push_request h_store_laws_mem_law_replace_request"
           - "h_store_laws_mem_law_push_approval h_store_laws_mem_law_count h_store_laws_mem_law_revocation"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - name: Check out trust-framework at the pin
         env:
-          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
           SOURCE_REF: ${{ needs.pin.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Install Kani (and the CBMC it bundles)
@@ -413,7 +390,7 @@ jobs:
         run: tools/scripts/run-kani.sh near-approval ${{ matrix.group }}
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: kani-logs-${{ strategy.job-index }}
           path: ${{ runner.temp }}/kani-logs
@@ -425,12 +402,11 @@ jobs:
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 240
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - name: Check out trust-framework at the pin
         env:
-          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
           SOURCE_REF: ${{ needs.pin.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Toolchain from versions.env
@@ -440,11 +416,11 @@ jobs:
           # For this job only: `rustup default` would outlive it on a
           # self-hosted runner.
           echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           distribution: temurin
           java-version: "21"
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         # Hosted runners only, as in plain: a self-hosted CARGO_HOME is
         # shared with other repositories. There the TLA+ tools persist in
         # the runner's tool cache instead (TLA_CACHE below).
@@ -464,7 +440,7 @@ jobs:
         run: tools/scripts/run-tla.sh near-approval safety liveness apalache trace mutants
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: tla-logs
           path: ${{ runner.temp }}/tla-logs
@@ -480,12 +456,11 @@ jobs:
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - name: Check out trust-framework at the pin
         env:
-          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
           SOURCE_REF: ${{ needs.pin.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Toolchain from versions.env
@@ -495,11 +470,11 @@ jobs:
           # For this job only: `rustup default` would outlive it on a
           # self-hosted runner.
           echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           distribution: temurin
           java-version: "21"
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         # Hosted runners only, as in plain; self-hosted runners keep Lean and
         # the TLA+ tools in the runner's tool cache (LEAN_CACHE, TLA_CACHE).
         if: runner.environment == 'github-hosted'
@@ -522,7 +497,7 @@ jobs:
         run: tools/scripts/run-lean.sh near-approval
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: lean-logs
           path: ${{ runner.temp }}/lean-logs
@@ -538,12 +513,11 @@ jobs:
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - name: Check out trust-framework at the pin
         env:
-          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
           SOURCE_REF: ${{ needs.pin.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Python >= 3.11 (tomllib)
@@ -569,7 +543,7 @@ jobs:
         run: tools/scripts/run-verus.sh near-approval
       - name: Upload logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: verus-logs
           path: ${{ runner.temp }}/verus-logs
@@ -585,7 +559,7 @@ jobs:
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - name: Scryer install root
@@ -593,7 +567,6 @@ jobs:
         run: echo "SCRYER_ROOT=$RUNNER_TOOL_CACHE/formalver-scryer" >> "$GITHUB_ENV"
       - name: Check out trust-framework at the pin
         env:
-          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
           SOURCE_REF: ${{ needs.pin.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Toolchain from versions.env
@@ -603,7 +576,7 @@ jobs:
           # For this job only: `rustup default` would outlive it on a
           # self-hosted runner.
           echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         if: runner.environment == 'github-hosted'
         with:
           path: ${{ env.SCRYER_ROOT }}
@@ -632,7 +605,7 @@ jobs:
             scryer-prolog mc2.pl -g "(replay('$PWD/../../kani/target/mc2/core.txt') -> halt(0) ; halt(1))" </dev/null &&
             scryer-prolog mc2.pl -g "(generate('$PWD/../../kani/target/mc2/prolog.txt', 60) -> halt(0) ; halt(1))" </dev/null)
           cargo test --release --locked mc2_prolog_traces -- --nocapture
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         with:
           distribution: temurin
@@ -654,12 +627,11 @@ jobs:
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - name: Check out trust-framework at the pin
         env:
-          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
           SOURCE_REF: ${{ needs.pin.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Toolchain from versions.env, with the wasm target
@@ -672,7 +644,7 @@ jobs:
       - name: cargo-near from versions.env
         # Into RUNNER_TEMP, not the shared CARGO_HOME of a self-hosted runner.
         run: tools/scripts/get-cargo-near.sh "$RUNNER_TEMP/cargo-near" >> "$GITHUB_PATH"
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         if: runner.environment == 'github-hosted'
         with:
           path: |
@@ -704,14 +676,13 @@ jobs:
     env:
       RT_TRACE_JOBS: "4"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - name: Tool cache paths
         run: echo "SCRYER_ROOT=$RUNNER_TOOL_CACHE/formalver-scryer" >> "$GITHUB_ENV"
       - name: Check out trust-framework at the pin
         env:
-          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
           SOURCE_REF: ${{ needs.pin.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Toolchain from versions.env, with the wasm target
@@ -757,11 +728,13 @@ jobs:
       - name: Wasm surface of the reproducible build (SH-11, SH-12)
         run: |
           wasm=projects/near-approval/sandbox/target/approval/near/approval_contract/approval_contract.wasm
-          abi=$(ls "$(dirname "$wasm")"/*abi*.json 2>/dev/null | head -1 || true)
+          shopt -s nullglob
+          abis=("$(dirname "$wasm")"/*abi*.json)
+          abi=${abis[0]:-}
           tools/scripts/wasm-surface.sh --wasm "$wasm" ${abi:+--abi "$abi"}
       - name: Sandbox tests
         run: projects/near-approval/sandbox/scripts/run-sandbox.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: sandbox-results
@@ -777,7 +750,7 @@ jobs:
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - name: Python >= 3.11 (tomllib)
@@ -800,7 +773,7 @@ jobs:
         run: |
           if [ -n "$RPC" ]; then export CHECK_RPC_URL="$RPC"; fi
           projects/near-approval/deploy-checks/check_deployment.sh "$NET" --json "$RUNNER_TEMP/deploy-check.json"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: deploy-check
@@ -813,10 +786,10 @@ jobs:
     if: ${{ !cancelled() && needs.kani.result != 'skipped' }}
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: kani-logs-*
           path: ${{ runner.temp }}/kani-logs
@@ -840,12 +813,11 @@ jobs:
                  "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
                  "40", "41", "42", "43"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - name: Check out trust-framework at the pin
         env:
-          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
           SOURCE_REF: ${{ needs.pin.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Toolchain from versions.env
@@ -897,12 +869,11 @@ jobs:
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - name: Check out trust-framework at the pin
         env:
-          CROSS_REPO_BUILD_KEY: ${{ secrets.CROSS_REPO_BUILD_KEY }}
           SOURCE_REF: ${{ needs.pin.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Toolchain from versions.env
@@ -912,3 +883,33 @@ jobs:
           echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
       - name: Shell mutants
         run: projects/near-approval/near-tests/run-mutants.sh
+
+  record-upstream:
+    # Record a successful check through review, never before the proofs finish.
+    # Skipped jobs are expected (nightly/weekly scopes differ); failures and
+    # cancellations must never advance the baseline.
+    needs: [pin, plain, loops, kani, tla, lean, verus, prolog, near-unit, sandbox, covers, mutants, shell-mutants]
+    if: >-
+      ${{ !cancelled() && github.event_name == 'schedule' &&
+          needs.pin.outputs.contract_changed == 'true' &&
+          !contains(needs.*.result, 'failure') &&
+          !contains(needs.*.result, 'cancelled') }}
+    permissions:
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: near-approval-record-upstream
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Propose the successfully checked upstream tip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          SEEN: ${{ needs.pin.outputs.source_ref }}
+        run: tools/scripts/record-approval-check.sh "$SEEN"

@@ -18,8 +18,9 @@
 # Local test (no network):
 #   approval-changed.sh --repo <git-dir> --pin <sha> --head <sha> --path <path>
 #
-# CI: CROSS_REPO_BUILD_KEY if the upstream is still private (token or SSH
-# deploy key), same rewrite as ci-submodule.sh.
+# CI uses the public upstream without credentials. With GH_TOKEN and
+# GITHUB_REPOSITORY set, an open bot PR recording a successful check of the
+# same tip also suppresses duplicate runs while its review is pending.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
@@ -70,32 +71,8 @@ fi
 }
 
 url=$(git config -f .gitmodules --get "submodule.projects/near-approval/source-mirror.url")
-repo=${url#https://github.com/}
-repo=${repo%.git}
-key=${CROSS_REPO_BUILD_KEY:-}
-
-known_hosts=
-if [ -n "$key" ]; then
-  if [[ $key == -----BEGIN* ]]; then
-    eval "$(ssh-agent -s)" >/dev/null
-    known_hosts=$(mktemp)
-    ssh-add - <<<"$key" 2>/dev/null
-    ssh-keyscan -t ed25519 github.com >"$known_hosts" 2>/dev/null
-    export GIT_SSH_COMMAND="ssh -o UserKnownHostsFile=$known_hosts"
-    rewrite="git@github.com:$repo"
-  else
-    echo "::add-mask::$key"
-    rewrite="https://x-access-token:$key@github.com/$repo"
-  fi
-  export GIT_CONFIG_COUNT=2
-  export GIT_CONFIG_KEY_0="url.$rewrite.insteadOf"
-  export GIT_CONFIG_VALUE_0="https://github.com/$repo"
-  export GIT_CONFIG_KEY_1=credential.helper
-  export GIT_CONFIG_VALUE_1=
-fi
-
 work=$(mktemp -d)
-trap 'rm -rf "$work"; rm -f "$known_hosts"; ssh-agent -k >/dev/null 2>&1 || true' EXIT
+trap 'rm -rf "$work"' EXIT
 git init -q "$work"
 git -C "$work" remote add origin "$url"
 git -C "$work" fetch -q --filter=blob:none origin "$pin" || {
@@ -109,8 +86,22 @@ git -C "$work" fetch -q --filter=blob:none origin HEAD || {
 }
 head=$(git -C "$work" rev-parse FETCH_HEAD)
 
-files=$(changed_files "$work" "$pin_fetch" "$head" "$path" || true)
+if ! files=$(changed_files "$work" "$pin_fetch" "$head" "$path"); then
+  echo "approval-changed: could not compare approval contract revisions" >&2
+  exit 2
+fi
 if [ -n "$files" ]; then
+  if [ -n "${GH_TOKEN:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
+    pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
+      --base "${BASE_BRANCH:-main}" --head "automation/approval-seen-$head" \
+      --author 'github-actions[bot]' --json number --jq '.[0].number // empty')
+    if [ -n "$pr" ]; then
+      echo "Approval contract tip $head already checked; PR #$pr awaits review."
+      emit contract_changed=false
+      emit source_ref=
+      exit 0
+    fi
+  fi
   {
     echo "### Approval contract changed"
     echo

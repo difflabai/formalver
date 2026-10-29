@@ -30,6 +30,8 @@ else
       $p/status.toml) add="verus" ;;
       # Checked by the pin job alone (pin and status-lint).
       $s/check-pin.sh | $s/check-status.sh | $s/test-check-status.sh) add="" ;;
+      # A recording PR only advances the already-successful schedule baseline.
+      .github/approval-seen | $s/record-approval-check.sh | $s/test-record-approval-check.sh) add="" ;;
       # The weekly upstream watch.
       $s/upstream-watch.sh | tools/upstream-watch.toml) add="" ;;
       # M5: the verified twin, its canary, mutants and erasure check.
