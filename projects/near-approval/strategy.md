@@ -819,7 +819,10 @@ facts.
 - **Lockfile** (near-tests and sandbox). Seed each crate's lockfile with the
   mirror's `Cargo.lock`, let Cargo add the missing entries once, commit the
   result, and build with `--locked`. CI fails if any package present in both
-  lockfiles differs in version or checksum.
+  lockfiles differs in version or checksum. The sandbox may lead the pin on
+  the host TLS versions in `sandbox/scripts/check-lock.py` (`AHEAD_OF_PIN`)
+  until the pin includes them. Those crates are not in the wasm; moving the
+  pin would change the contract artifact.
 - **`near-tests/`** (standalone `[workspace]`; CI only, needs crates.io):
   - **Universe:** 4 accounts and 4 real ed25519/secp256k1 keys.
   - **`tests/store_diff.rs`:** ST-4, SH-2, with persist and reload every step.
