@@ -48,7 +48,7 @@ trap 'rm -f "$body"' EXIT
 cat >"$body" <<EOF
 Scheduled verification succeeded for trust-framework upstream tip \`$seen\`.
 
-The schedule compared non-Markdown files under \`contracts/approval\` against
+The watcher compared approval core/contract code and workspace build inputs against
 \`.github/approval-seen\` and verified the changed upstream tip before opening
 this PR. Merge to advance that baseline and avoid duplicate nightly checks.
 The verification pin and its reviewed source hashes are unchanged.

@@ -9,7 +9,13 @@ on:
       - "tools/**"
       - ".gitmodules"
       - ".github/workflows/near-approval.yml"
-      - ".github/approval-seen"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "!**/*.md"
+      - "!**/*.mdx"
+      - "!**/*.rst"
+      - "!**/*.adoc"
+      - "!**/docs/**"
   push:
     branches: [main]
     paths:
@@ -17,10 +23,28 @@ on:
       - "tools/**"
       - ".gitmodules"
       - ".github/workflows/near-approval.yml"
-      - ".github/approval-seen"
-  schedule:
-    - cron: "17 3 * * *" # nightly: verify only if contracts/approval changed
-    - cron: "41 4 * * 0" # weekly: mutants, only if the contract changed
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "!**/*.md"
+      - "!**/*.mdx"
+      - "!**/*.rst"
+      - "!**/*.adoc"
+      - "!**/docs/**"
+  workflow_call:
+    inputs:
+      source_ref:
+        description: Changed approval-contract upstream tip to verify
+        type: string
+        required: true
+      mutants:
+        type: boolean
+        default: false
+      sandbox:
+        type: boolean
+        default: true
+      deploy_check:
+        type: string
+        default: ""
   workflow_dispatch:
     inputs:
       mutants:
@@ -40,38 +64,26 @@ permissions:
   contents: read
 
 concurrency:
-  # Scheduled runs get their own group so a push or the other schedule
-  # does not cancel them.
+  # Calls from the upstream watcher and repository changes have separate groups.
   group: near-approval-${{ github.ref }}-${{ github.event_name }}-${{ github.event.schedule }}
   cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
 
-# Every job takes its label from the CI_RUNNER repository variable (the
-# self-hosted macOS arm64 runners) and falls back to its original hosted label.
-# Those runners refuse Dependabot's runs and Claude Code cloud sessions'
-# (commits signed with Anthropic's shared key), so the parenthesised clause
-# that opens each runs-on sends those runs to ubuntu-latest instead, ahead of
-# CI_RUNNER and KANI_RUNNER. That clause is the canonical routing from
-# the shared CI routing policy: keep every copy byte-identical to it, and change
-# it there first. The Mac keeps HOME between jobs and has no sudo: the steps
-# below avoid `rustup default`, ~/.gitconfig and ~/.ssh, and the hosted-only
-# swap setup is skipped there.
+# Every job takes its label from the CI_RUNNER repository variable and falls
+# back to its original hosted label. The parenthesised clause that opens each
+# runs-on sends Dependabot and automated-agent runs to ubuntu-latest instead,
+# ahead of CI_RUNNER and KANI_RUNNER; keep every copy byte-identical. A
+# self-hosted runner keeps HOME between jobs and has no sudo: the steps below
+# avoid `rustup default`, ~/.gitconfig and ~/.ssh, and the hosted-only swap
+# setup is skipped there.
 #
-# On pull requests each job below pin runs only when the PR changes a path
-# it depends on (tools/scripts/ci-areas.sh); a skipped job reports as
-# skipped, which branch protection counts as passing. Pushes to main and
-# manual dispatch run every job. A schedule runs verification only when
-# contracts/approval on trust-framework differs from .github/approval-seen
-# (*.md ignored). That file is the tip already checked, not the pin, so one
-# upstream move does not re-run the proofs every night.
+# PRs and pushes select only affected verification layers from the entire
+# change range. Manual calls and a changed upstream contract verify all layers.
+# The separate near-approval-watch workflow owns polling and recording PRs.
 jobs:
   pin:
-    # Read-only: check for an existing successful-check PR on schedules.
-    permissions:
-      contents: read
-      pull-requests: read
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     outputs:
       plain: ${{ steps.areas.outputs.plain }}
@@ -83,8 +95,7 @@ jobs:
       near_unit: ${{ steps.areas.outputs.near_unit }}
       sandbox: ${{ steps.areas.outputs.sandbox }}
       verus: ${{ steps.areas.outputs.verus }}
-      contract_changed: ${{ steps.contract.outputs.contract_changed }}
-      source_ref: ${{ steps.contract.outputs.source_ref }}
+      source_ref: ${{ inputs.source_ref }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -94,39 +105,30 @@ jobs:
           fetch-depth: 2
       - name: Jobs this change needs
         id: areas
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          SOURCE_REF: ${{ inputs.source_ref }}
         run: |
           tools/scripts/test-ci-areas.sh
-          tools/scripts/test-approval-changed.sh
-          tools/scripts/test-record-approval-check.sh
-          if [ "$GITHUB_EVENT_NAME" = pull_request ] && git rev-parse -q --verify HEAD^2 >/dev/null; then
-            git diff --name-only HEAD^1 HEAD | CI_AREAS_EXPLAIN=1 tools/scripts/ci-areas.sh >"$RUNNER_TEMP/areas"
-          else
-            tools/scripts/ci-areas.sh --all </dev/null >"$RUNNER_TEMP/areas"
-          fi
+          tools/scripts/test-ci-changed-areas.sh
+          tools/scripts/ci-changed-areas.sh >"$RUNNER_TEMP/areas"
           cat "$RUNNER_TEMP/areas" >>"$GITHUB_OUTPUT"
-          { echo '### Jobs this change needs'; sed 's/^/- /' "$RUNNER_TEMP/areas"; } >>"$GITHUB_STEP_SUMMARY"
-      - name: Approval contract since the last check
-        id: contract
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BASE_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          if [ "$GITHUB_EVENT_NAME" = schedule ]; then
-            tools/scripts/approval-changed.sh
+          if grep -q '=true$' "$RUNNER_TEMP/areas"; then
+            echo verification=true >>"$GITHUB_OUTPUT"
           else
-            echo contract_changed=true >>"$GITHUB_OUTPUT"
-            echo source_ref= >>"$GITHUB_OUTPUT"
+            echo verification=false >>"$GITHUB_OUTPUT"
           fi
+          { echo '### Jobs this change needs'; sed 's/^/- /' "$RUNNER_TEMP/areas"; } >>"$GITHUB_STEP_SUMMARY"
       - name: Check out trust-framework at the pin
-        if: steps.contract.outputs.contract_changed == 'true'
+        if: steps.areas.outputs.verification == 'true'
         env:
-          SOURCE_REF: ${{ steps.contract.outputs.source_ref }}
+          SOURCE_REF: ${{ inputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
       - name: Python >= 3.11 (tomllib)
         if: runner.os == 'macOS'
         run: |
-          # macOS's /usr/bin/python3 is 3.9; the Mac runner has Homebrew's
-          # newer ones under versioned names only.
+          # macOS's /usr/bin/python3 is 3.9; Homebrew's newer ones exist
+          # under versioned names only.
           python3 -c 'import tomllib' 2>/dev/null && exit 0
           for py in python3.13 python3.12 python3.11; do
             if p=$(command -v "$py"); then
@@ -138,21 +140,21 @@ jobs:
           done
           echo "::error::no python3 >= 3.11 on PATH"; exit 1
       - name: Gitlink and source hashes match status.toml
-        # A schedule that found upstream drift verifies that tip. check-pin
-        # would fail on it and skip every proof job, which is the opposite
-        # of the point. PRs and pushes still require the pin.
-        if: github.event_name != 'schedule'
+        # An upstream call intentionally verifies a different tip. Repository
+        # changes and ordinary manual runs still require the reviewed pin.
+        if: inputs.source_ref == '' && steps.areas.outputs.verification == 'true'
         run: tools/scripts/check-pin.sh near-approval
       # status-lint (strategy.md section 14): status.toml claims nothing the
-      # repository doesn't back. Runs here because pin always runs.
+      # repository doesn't back. Runs only when a verification layer is selected.
       - name: status-lint
+        if: steps.areas.outputs.verification == 'true'
         run: |
           tools/scripts/test-check-status.sh
           tools/scripts/check-status.sh near-approval
 
   plain:
     needs: pin
-    if: needs.pin.outputs.plain == 'true' && needs.pin.outputs.contract_changed == 'true'
+    if: needs.pin.outputs.plain == 'true'
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -191,9 +193,7 @@ jobs:
     # constant, at most its harness unwind (tools/scripts/kani-loops.py).
     needs: pin
     if: >-
-      needs.pin.outputs.contract_changed == 'true' &&
-      needs.pin.outputs.loops == 'true' &&
-      (github.event_name != 'schedule' || github.event.schedule == '17 3 * * *')
+      needs.pin.outputs.loops == 'true'
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
@@ -224,19 +224,14 @@ jobs:
 
   kani:
     needs: pin
-    # Every push to main, pull requests that change what it checks, and a
-    # nightly whose approval contract moved past the pin.
+    # Only affected repository changes, manual runs, or a changed upstream contract.
     if: >-
-      needs.pin.outputs.contract_changed == 'true' &&
-      needs.pin.outputs.kani == 'true' &&
-      (github.event_name != 'schedule' || github.event.schedule == '17 3 * * *')
+      needs.pin.outputs.kani == 'true'
     # CBMC peaks at 6.5 to 9.5 GB on the step harnesses; this repository's
     # default runner has 2 CPUs and 7.9 GB. Set the KANI_RUNNER repository
     # variable to a larger runner label (and KANI_SWAP_GB to 0) to avoid
-    # relying on swap. Without it, CI_RUNNER (the self-hosted Mac: 64 GB, no
-    # swap file needed) is next. Routed runs (see above `jobs:`) skip both and
-    # get ubuntu-latest with the swap step: KANI_RUNNER can name a self-hosted
-    # label (today it is `kani`, on the Macs), which would refuse them. The
+    # relying on swap. Without it, CI_RUNNER is next. Routed runs (see above
+    # `jobs:`) skip both and get ubuntu-latest with the swap step. The
     # timeouts here and on mutants assume that 2-CPU, swap-backed runner.
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.KANI_RUNNER || vars.CI_RUNNER || 'ubuntu-latest' }}
     # A step part may need most of KANI_TIMEOUT (120 min) on swap.
@@ -398,7 +393,7 @@ jobs:
 
   tla:
     needs: pin
-    if: needs.pin.outputs.tla == 'true' && needs.pin.outputs.contract_changed == 'true'
+    if: needs.pin.outputs.tla == 'true'
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 240
     steps:
@@ -452,7 +447,7 @@ jobs:
     # audit and canaries, REF-5L (real-core traces on the Lean machine),
     # MC-4 (Lean graph = TLC graph) and the spec mutants. About 8 min.
     needs: pin
-    if: needs.pin.outputs.lean == 'true' && needs.pin.outputs.contract_changed == 'true'
+    if: needs.pin.outputs.lean == 'true'
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 60
     steps:
@@ -509,7 +504,7 @@ jobs:
     # must fail, the erasure check ties the twin to the pinned upstream file,
     # and every mutant in verus/mutants.toml must be rejected. About 1 min.
     needs: pin
-    if: needs.pin.outputs.verus == 'true' && needs.pin.outputs.contract_changed == 'true'
+    if: needs.pin.outputs.verus == 'true'
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
@@ -555,7 +550,7 @@ jobs:
     # directions. MC-3 (the full graph comparison, about 30 min) runs
     # nightly and on manual dispatch.
     needs: pin
-    if: needs.pin.outputs.prolog == 'true' && needs.pin.outputs.contract_changed == 'true'
+    if: needs.pin.outputs.prolog == 'true'
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 90
     steps:
@@ -606,12 +601,12 @@ jobs:
             scryer-prolog mc2.pl -g "(generate('$PWD/../../kani/target/mc2/prolog.txt', 60) -> halt(0) ; halt(1))" </dev/null)
           cargo test --release --locked mc2_prolog_traces -- --nocapture
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        if: inputs.source_ref != '' || github.event_name == 'workflow_dispatch'
         with:
           distribution: temurin
           java-version: "21"
       - name: MC-3 graph equivalence, TLC and step/4
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        if: inputs.source_ref != '' || github.event_name == 'workflow_dispatch'
         env:
           TLA_CACHE: ${{ runner.environment != 'github-hosted' && format('{0}/formalver-tla', runner.tool_cache) || '' }}
           MC3_DIR: ${{ runner.temp }}/mc3
@@ -623,7 +618,7 @@ jobs:
   # api_facts.pl).
   near-unit:
     needs: pin
-    if: needs.pin.outputs.near_unit == 'true' && needs.pin.outputs.contract_changed == 'true'
+    if: needs.pin.outputs.near_unit == 'true'
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 45
     steps:
@@ -664,13 +659,9 @@ jobs:
   # that change what it runs, and on manual dispatch.
   sandbox:
     needs: pin
-    if: >-
-      needs.pin.outputs.contract_changed == 'true' &&
-      ((github.event_name == 'schedule' && github.event.schedule == '17 3 * * *') ||
-      inputs.sandbox ||
-      (github.event_name != 'schedule' && needs.pin.outputs.sandbox == 'true'))
+    if: inputs.sandbox || needs.pin.outputs.sandbox == 'true'
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
-    # The reproducible build runs an amd64 image (emulated on the Mac) and
+    # The reproducible build runs an amd64 image (emulated on arm64 hosts) and
     # RT-TRACE replays 210 traces.
     timeout-minutes: 120
     env:
@@ -685,6 +676,30 @@ jobs:
         env:
           SOURCE_REF: ${{ needs.pin.outputs.source_ref }}
         run: tools/scripts/ci-submodule.sh projects/near-approval/source-mirror
+      - name: Python >= 3.11 (tomllib)
+        if: runner.os == 'macOS'
+        run: |
+          python3 -c 'import tomllib' 2>/dev/null && exit 0
+          for py in python3.13 python3.12 python3.11; do
+            if p=$(command -v "$py"); then
+              mkdir -p "$RUNNER_TEMP/python-bin"
+              ln -sf "$p" "$RUNNER_TEMP/python-bin/python3"
+              echo "$RUNNER_TEMP/python-bin" >> "$GITHUB_PATH"
+              exit 0
+            fi
+          done
+          echo "::error::no python3 >= 3.11 on PATH"; exit 1
+      - name: Sandbox lockfile preflight
+        id: lock-preflight
+        run: |
+          python3 projects/near-approval/sandbox/scripts/test_check_lock.py
+          diag="$RUNNER_TEMP/sandbox-diagnostics"
+          mkdir -p "$diag"
+          cp projects/near-approval/sandbox/Cargo.lock "$diag/sandbox-Cargo.lock"
+          cp projects/near-approval/source-mirror/contracts/approval/Cargo.lock "$diag/upstream-Cargo.lock"
+          source_ref=$(git -C projects/near-approval/source-mirror rev-parse HEAD)
+          python3 projects/near-approval/sandbox/scripts/check-lock.py \
+            --source-ref "$source_ref" --json "$diag/lock-report.json"
       - name: Toolchain from versions.env, with the wasm target
         run: |
           . tools/versions.env
@@ -700,30 +715,27 @@ jobs:
             cargo install --locked scryer-prolog --version "$SCRYER" --root "$root"
           fi
           echo "$root/bin" >> "$GITHUB_PATH"
-      - name: Python >= 3.11 (tomllib)
-        if: runner.os == 'macOS'
-        run: |
-          python3 -c 'import tomllib' 2>/dev/null && exit 0
-          for py in python3.13 python3.12 python3.11; do
-            if p=$(command -v "$py"); then
-              mkdir -p "$RUNNER_TEMP/python-bin"
-              ln -sf "$p" "$RUNNER_TEMP/python-bin/python3"
-              echo "$RUNNER_TEMP/python-bin" >> "$GITHUB_PATH"
-              exit 0
-            fi
-          done
-          echo "::error::no python3 >= 3.11 on PATH"; exit 1
       - name: Docker daemon (the reproducible build runs in a container)
         run: |
           if ! docker info >/dev/null 2>&1; then
             echo "::error::No reachable Docker daemon on runner '${RUNNER_NAME}'. Start Docker Desktop and re-run."
             exit 1
           fi
-      - name: Reproducible wasm of the pin (RT-CODEHASH)
+      - name: Reproducible wasm of the selected contract (RT-CODEHASH)
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
         run: |
           projects/near-approval/sandbox/scripts/build-wasm.sh reproducible
-          want=$(python3 -c 'import tomllib; print(tomllib.load(open("projects/near-approval/status.toml","rb"))["project"]["reproducible_wasm_sha256"])')
           wasm=projects/near-approval/sandbox/target/approval/near/approval_contract/approval_contract.wasm
+          if [ -n "$SOURCE_REF" ]; then
+            # A changed upstream artifact cannot have the reviewed pin's hash.
+            # Adapt only its fingerprint, keeping exports and behavior strict.
+            want=$(python3 projects/near-approval/sandbox/scripts/prepare-upstream-observation.py \
+              --wasm "$wasm" --source-ref "$SOURCE_REF" \
+              --report "$RUNNER_TEMP/sandbox-diagnostics/upstream-artifact.json")
+          else
+            want=$(python3 -c 'import tomllib; print(tomllib.load(open("projects/near-approval/status.toml","rb"))["project"]["reproducible_wasm_sha256"])')
+          fi
           { echo "APPROVAL_WASM=$PWD/$wasm"; echo "APPROVAL_WASM_KIND=reproducible"; echo "APPROVAL_WASM_EXPECTED_SHA256=$want"; } >> "$GITHUB_ENV"
       - name: Wasm surface of the reproducible build (SH-11, SH-12)
         run: |
@@ -733,7 +745,17 @@ jobs:
           abi=${abis[0]:-}
           tools/scripts/wasm-surface.sh --wasm "$wasm" ${abi:+--abi "$abi"}
       - name: Sandbox tests
-        run: projects/near-approval/sandbox/scripts/run-sandbox.sh
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/sandbox-diagnostics"
+          projects/near-approval/sandbox/scripts/run-sandbox.sh 2>&1 | tee "$RUNNER_TEMP/sandbox-diagnostics/sandbox.log"
+      - name: Upload sandbox diagnostics
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: sandbox-diagnostics
+          path: ${{ runner.temp }}/sandbox-diagnostics/
+          retention-days: 14
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
@@ -798,7 +820,7 @@ jobs:
 
   mutants:
     needs: pin
-    if: (github.event.schedule == '41 4 * * 0' || inputs.mutants) && needs.pin.outputs.contract_changed == 'true'
+    if: inputs.mutants
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.KANI_RUNNER || vars.CI_RUNNER || 'ubuntu-latest' }}
     # Up to 2 harnesses (6 for the must-survive mutants) of KANI_TIMEOUT
     # (60 min) each, plus builds.
@@ -865,7 +887,7 @@ jobs:
   # shell suite fail.
   shell-mutants:
     needs: pin
-    if: (github.event.schedule == '41 4 * * 0' || inputs.mutants) && needs.pin.outputs.contract_changed == 'true'
+    if: inputs.mutants
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 90
     steps:
@@ -883,33 +905,3 @@ jobs:
           echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
       - name: Shell mutants
         run: projects/near-approval/near-tests/run-mutants.sh
-
-  record-upstream:
-    # Record a successful check through review, never before the proofs finish.
-    # Skipped jobs are expected (nightly/weekly scopes differ); failures and
-    # cancellations must never advance the baseline.
-    needs: [pin, plain, loops, kani, tla, lean, verus, prolog, near-unit, sandbox, covers, mutants, shell-mutants]
-    if: >-
-      ${{ !cancelled() && github.event_name == 'schedule' &&
-          needs.pin.outputs.contract_changed == 'true' &&
-          !contains(needs.*.result, 'failure') &&
-          !contains(needs.*.result, 'cancelled') }}
-    permissions:
-      contents: write
-      pull-requests: write
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    concurrency:
-      group: near-approval-record-upstream
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-          persist-credentials: false
-      - name: Propose the successfully checked upstream tip
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BASE_BRANCH: ${{ github.event.repository.default_branch }}
-          SEEN: ${{ needs.pin.outputs.source_ref }}
-        run: tools/scripts/record-approval-check.sh "$SEEN"

@@ -1,57 +1,97 @@
 #!/usr/bin/env python3
-"""Lockfile rule (strategy.md section 9): every package that appears in both
-the sandbox Cargo.lock and the mirror's contracts/approval/Cargo.lock must
-have the same version(s) and checksum(s). Exit 1 on any difference.
+"""Check shared sandbox/mirror dependency versions, sources and checksums.
 
-The sandbox lockfile may lead the pin on AHEAD_OF_PIN. Those crates are the
-host TLS stack (ureq, used to fetch near-sandbox), not the contract wasm.
-Re-pinning would change the contract artifact. Delete an entry once the
-mirror has that version. The script fails if you leave it."""
-import sys, tomllib, pathlib
+Explicit host-TLS backports allow the sandbox to lead the reviewed pin.
+When upstream catches up, normal equality applies; an unused exception is
+not an error. Other version drift and checksum/source mismatches fail closed.
+"""
+import argparse
+import json
+import pathlib
+import sys
+import tomllib
 
-# rustls-webpki 0.103.16 rejects the compromised intermediate keys.
-# webpki-roots 1.0.11 drops the emSign roots (RUSTSEC-2026-0382). The pin
-# still has 0.103.15 and 1.0.9.
-# rustls 0.23.46 patches RUSTSEC-2026-0346, -0347, -0348 and -0349. The pin
-# still has 0.23.45.
-AHEAD_OF_PIN = {
-    "rustls": {"0.23.46"},
-    "rustls-webpki": {"0.103.16"},
-    "webpki-roots": {"1.0.11"},
+# Only these exact sandbox/mirror pairs are approved. These are host-side
+# TLS updates, not a change to the reviewed contract pin or wasm artifact.
+# rustls 0.23.46 patches RUSTSEC-2026-0346 through -0349 (PR #26).
+# rustls-webpki 0.103.16 and webpki-roots 1.0.11 carry the earlier eMudhra
+# distrust update (RUSTSEC-2026-0382). Equality needs no backport exception.
+HOST_TLS_BACKPORTS = {
+    "rustls": ("0.23.46", {"0.23.45"}),
+    "rustls-webpki": ("0.103.16", {"0.103.15"}),
+    "webpki-roots": ("1.0.11", {"1.0.9"}),
 }
 
-here = pathlib.Path(__file__).resolve().parent.parent
-mine = tomllib.loads((here / "Cargo.lock").read_text())["package"]
-theirs = tomllib.loads(
-    (here.parent / "source-mirror/contracts/approval/Cargo.lock").read_text()
-)["package"]
 
-def index(pkgs):
+def index(packages):
     out = {}
-    for p in pkgs:
-        if "source" not in p:  # workspace members
+    for package in packages:
+        if "source" not in package:  # workspace members
             continue
-        out.setdefault(p["name"], {})[p["version"]] = p.get("checksum")
+        versions = out.setdefault(package["name"], {})
+        version = package["version"]
+        if version in versions:
+            raise ValueError(f"ambiguous package {package['name']} {version}")
+        versions[version] = (package["source"], package.get("checksum"))
     return out
 
-a, b = index(mine), index(theirs)
-bad = []
-ahead = []
-for name in sorted(a.keys() & b.keys()):
-    for ver, sum_ in a[name].items():
-        if ver not in b[name]:
-            if ver in AHEAD_OF_PIN.get(name, ()):
-                ahead.append(f"{name} {ver}: mirror has {sorted(b[name])}")
+
+def compare(mine, theirs):
+    a, b = index(mine), index(theirs)
+    bad, ahead = [], []
+    for name in sorted(a.keys() & b.keys()):
+        for version, (source, checksum) in a[name].items():
+            if version in b[name]:
+                other_source, other_checksum = b[name][version]
+                if source != other_source:
+                    bad.append(f"{name} {version}: source differs")
+                elif checksum != other_checksum:
+                    bad.append(f"{name} {version}: checksum differs")
+                continue
+            allowed_version, old_versions = HOST_TLS_BACKPORTS.get(name, (None, set()))
+            # Exceptions do not permit a different source or arbitrary newer
+            # upstream versions. Equality above always checks checksums.
+            if (version == allowed_version and set(b[name]) <= old_versions
+                    and all(other_source == source for other_source, _ in b[name].values())):
+                ahead.append(f"{name} {version}: approved host-TLS backport; mirror has {sorted(b[name])}")
             else:
-                bad.append(f"{name} {ver}: mirror has {sorted(b[name])}")
-        elif b[name][ver] != sum_:
-            bad.append(f"{name} {ver}: checksum differs")
-for name, vers in sorted(AHEAD_OF_PIN.items()):
-    if name in b and vers <= set(b[name]):
-        bad.append(f"drop AHEAD_OF_PIN[{name!r}], mirror has caught up")
-for line in ahead:
-    print("lockfile ahead of pin:", line)
-for line in bad:
-    print("lockfile mismatch:", line)
-print(f"check-lock: {len(a.keys() & b.keys())} shared packages, {len(bad)} mismatches")
-sys.exit(1 if bad else 0)
+                bad.append(f"{name} {version}: mirror has {sorted(b[name])}")
+    return {"shared_packages": len(a.keys() & b.keys()), "mismatches": bad, "backports": ahead}
+
+
+def main():
+    here = pathlib.Path(__file__).resolve().parent.parent
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--sandbox-lock", type=pathlib.Path, default=here / "Cargo.lock")
+    parser.add_argument("--mirror-lock", type=pathlib.Path,
+                        default=here.parent / "source-mirror/contracts/approval/Cargo.lock")
+    parser.add_argument("--source-ref", default="")
+    parser.add_argument("--json", type=pathlib.Path, help="write a diagnostic report, including on input errors")
+    args = parser.parse_args()
+    report = {"sandbox_lock": str(args.sandbox_lock), "mirror_lock": str(args.mirror_lock),
+              "source_ref": args.source_ref}
+    try:
+        mine = tomllib.loads(args.sandbox_lock.read_text())["package"]
+        theirs = tomllib.loads(args.mirror_lock.read_text())["package"]
+        report.update(compare(mine, theirs))
+        code = 1 if report["mismatches"] else 0
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        report["error"] = str(error)
+        print(f"check-lock: cannot compare lockfiles: {error}", file=sys.stderr)
+        code = 2
+    if args.json:
+        args.json.parent.mkdir(parents=True, exist_ok=True)
+        args.json.write_text(json.dumps(report, indent=2) + "\n")
+    if "error" not in report:
+        for line in report["backports"]:
+            print("lockfile ahead of pin:", line)
+        for line in report["mismatches"]:
+            print("lockfile mismatch:", line)
+        print(f"check-lock: {report['shared_packages']} shared packages, {len(report['mismatches'])} mismatches")
+        if code:
+            print("Update the sandbox lockfile against the selected mirror revision; do not remove --locked.")
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

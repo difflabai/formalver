@@ -24,6 +24,10 @@ expect "" $p/strategy.md $p/kani/RESULTS.md README.md
 expect "verus" $p/status.toml
 expect "" tools/scripts/check-pin.sh tools/scripts/check-status.sh tools/scripts/test-check-status.sh
 expect "" .github/approval-seen tools/scripts/record-approval-check.sh tools/scripts/test-record-approval-check.sh
+expect "" tools/scripts/approval-changed.sh tools/scripts/test-approval-changed.sh .github/workflows/near-approval-watch.yml
+expect "" docs/architecture.svg projects/near-approval/lean/docs/diagram.png .github/CODEOWNERS
+expect "" projects/ironclaw/verus/src/lib.rs
+expect "prolog" projects/near-approval/prolog/requirements/r.pl README.md .gitignore
 expect "" tools/upstream-watch.toml tools/scripts/upstream-watch.sh
 expect "verus" $p/verus/src/lib.rs $p/verus/mutants.toml tools/scripts/run-verus.sh tools/scripts/get-verus.sh tools/scripts/erasure-check.py
 expect "" # no changes

@@ -1132,14 +1132,15 @@ for fork pull requests.
 `lean`, `prolog`, `mutants` and `upstream-watch`, on self-hosted macOS
 runners (`vars.CI_RUNNER`). On a PR, `pin` always runs and each other job
 runs only when the diff touches its inputs (`tools/scripts/ci-areas.sh`;
-Markdown changes run none). Push to `main` and manual runs run every job.
-A schedule (`approval-changed.sh`) runs verification only when
-`contracts/approval` on trust-framework differs from `.github/approval-seen`
-(`*.md` ignored). That sha is the tip already checked, not the pin, and the
+Markdown changes run none). Pushes use the complete before/after diff just like PRs; manual runs check all layers.
+The separate `near-approval-watch.yml` schedule calls reusable `near-approval.yml`
+only when approval core/contract code or workspace build inputs differ from
+`.github/approval-seen`. Documentation, upstream sandbox tests, and other
+trust-framework changes are ignored. That sha is the tip already checked, not the pin, and the
 schedule proposes the new tip in a PR only after every applicable check
 succeeds. The recording job never pushes `main` or moves the verification
 pin. An open recording PR suppresses repeat checks of that upstream tip
-until its review is complete.
+until its review is complete, including when later unrelated upstream commits arrive.
 `verus` (M5) since 2026-10-19.
 
 ## 15. Risks

@@ -4,9 +4,9 @@
 # Compares trust-framework's default branch to the sha in
 # .github/approval-seen, not to the verification pin. The pin stays put
 # until a human re-pins, so comparing to it re-ran the proofs every night
-# after one upstream move. A change is any file under upstream_path
-# (contracts/approval) other than *.md, the same cut trust-framework's
-# own CI uses: a doc edit does not change the wasm or the proofs.
+# after one upstream move. Only the core/contract crates and their workspace
+# build inputs count. Documentation, the upstream sandbox harness and other
+# trust-framework projects do not change the approval contract under test.
 #
 # Prints contract_changed=true|false and source_ref=<sha-or-empty>.
 # When the contract changed, source_ref is the upstream tip to verify.
@@ -34,8 +34,11 @@ emit() {
 }
 
 changed_files() {
-  # $1 repo, $2 pin, $3 head, $4 path. Prints non-markdown paths, if any.
-  git -C "$1" diff --name-only "$2" "$3" -- "$4" | awk '!/\.md$/'
+  # Include both sides of renames so moving code out of a crate is detected.
+  git -C "$1" diff --no-renames --name-only "$2" "$3" -- \
+    "$4/core" "$4/contract" "$4/Cargo.toml" "$4/Cargo.lock" \
+    "$4/.cargo" "$4/rust-toolchain" "$4/rust-toolchain.toml" "$4/build.rs" \
+    | awk '!/\.(md|mdx|rst|adoc)$/ && !/(^|\/)docs\//'
 }
 
 if [ "${1:-}" = --repo ]; then
@@ -51,7 +54,7 @@ if [ "${1:-}" = --repo ]; then
     emit contract_changed=true
     emit "source_ref=$head"
   else
-    echo "Approval contract unchanged ($pin -> $head) under $path, ignoring *.md."
+    echo "Approval contract build inputs unchanged ($pin -> $head)."
     emit contract_changed=false
     emit source_ref=
   fi
@@ -92,15 +95,30 @@ if ! files=$(changed_files "$work" "$pin_fetch" "$head" "$path"); then
 fi
 if [ -n "$files" ]; then
   if [ -n "${GH_TOKEN:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
-    pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
-      --base "${BASE_BRANCH:-main}" --head "automation/approval-seen-$head" \
-      --author 'github-actions[bot]' --json number --jq '.[0].number // empty')
-    if [ -n "$pr" ]; then
-      echo "Approval contract tip $head already checked; PR #$pr awaits review."
-      emit contract_changed=false
-      emit source_ref=
-      exit 0
-    fi
+    proposals=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 100 \
+      --base "${BASE_BRANCH:-main}" --author 'github-actions[bot]' \
+      --json number,headRefName \
+      --jq '.[] | select(.headRefName | startswith("automation/approval-seen-")) | [.number, .headRefName] | @tsv')
+    while IFS=$'\t' read -r pr branch; do
+      verified=${branch#automation/approval-seen-}
+      [[ $verified =~ ^[0-9a-f]{40}$ ]] || continue
+      # A stale proposal must not abort the nightly: verify instead.
+      if ! git -C "$work" cat-file -e "$verified^{commit}" 2>/dev/null &&
+         ! git -C "$work" fetch -q --depth 1 --filter=blob:none origin "$verified"; then
+        echo "approval-changed: ignoring PR #$pr, cannot fetch $verified" >&2
+        continue
+      fi
+      if ! remaining=$(changed_files "$work" "$verified" "$head" "$path"); then
+        echo "approval-changed: ignoring PR #$pr, cannot compare $verified" >&2
+        continue
+      fi
+      if [ -z "$remaining" ]; then
+        echo "Approval contract code already checked at $verified; PR #$pr awaits review."
+        emit contract_changed=false
+        emit source_ref=
+        exit 0
+      fi
+    done <<< "$proposals"
   fi
   {
     echo "### Approval contract changed"
@@ -119,7 +137,7 @@ else
   {
     echo "### Approval contract unchanged"
     echo
-    echo "\`$path\` at upstream \`$head\` matches the last check \`$pin_fetch\` (ignoring \`*.md\`). Skipping verification."
+    echo "Approval core/contract code and workspace build inputs at \`$head\` match the last check \`$pin_fetch\`. Skipping verification."
   } >>"${GITHUB_STEP_SUMMARY:-/dev/null}"
   echo "Approval contract unchanged ($pin_fetch). Skipping verification."
   emit contract_changed=false
