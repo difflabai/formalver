@@ -71,16 +71,13 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
 
-# Every job takes its label from the CI_RUNNER repository variable (the
-# self-hosted macOS arm64 runners) and falls back to its original hosted label.
-# Those runners refuse Dependabot's runs and Claude Code cloud sessions'
-# (commits signed with Anthropic's shared key), so the parenthesised clause
-# that opens each runs-on sends those runs to ubuntu-latest instead, ahead of
-# CI_RUNNER and KANI_RUNNER. That clause is the canonical routing from
-# the shared CI routing policy: keep every copy byte-identical to it, and change
-# it there first. The Mac keeps HOME between jobs and has no sudo: the steps
-# below avoid `rustup default`, ~/.gitconfig and ~/.ssh, and the hosted-only
-# swap setup is skipped there.
+# Every job takes its label from the CI_RUNNER repository variable and falls
+# back to its original hosted label. The parenthesised clause that opens each
+# runs-on sends Dependabot and automated-agent runs to ubuntu-latest instead,
+# ahead of CI_RUNNER and KANI_RUNNER; keep every copy byte-identical. A
+# self-hosted runner keeps HOME between jobs and has no sudo: the steps below
+# avoid `rustup default`, ~/.gitconfig and ~/.ssh, and the hosted-only swap
+# setup is skipped there.
 #
 # PRs and pushes select only affected verification layers from the entire
 # change range. Manual calls and a changed upstream contract verify all layers.
@@ -130,8 +127,8 @@ jobs:
       - name: Python >= 3.11 (tomllib)
         if: runner.os == 'macOS'
         run: |
-          # macOS's /usr/bin/python3 is 3.9; the Mac runner has Homebrew's
-          # newer ones under versioned names only.
+          # macOS's /usr/bin/python3 is 3.9; Homebrew's newer ones exist
+          # under versioned names only.
           python3 -c 'import tomllib' 2>/dev/null && exit 0
           for py in python3.13 python3.12 python3.11; do
             if p=$(command -v "$py"); then
@@ -233,10 +230,8 @@ jobs:
     # CBMC peaks at 6.5 to 9.5 GB on the step harnesses; this repository's
     # default runner has 2 CPUs and 7.9 GB. Set the KANI_RUNNER repository
     # variable to a larger runner label (and KANI_SWAP_GB to 0) to avoid
-    # relying on swap. Without it, CI_RUNNER (the self-hosted Mac: 64 GB, no
-    # swap file needed) is next. Routed runs (see above `jobs:`) skip both and
-    # get ubuntu-latest with the swap step: KANI_RUNNER can name a self-hosted
-    # label (today it is `kani`, on the Macs), which would refuse them. The
+    # relying on swap. Without it, CI_RUNNER is next. Routed runs (see above
+    # `jobs:`) skip both and get ubuntu-latest with the swap step. The
     # timeouts here and on mutants assume that 2-CPU, swap-backed runner.
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.KANI_RUNNER || vars.CI_RUNNER || 'ubuntu-latest' }}
     # A step part may need most of KANI_TIMEOUT (120 min) on swap.
@@ -666,7 +661,7 @@ jobs:
     needs: pin
     if: inputs.sandbox || needs.pin.outputs.sandbox == 'true'
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
-    # The reproducible build runs an amd64 image (emulated on the Mac) and
+    # The reproducible build runs an amd64 image (emulated on arm64 hosts) and
     # RT-TRACE replays 210 traces.
     timeout-minutes: 120
     env:
