@@ -102,10 +102,16 @@ if [ -n "$files" ]; then
     while IFS=$'\t' read -r pr branch; do
       verified=${branch#automation/approval-seen-}
       [[ $verified =~ ^[0-9a-f]{40}$ ]] || continue
-      if ! git -C "$work" cat-file -e "$verified^{commit}" 2>/dev/null; then
-        git -C "$work" fetch -q --depth 1 --filter=blob:none origin "$verified"
+      # A stale proposal must not abort the nightly: verify instead.
+      if ! git -C "$work" cat-file -e "$verified^{commit}" 2>/dev/null &&
+         ! git -C "$work" fetch -q --depth 1 --filter=blob:none origin "$verified"; then
+        echo "approval-changed: ignoring PR #$pr, cannot fetch $verified" >&2
+        continue
       fi
-      remaining=$(changed_files "$work" "$verified" "$head" "$path")
+      if ! remaining=$(changed_files "$work" "$verified" "$head" "$path"); then
+        echo "approval-changed: ignoring PR #$pr, cannot compare $verified" >&2
+        continue
+      fi
       if [ -z "$remaining" ]; then
         echo "Approval contract code already checked at $verified; PR #$pr awaits review."
         emit contract_changed=false
