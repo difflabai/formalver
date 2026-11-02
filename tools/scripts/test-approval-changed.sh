@@ -23,6 +23,16 @@ other=$(git -C "$work" rev-parse HEAD)
 out=$("$script" --repo "$work" --pin "$pin" --head "$other" --path contracts/approval)
 printf '%s\n' "$out" | grep -q '^contract_changed=false$'
 
+# The upstream sandbox and docs inside a crate do not change contract code.
+mkdir -p "$work/contracts/approval/sandbox/tests" "$work/contracts/approval/core/docs"
+printf 'test\n' > "$work/contracts/approval/sandbox/tests/sandbox.rs"
+printf 'diagram\n' > "$work/contracts/approval/core/docs/diagram.svg"
+git -C "$work" add contracts
+git -C "$work" commit -q -m upstream-harness-and-docs
+ignored=$(git -C "$work" rev-parse HEAD)
+out=$("$script" --repo "$work" --pin "$pin" --head "$ignored" --path contracts/approval)
+printf '%s\n' "$out" | grep -q '^contract_changed=false$'
+
 printf '# readme changed\n' >"$work/contracts/approval/README.md"
 git -C "$work" add contracts
 git -C "$work" commit -q -m docs
@@ -62,10 +72,23 @@ git -C "$work" commit -q -m dependencies
 deps=$(git -C "$work" rev-parse HEAD)
 out=$("$script" --repo "$work" --pin "$code" --head "$deps" --path contracts/approval)
 printf '%s\n' "$out" | grep -q '^contract_changed=true$'
+mkdir -p "$work/contracts/approval/contract/src"
+printf 'fn wrapper() {}\n' > "$work/contracts/approval/contract/src/lib.rs"
+git -C "$work" add contracts
+git -C "$work" commit -q -m contract-wrapper
+wrapper=$(git -C "$work" rev-parse HEAD)
+out=$("$script" --repo "$work" --pin "$deps" --head "$wrapper" --path contracts/approval)
+printf '%s\n' "$out" | grep -q '^contract_changed=true$'
+printf '[workspace]\n' > "$work/contracts/approval/Cargo.toml"
+git -C "$work" add contracts
+git -C "$work" commit -q -m workspace-build-input
+workspace=$(git -C "$work" rev-parse HEAD)
+out=$("$script" --repo "$work" --pin "$wrapper" --head "$workspace" --path contracts/approval)
+printf '%s\n' "$out" | grep -q '^contract_changed=true$'
 git -C "$work" rm -q contracts/approval/core/src/lib.rs
 git -C "$work" commit -q -m deletion
 deleted=$(git -C "$work" rev-parse HEAD)
-out=$("$script" --repo "$work" --pin "$deps" --head "$deleted" --path contracts/approval)
+out=$("$script" --repo "$work" --pin "$workspace" --head "$deleted" --path contracts/approval)
 printf '%s\n' "$out" | grep -q '^contract_changed=true$'
 
 # Git comparison errors must fail; they must never be reported as unchanged.
@@ -86,15 +109,29 @@ cat > "$ci/bin/gh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 if [ "${PR_TEST_FAIL:-}" = 1 ]; then exit 19; fi
-printf '%s' "${EXISTING_PR:-}"
+if [ -n "${EXISTING_PR:-}" ]; then
+  printf '%s\tautomation/approval-seen-%s\n' "$EXISTING_PR" "$PR_TEST_VERIFIED_REF"
+fi
 SH
 chmod +x "$ci/bin/gh"
-export PATH="$ci/bin:$PATH" GH_TOKEN=test GITHUB_REPOSITORY=example/formalver
+export PATH="$ci/bin:$PATH" GH_TOKEN=test GITHUB_REPOSITORY=example/formalver PR_TEST_VERIFIED_REF="$deleted"
+out=$(EXISTING_PR=42 "$ci/tools/scripts/approval-changed.sh" 2>"$work/fetch.log")
+printf '%s\n' "$out" | grep -q '^contract_changed=false$'
+# A later unrelated commit must not reverify code already checked by an open PR.
+printf 'another unrelated change\n' >> "$work/other.txt"
+git -C "$work" add other.txt
+git -C "$work" commit -q -m unrelated-after-check
+latest=$(git -C "$work" rev-parse HEAD)
 out=$(EXISTING_PR=42 "$ci/tools/scripts/approval-changed.sh" 2>"$work/fetch.log")
 printf '%s\n' "$out" | grep -q '^contract_changed=false$'
 out=$(EXISTING_PR='' "$ci/tools/scripts/approval-changed.sh" 2>"$work/fetch.log")
 printf '%s\n' "$out" | grep -q '^contract_changed=true$'
-printf '%s\n' "$out" | grep -q "^source_ref=$deleted$"
+printf '%s\n' "$out" | grep -q "^source_ref=$latest$"
+printf 'fn new_wrapper() {}\n' > "$work/contracts/approval/contract/src/lib.rs"
+git -C "$work" add contracts
+git -C "$work" commit -q -m new-contract-after-check
+out=$(EXISTING_PR=42 "$ci/tools/scripts/approval-changed.sh" 2>"$work/fetch.log")
+printf '%s\n' "$out" | grep -q '^contract_changed=true$'
 if PR_TEST_FAIL=1 "$ci/tools/scripts/approval-changed.sh" >"$work/api-error.log" 2>&1; then
   echo 'FAIL: GitHub API failure was ignored' >&2; exit 1
 fi
