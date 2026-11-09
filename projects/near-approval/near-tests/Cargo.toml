@@ -14,7 +14,7 @@ description = "near-sdk unit and differential tests of approval-contract (strate
 [dependencies]
 approval-core = { path = "../source-mirror/contracts/approval/core", features = ["borsh"] }
 approval-contract = { path = "../source-mirror/contracts/approval/contract" }
-near-sdk = { version = "5.29", features = ["unit-testing"] }
+near-sdk = { version = "5.29", default-features = false, features = ["unit-testing"] }
 
 [profile.dev]
 overflow-checks = true
