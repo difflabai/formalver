@@ -2,8 +2,8 @@
 name = "near-approval"
 upstream = "https://github.com/difflabai/trust-framework"
 upstream_path = "contracts/approval"
-pinned_commit = "af2c704ecacdae809c18f27b0d645f771d45cdd3"   # trust-framework main (2026-10-21): MIT publication prep. core/src/lib.rs and contract/src/lib.rs identical to 18f57cb
-last_reviewed = "2026-10-21"
+pinned_commit = "249f932d84b91fbc6f82abd0668cac6c0503fc42"   # trust-framework main (2026-11-02): near-sdk without the unmaintained wee_alloc default (PR #33 spec-approval page). core/src/lib.rs and contract/src/lib.rs identical to af2c704
+last_reviewed = "2026-11-09"
 verus_min_verified = 95     # M5 path A (2026-10-20): twin + property lemmas; run-verus.sh fails below it
 mc1_state_floor = 51568     # recorded at M4 (2026-10-11); MC-1 fails below it
 # RT-CODEHASH: `cargo near build reproducible-wasm` of the pin (sandbox job
@@ -11,8 +11,8 @@ mc1_state_floor = 51568     # recorded at M4 (2026-10-11); MC-1 fails below it
 # `reproducible wasm` job on the pinned main commit: the build metadata names
 # the commit, so a PR-head build of the same source hashes differently.
 # sandbox/results/RT-CODEHASH.json records the same build and moves with it.
-reproducible_wasm_sha256 = "36683fb50050cda51e6831e837f40a442cbe767b03d45cae8ac92602b7d9ef95"
-reproducible_code_hash = "4fPDQYaQdSn6SkD7WYgD5pUrU1d6Ev8FQqE7iEYvUtyJ"
+reproducible_wasm_sha256 = "3a3be0b8be6338555436b7cdd6a4ded2cb60544ccd34a167aaeaa971d88e0323"
+reproducible_code_hash = "4vKbxYH8PY7w1vKVpXteRYKomwpK6Yx53gYfbPPetbfx"
 release_overflow_checks = true  # ASM-COMPILE: check-pin.sh fails unless upstream [profile.release] sets overflow-checks = true
 
 # Status values: unverified | in-progress | verified | verified-with-assumptions | stale
@@ -55,12 +55,12 @@ near_proof_arena = "cb16c4090a82a6179d8e1a23d6e83e74e9d5d017"  # contract v1; to
 
 [source_hashes]             # sha256 at pinned_commit; check-pin.sh recomputes
 "Cargo.toml" = "1cbed4b212bec393ad67cdd2179357355a6b137694c1b604638b2f3e6ee382af"
-"Cargo.lock" = "3ef5ab18d24eb2fb74fc3033c9d2fefa611568b6e401127de8eb91557791b939"
-"README.md" = "7ce9c44210e8c8e743ae284a02f9c76b209a5e1035f37e73f730f6159d3fd75a"
+"Cargo.lock" = "7c4f894d9864737cc7d3d75b091ca7716e9dcab395c7f4da6cba5042a3d6bf96"
+"README.md" = "7058851f9e115db794cb27b9baab34a3ead313184401358c4ddc2c2731133252"
 "core/Cargo.toml" = "86b3fe15cd85d92405c4896d53227132bdd9fa4d6510f6481b713b89748aeca0"
 "core/src/lib.rs" = "b7528a6e54ce5f72bccf6cb3a40bf010f6b5a59b4627a1be6e1102396e5eefed"
 "core/src/tests.rs" = "a5b29506a777012df246763a71d0d6bd7ac8f18c1927e341de766f8eab24c5b9"
-"contract/Cargo.toml" = "e886b7274ffba149d970acf819c21e07617ea7fe3a156d70d9c0b0106b5093ca"
+"contract/Cargo.toml" = "0c4fd1cabd20a4e6a3b420be4ebe4d9edbb9945ebf82685e739d575ad53efeb3"
 "contract/src/lib.rs" = "be9d35ba7a0cca151acf79882872eba18c6cf9078651fae94c35b55b389d0272"
 "sandbox/Cargo.toml" = "662d563b240184cb781f563d8e0bd4fb3dee34b60cbcaee7e2c030d15e48e5cb"
 "sandbox/src/lib.rs" = "955bc6fe5ea34c92f70e479b618046f26ad37637ed96a59c6192982d45b7ce18"

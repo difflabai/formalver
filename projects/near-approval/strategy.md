@@ -10,7 +10,7 @@ readable per request or as a paged log.
 
 | | |
 |---|---|
-| Pinned commit | `af2c704ecacdae809c18f27b0d645f771d45cdd3`, trust-framework `main` (2026-10-21). Publication prep: MIT license, README, SECURITY.md. `core/src/lib.rs` and `contract/src/lib.rs` are identical to `18f57cb`. The `Cargo.toml` license fields and `README.md` changed, and the reproducible wasm hash changed because the build records the commit. Previous pins: `18f57cb`, `8635ca7`, `3426c92`, `5736251`. |
+| Pinned commit | `249f932d84b91fbc6f82abd0668cac6c0503fc42`, trust-framework `main` (2026-11-02). `near-sdk` without the unmaintained `wee_alloc` default. `core/src/lib.rs` and `contract/src/lib.rs` are identical to `af2c704`. `contract/Cargo.toml`, `Cargo.lock` and `README.md` changed, and the reproducible wasm hash changed because the build records the commit. Previous pins: `af2c704`, `18f57cb`, `8635ca7`, `3426c92`, `5736251`. |
 | Crates | `approval-core` (`core/src/lib.rs`, 749 lines incl. docs). A dependency-free state machine, generic over account `A` and key `K`, holding *all* authorization and transition logic. `approval-contract` (`contract/src/lib.rs`, 976 lines incl. tests). A near-sdk 5.29 shell: env → `Caller`, `Store` over `LookupMap`, NEP-297 events, JSON views. |
 | In the TCB via `Cargo.lock` | near-sdk 5.29.1, near-sdk-macros 5.29.1, near-sdk-core 4.2.3, near-sdk-env 0.1.6, near-account-id 2.6.0, near-sys 0.2.14, borsh 1.8.1, serde_json 1.0.151 |
 | Mirror | git submodule `projects/near-approval/source-mirror` (same pattern as ironclaw) |
@@ -20,7 +20,7 @@ dependencies, so Kani and Verus can target **the deployed logic itself**
 rather than a model of it. The shell is thin enough to cover with tests,
 review and wasm inspection.
 
-**Status (2026-10-21, pin `af2c704`).** Every
+**Status (2026-11-09, pin `249f932`).** Every
 milestone is built and green in CI (M5, Verus path A, since 2026-10-19). What keeps the contract short
 of "fully verified" is the spec sign-off. That review happens after the repos are public, and it is an approval recorded by the contract itself. A testnet demonstration exists (`approvals.difflabai.testnet`, deployed from `081a3a6`) but it is not this pin and it is not locked.
 

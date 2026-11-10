@@ -31,16 +31,16 @@ The sandbox checks lockfile compatibility before installing tools or building Wa
 
 ## near-approval
 
-Development Ready. Pin [`af2c704ecacdae809c18f27b0d645f771d45cdd3`](https://github.com/difflabai/trust-framework/commit/af2c704ecacdae809c18f27b0d645f771d45cdd3), trust-framework `main` (2026-10-21). `core/src/lib.rs` and `contract/src/lib.rs` match the previous pin `18f57cb`. The license fields in the `Cargo.toml` files, and the contract README, do not.
+Development Ready. Pin [`249f932d84b91fbc6f82abd0668cac6c0503fc42`](https://github.com/difflabai/trust-framework/commit/249f932d84b91fbc6f82abd0668cac6c0503fc42), trust-framework `main` (2026-11-02). `core/src/lib.rs` and `contract/src/lib.rs` match the previous pin `af2c704`. `near-sdk` is built without its unmaintained `wee_alloc` default, which changes `contract/Cargo.toml`, the lockfile and the contract README.
 
-Reproducible wasm of this pin, from trust-framework's `reproducible wasm` job on that commit:
+Reproducible wasm of this pin, from the sandbox job's `cargo near build reproducible-wasm` of that commit:
 
 | | |
 |---|---|
-| sha256 | `36683fb50050cda51e6831e837f40a442cbe767b03d45cae8ac92602b7d9ef95` |
-| NEAR code hash | `4fPDQYaQdSn6SkD7WYgD5pUrU1d6Ev8FQqE7iEYvUtyJ` |
+| sha256 | `3a3be0b8be6338555436b7cdd6a4ded2cb60544ccd34a167aaeaa971d88e0323` |
+| NEAR code hash | `4vKbxYH8PY7w1vKVpXteRYKomwpK6Yx53gYfbPPetbfx` |
 
-The build records the commit, so this hash is not the hash of `18f57cb` (`BqEdznmvQiCG6XKTgpXbzEptV3GuL3VF274uUqkoseCv`). Same logic. Different artifact.
+The build records the commit, so this hash is not the hash of `af2c704` (`4fPDQYaQdSn6SkD7WYgD5pUrU1d6Ev8FQqE7iEYvUtyJ`). Same logic. Different artifact.
 
 `approvals.difflabai.testnet` is a demonstration, owned by `difflabai.testnet`, deployed from `081a3a6`. Its code hash is `5G334oPHzjDvPLXKUSstbaf3BzUPaj1sWZnDhy5Baauv`. The account still has a full-access key, so it can be redeployed. It is not this pin, and a matching code hash on one read is not a lock.
 
