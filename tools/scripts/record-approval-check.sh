@@ -39,8 +39,12 @@ git -c user.email='github-actions[bot]@users.noreply.github.com' \
 # Only this SHA-specific automation branch may be replaced. The lease
 # refuses to overwrite work added since we checked it; main is never a target.
 expected=$(git ls-remote origin "refs/heads/$branch" | cut -f1)
+# Git over HTTPS takes Basic credentials (as actions/checkout sends them); a
+# bearer header is rejected and git falls back to prompting for a username.
+auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')
+echo "::add-mask::$auth"
 git -c credential.helper= \
-    -c "http.https://github.com/.extraheader=AUTHORIZATION: bearer $GH_TOKEN" \
+    -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
     push --force-with-lease="refs/heads/$branch:$expected" origin "HEAD:refs/heads/$branch"
 
 body=$(mktemp)
