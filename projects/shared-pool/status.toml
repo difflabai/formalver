@@ -1,0 +1,41 @@
+[project]
+name = "shared-pool"
+upstream = "https://github.com/difflabai/shared-pool-controls"
+upstream_path = ""
+pinned_commit = "a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7"   # PR #1 head (feat/shared-pool-controls, 2026-11-12): "Address review: reconcile griefing, broken doc link, CI robustness". Not on main yet: re-pin when the PR merges.
+last_reviewed = "2026-11-11"
+release_overflow_checks = true  # ASM-COMPILE: check-pin.sh fails unless upstream [profile.release] sets overflow-checks = true
+
+# Status values, evidence vocabulary and ceilings: projects/near-approval/strategy.md section 12.
+
+[review]
+spec_reviewer = ""          # empty until a named human who did not write pool-core signs off
+spec_reviewed_at = ""
+
+[tools]
+lean = "4.34.1"
+tla2tools = "1.7.4"
+apalache = "0.47.2"
+kani = "0.68.0"
+cbmc = "6.11.0"
+scryer_prolog = "0.10.0"
+near_sdk = "5.29.1"         # from source-mirror Cargo.lock
+upstream_rust = "1.98"      # source-mirror rust-toolchain.toml
+
+[source_hashes]             # sha256 at pinned_commit; check-pin.sh recomputes
+"Cargo.toml" = "b2e34970efce90df1726c3f1639fa116c1c7c987fb924f60f018a0f32aa0942c"
+"Cargo.lock" = "d7e9d84d9e64001ac2aa51e9c15290f1ba14af85f3a30a52a4e587940a34def1"
+"rust-toolchain.toml" = "5878a36e61292d01952bbaa165e48284703ed79ec46918d407aefccf7709d2f9"
+"crates/core/Cargo.toml" = "5f29e05fedf59163b56ab57c3d760e5614b331523e76a1a6056d8c630707bfd2"
+"crates/core/src/lib.rs" = "9a4eb36cc9690d353f8ec78e4eec6e389a895caccab24ced54994b8a8e7505c4"
+"crates/core/src/fixtures.rs" = "b8168b743509b5996a7d0b1a363341d17278cc4689b60014ad3702d9cc791389"
+"crates/core/src/tests.rs" = "22037750d5521113c53ff801ecbad8200b0d7de19055c786b95cd68ece5144e4"
+"crates/contract/Cargo.toml" = "fa1906e2a7bee9593eff9fdecd957a6f3a5bb4072ac11e492363304062f545f2"
+"crates/contract/src/lib.rs" = "6ee32c1e4b05934c69ef4a338c58f13f658fc55b3bc132c832ae762c9fe29784"
+"crates/executor/Cargo.toml" = "b75fb69980e7b0c06926096c14927e96ecb6372760a1edaa33457c6f9b9f8804"
+"crates/executor/src/lib.rs" = "917d0dcc667a7f55f963313b495e5bf8067f22f80b206543f12b8332e1d005c5"
+"crates/sandbox/Cargo.toml" = "24b6e0e946710ca6e7f7f508249e0d32cc36a2d12c1bf9a31c4dad079ad85e03"
+"crates/sandbox/tests/integration.rs" = "eca6e156ef165a9b50720fd95d4535ca964b382e5ee4a14022fc724f3a5fdd34"
+"docs/spec.md" = "8b3a03f0d6aed6545f1a6edc617b1d5c8a795df15bbb2a573f67f1baf21be3e6"
+"docs/api.md" = "1730c10d46af74772c49fbf0c54ce27f6e827b3b536e286adc1c92ad098e840c"
+"docs/verification-handoff.md" = "07bb0a92806c130bbd0a591928ecce91d831dd22284441063cbfcf7e1d5116d9"

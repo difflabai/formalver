@@ -5,3 +5,7 @@
 	path = projects/near-approval/source-mirror
 	url = https://github.com/difflabai/trust-framework.git
 	shallow = true
+[submodule "projects/shared-pool/source-mirror"]
+	path = projects/shared-pool/source-mirror
+	url = https://github.com/difflabai/shared-pool-controls.git
+	shallow = true

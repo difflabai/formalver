@@ -9,6 +9,11 @@ exclude = [
     "projects/near-approval/kani",
     "projects/near-approval/near-tests",
     "projects/near-approval/sandbox",
+    "projects/shared-pool/source-mirror",
+    "projects/shared-pool/kani",
+    "projects/shared-pool/conformance",
+    "projects/shared-pool/near-tests",
+    "projects/shared-pool/sandbox",
     "near-proofs",
 ]
 resolver = "2"
