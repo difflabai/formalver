@@ -340,8 +340,8 @@ with `inv_init`, `inv_step` and `reach_inv`.
 
 | ID | Statement | Layer(s) | Evidence | Status |
 |---|---|---|---|---|
-| RD-PREVIEW | `preview.allowed` ⇔ `candidate` Ok; allowed and version < u32::MAX ⇒ submit Ok; no mutation, no panic | kani, near-tests, prolog | Prolog `preview_allowed` over a request grid (model only); near-tests: the shell's `preview` equals the core's after every SH-8 host call (the shell half) | partial: shell half tested, core half model only; Kani pending |
-| RD-BEST | `best_quantity` is sound and minimal as documented | kani, prolog | Prolog `best_quantity` against brute force on small cases (model only) | partial: model only; Kani pending |
+| RD-PREVIEW | `preview.allowed` ⇔ `candidate` Ok; allowed and version < u32::MAX ⇒ submit Ok; no mutation, no panic | kani, near-tests, prolog | Prolog `test_reads` (COV-2): the real core's `preview` (allowed, reason, candidate, energies) on 36,797 requests at 1,246 trace states (`reads.txt`) equals the model's; the generator checks that `submit` agrees with each of those previews on the real core; Prolog `preview_allowed` over a request grid (model); near-tests: the shell's `preview` equals the core's after every SH-8 host call (the shell half) | partial: tested (shell half; core half by differential against the model); Kani pending |
+| RD-BEST | `best_quantity` is sound and minimal as documented | kani, prolog | Prolog `test_reads` (COV-2): the real core's `best_quantity` on the same 36,797 requests equals the model's `best_quantity/4`; Prolog `best_quantity` against brute force on small cases (model) | partial: tested by differential against the model; Kani pending |
 
 ### 5.6 Liveness
 
@@ -523,7 +523,7 @@ rather than the model.
 ## 8. Prolog
 
 Results: `prolog/RESULTS.md`. Scryer Prolog 0.10.0. The final run
-(2026-11-12, 212 traces) exits 0 in 332.4 s.
+(2026-11-12, 212 traces, with the COV-2 reads) exits 0 in 510.5 s.
 
 | File | Contents |
 |---|---|
@@ -532,7 +532,7 @@ Results: `prolog/RESULTS.md`. Scryer Prolog 0.10.0. The final run
 | `requirements/traceability.pl` | `property/3`, which is §5; `trace_row/2`, which maps requirements to properties |
 | `model/pool_machine.pl` | `step/4`, written from the docs. It walks the guard table in order, so the model's behaviour is the requirement table. 16 places are tagged `CODE-ONLY`. Reads: `admissible/3`, `preview_allowed/3`, `best_quantity/4`. |
 | `extract.py` → `extracted/` | Facts from the core and contract `lib.rs`, `fixtures.rs`, `SharedPool.tla` and `Props.tla`. A narrow parser that fails loudly on unknown constructs. `run.sh` fails on a regeneration diff. |
-| `verification/`, `tests/`, `mutants/` | C-1..C-6, MC-1, MC-2 and the property checkers; four suites; 17 model, 2 requirements (r01, r02) and 9 code mutants |
+| `verification/`, `tests/`, `mutants/` | C-1..C-6, MC-1, MC-2, the COV-2 reads differential and the property checkers; five suites; 20 model, 2 requirements (r01, r02), 9 code and 2 reads mutants (d01, d02: a mutated core, through a rebuilt generator) |
 
 **Results.**
 - **C-1..C-6 pass** (§5.10). C-5 reproduces F-2 and F-4, and fails if
@@ -552,8 +552,20 @@ Results: `prolog/RESULTS.md`. Scryer Prolog 0.10.0. The final run
   on every core state.
 - **Unit tests:** 29 `step/4` tests pass (0.5 s), including the F-1..F-6
   witnesses and the RD checks on the model.
+- **Reads differential (COV-2).** `test_reads` rebuilds each of the 1,246
+  states of `conformance/traces/reads.txt` and compares the real core's
+  `preview` (allowed, reason, candidate, energies) and `best_quantity` on
+  36,797 requests with the model: 0 divergences (3 tests, about 36 s).
+  1,678 requests are allowed; every error `candidate` can return from these
+  states occurs; 5,739 have a best quantity, 1,617 of them after an energy
+  tie (taken to the larger units). Mutants m19 (preview ignores paused) and
+  m20 (best_quantity ignores the request's version) are killed only by
+  this suite. Reads mutant d01 (the core's ties broken to the smaller
+  units) gives 1,617 divergences. Reads mutant d02 (the core's `preview`
+  allows a `Paused` request) stops the generator: `preview` and `submit`
+  disagree. This is testing, not proof.
 - **Canaries and mutants.** Each of three suites exits 1 with only its
-  canary failing. 28 of 28 mutants are killed (258.3 s summed).
+  canary failing. 33 of 33 mutants are killed (400.5 s summed).
 
 **What it does not show.**
 - **Independence (ASM-SPEC).** Unlike near-approval's M4, this layer's
@@ -562,8 +574,10 @@ Results: `prolog/RESULTS.md`. Scryer Prolog 0.10.0. The final run
   either.
 - **Bounds.** MC-1 has at most 3 records, 2 or 3 times, and fixed
   observation vectors. C-5's release search covers two records from each
-  fixture's init state. RD-PREVIEW and RD-BEST are checked on the model
-  only. C-2 skips five kinds of code error site that cannot fire from an
+  fixture's init state. RD-PREVIEW's core half and RD-BEST are tested by
+  a differential against the model on 36,797 recorded requests at 1,246
+  trace states (testing, not proof); other states and requests are not
+  covered. C-2 skips five kinds of code error site that cannot fire from an
   INV state.
 - **Extraction (ASM-TOOLS).** A construct inside `extract.py`'s grammar
   could be misread. Code mutants c01-c09 show it sees their changes.
@@ -675,6 +689,7 @@ replacement (NT-F3).
 `conformance/` is a standalone crate over the pinned `pool-core`.
 `cargo run --release -- --out traces/core.txt` writes the traces, and
 `--check traces/core.txt` regenerates them and fails on any difference.
+`--reads-out` and `--reads-check` do the same for `traces/reads.txt`.
 The format is Prolog terms, documented at the top of `src/main.rs`, with
 accounts `o`, `a1`, `a2`, `x1`, `x2` and `z`.
 
@@ -696,6 +711,22 @@ calls, 2,547 of them Ok (no-ops included):
 The traces come from the real core, so a disagreement is either a model
 bug or a finding in the code. Every replay compares each result and the
 whole post-state.
+
+`traces/reads.txt` (COV-2, sha256 `5545add5…59325ef`, 2.9 MB) holds the
+real core's two reads at 1,246 states of those traces: every state of
+traces 0-5 and 206-211 (but `full`, 207), every 10th state of the others,
+and each final state; a state equal to the one read just before it, at the
+same time, is skipped. Each state has 18-61 requests (36,797 in all): every
+recipe's actor with units 0, 1, 2, max_units, max_units + 1, 100, 101 and
+10^6; a recipe index past the end; for one recipe, every account as
+caller, version + 1 and (above 0) version − 1, expiry at now − 1, now,
+now + 86,400 and now + 86,401, and with a max age, now at the freshness
+edge and 1 s past it. Each line records `preview`
+(allowed, reason, candidate, before, after) and `best_quantity`. The
+generator fails if a read class is never reached (every `candidate`
+error, both Energy and both Arithmetic exits, a tie, a best below the
+largest allowed units) or if `submit` on a copy of the pool disagrees with
+a `preview`. Prolog `test_reads` compares every line with the model (§8).
 
 | Replayer | ID | Result |
 |---|---|---|
@@ -737,6 +768,7 @@ whole post-state.
 | docs ↔ code facts | C-1..C-4 (`extract.py`) |
 | docs ↔ TLA+ guard order and edges | C-2, C-3 |
 | Prolog `step/4`, TLA+, Lean ↔ real core | MC-2, REF-5, REF-5L (traces); REF-1..3 for TLA+ (Kani, pending) |
+| Prolog reads ↔ real core `preview`, `best_quantity` | COV-2 (`reads.txt`, `test_reads`) |
 | Lean guard lists ↔ TLA+ `GuardOrder` | LEAN-GUARD, compared by hand |
 | real core ↔ shell (host, both wasm builds) | SH-8 |
 | wasm ↔ NEAR runtime | sandbox RT-*, with the host core as oracle |
@@ -841,10 +873,10 @@ the path filters include it again. `sandbox` runs only on
 |---|---|---|
 | `pin` | `tools/scripts/check-pin.sh shared-pool` | gitlink ≠ `pinned_commit`; `[source_hashes]` drift; no `overflow-checks = true`. Every job but `status-lint` needs it. |
 | `status-lint` | `tools/scripts/check-status.sh shared-pool` | evidence not allowed for its layer; a status without its artifact; a status above its ceiling |
-| `conformance` | `cargo run --release --locked -- --check traces/core.txt` | the checked-in traces differ from the generator's output |
+| `conformance` | `cargo run --release --locked -- --check traces/core.txt`, then `-- --reads-check traces/reads.txt` | the checked-in traces or reads differ from the generator's output; a read class not reached; `preview` and `submit` disagree |
 | `tla` | `tla/run.sh safety liveness trace` (about 10 min), then `run.sh mutants` | a check failing; a witness or required violation passing; a mutant surviving |
 | `lean` | `lean/run.sh` (about 4 min) | a `sorry` or forbidden construct; an extra axiom; a canary compiling; a REF-5L difference; a mutant surviving |
-| `prolog` | `prolog/run.sh` (about 5.5 min) | a suite failing; a loader warning; extraction drift; a canary passing; a mutant surviving |
+| `prolog` | `prolog/run.sh` (about 9 min) | a suite failing; a loader warning; extraction drift; a canary passing; a mutant surviving |
 | `near-unit` | `near-tests/run.sh all`: the PROP-tag check, tests, surface, and the 21 mutants (about 9 min) | a tag problem (`check-tags.py`); a test failing; lockfile drift; a surface diff (SURF-2 stays expected-fail); a mutant surviving |
 | `sandbox` | `sandbox/run.sh` (about 7 min warm) | any failure; lockfile drift |
 | `plain`, `kani` | Not in the workflow yet; added when the Kani layer lands. The harness bodies in random mode, and the Kani harnesses (§6). | any failure; an unsatisfied cover; `h_canary` passing |
@@ -1055,7 +1087,9 @@ vacuous.
   u32 type and all strings are not modelled.
 - **Panics (ROB-1).** Not modelled. `Inv` shows every index the guards
   read is in range, but not that the Rust never panics.
-- **Not stated in Lean:** RD-PREVIEW, RD-BEST and the shell. LIVE-2
+- **Not stated in Lean:** RD-PREVIEW, RD-BEST and the shell. (The
+  Prolog layer tests the two reads of the real core against its model,
+  COV-2, §8.) LIVE-2
   (LIVE-1 is its per-state half, and `f1_forever` its counterexample).
   TX-SUBMIT..TX-OBSERVE as separate theorems: they are the model's
   definitions plus REF-5L.

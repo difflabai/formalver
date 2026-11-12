@@ -138,8 +138,12 @@ jobs:
     # The shared link between the layers: traces/core.txt (212 traces, 8,804
     # calls) must regenerate byte for byte from the pinned pool-core. TLA+,
     # Lean, Prolog and the shell replay this file, so a stale one would make
-    # their replays evidence about other code. Seconds of work; pool-core has
-    # no dependencies.
+    # their replays evidence about other code. traces/reads.txt (COV-2: the
+    # core's preview and best_quantity at 1,246 states, 36,797 requests,
+    # compared with the Prolog model by prolog/tests/test_reads.pl) must
+    # regenerate too; that run also fails if preview and submit disagree on
+    # the real core or a read class is never reached. Seconds of work;
+    # pool-core has no dependencies.
     needs: pin
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 20
@@ -159,6 +163,9 @@ jobs:
       - name: traces/core.txt is current
         working-directory: projects/shared-pool/conformance
         run: cargo run --release --locked -- --check traces/core.txt
+      - name: traces/reads.txt is current
+        working-directory: projects/shared-pool/conformance
+        run: cargo run --release --locked -- --reads-check traces/reads.txt
 
   # No Kani jobs yet. projects/shared-pool/kani/ is still being built and has
   # no RESULTS.md. When it lands, add plain and kani jobs sized from that file
@@ -246,12 +253,14 @@ jobs:
 
   prolog:
     # Requirement checks C-1..C-6, MC-1 (three small universes), MC-2 (every
-    # conformance trace through step/4), the canaries, the PROP tags and the
-    # 28 mutants. extract.py reads the pinned sources, so this job needs the
-    # submodule. C-6 compares the catalogue in traceability.pl with section 5
-    # of projects/shared-pool/strategy.md (the path filters include that file
-    # again); a missing file or section fails it.
-    # 332 s on a 10-core Mac.
+    # conformance trace through step/4), COV-2 (test_reads: the core's
+    # preview and best_quantity in traces/reads.txt against the model), the
+    # canaries, the PROP tags and the 33 mutants (the 2 reads mutants patch
+    # the core and rebuild the conformance generator with cargo).
+    # extract.py reads the pinned sources, so this job needs the submodule.
+    # C-6 compares the catalogue in traceability.pl with section 5 of
+    # projects/shared-pool/strategy.md (the path filters include that file
+    # again); a missing file or section fails it. 511 s on a 10-core Mac.
     needs: pin
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 60

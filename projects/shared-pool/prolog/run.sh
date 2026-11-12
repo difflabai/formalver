@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # run.sh -- the shared-pool Prolog layer: requirement checks C-1..C-6, the
-# reference model, MC-1 (bounded exploration) and MC-2 (conformance replay).
+# reference model, MC-1 (bounded exploration), MC-2 (conformance replay) and
+# the COV-2 reads differential (tests/test_reads.pl: the real core's preview
+# and best_quantity in conformance/traces/reads.txt against the model).
 #
 # PROP: C-1 C-2 C-3 C-4 C-5 C-6 MC-1 MC-2
 #
@@ -12,19 +14,26 @@
 #      and no suite may print a loader "Warning:" (e.g. discontiguous test/2
 #      clauses overwritten, which would silently drop tests)
 #   3. canary: with SHARED_POOL_PROLOG_CANARY=1 each fast suite must exit 1
-#      (a failing test makes the file fail).
+#      (a failing test makes the file fail). test_mc1 and test_reads have no
+#      canary run; mutants m12, m15, m17 (test_mc1) and m18-m20 (test_reads)
+#      show that each exits non-zero on a failing test.
 #   4. PROP tags: every catalogue property that lists the prolog layer is
 #      tagged `PROP: <ID>` in a file of this directory, and every tagged ID
 #      is in the catalogue.
-#   5. mutants: each mutants/{model,requirements,code}/*.patch is applied to
-#      a scratch copy (code mutants: extracted facts are regenerated from the
-#      mutated source), and every `# expect: <suite> <test-name prefix>` line
-#      must hold: the suite exits non-zero AND prints `FAIL <prefix>`.
+#   5. mutants: each mutants/{model,requirements,code,reads}/*.patch is
+#      applied to a scratch copy (code and reads mutants: extracted facts are
+#      regenerated from the mutated source), and every
+#      `# expect: <suite> <test-name prefix>` line must hold: the suite exits
+#      non-zero AND prints `FAIL <prefix>`. Reads mutants (the code side of
+#      COV-2) patch the core, rebuild the conformance generator from it and
+#      regenerate core.txt and reads.txt in the copy (needs cargo). Their
+#      `# expect: generator <message>` means the generator itself exits
+#      non-zero and prints <message>.
 #
 # C-6 reads the property catalogue from ../strategy.md section 5, so that
 # file must be present (a missing one fails C-6).
 #
-# usage: projects/shared-pool/prolog/run.sh        (about 5 minutes)
+# usage: projects/shared-pool/prolog/run.sh        (about 9 minutes)
 #        PROLOG_LOGS=dir run.sh                   (keep the logs in dir)
 set -uo pipefail
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -121,49 +130,78 @@ fi
 # --- 5. mutants -------------------------------------------------------------
 # A scratch copy laid out like the repository: prolog/, strategy.md (C-6's
 # catalogue) and the sources it extracts from are copied; the traces and TLA+
-# are linked read-only.
-mirror() { # <dir>
+# are linked read-only. For a reads mutant the conformance crate and the
+# core's manifests are copied instead, and the traces are regenerated.
+mirror() { # <dir> [reads]
   local t=$1
   mkdir -p "$t/projects/shared-pool/source-mirror/crates/core" "$t/projects/shared-pool/source-mirror/crates/contract"
   cp -R "$HERE" "$t/projects/shared-pool/prolog"
   cp "$SP/strategy.md" "$t/projects/shared-pool/strategy.md"
   cp -R "$SP/source-mirror/crates/core/src" "$t/projects/shared-pool/source-mirror/crates/core/src"
   cp -R "$SP/source-mirror/crates/contract/src" "$t/projects/shared-pool/source-mirror/crates/contract/src"
-  ln -s "$SP/conformance" "$t/projects/shared-pool/conformance"
+  if [ "${2:-}" = reads ]; then
+    cp "$SP/source-mirror/Cargo.toml" "$t/projects/shared-pool/source-mirror/Cargo.toml"
+    cp "$SP/source-mirror/crates/core/Cargo.toml" "$t/projects/shared-pool/source-mirror/crates/core/Cargo.toml"
+    mkdir -p "$t/projects/shared-pool/conformance/traces"
+    cp -R "$SP/conformance/src" "$SP/conformance/Cargo.toml" "$SP/conformance/Cargo.lock" "$t/projects/shared-pool/conformance/"
+  else
+    ln -s "$SP/conformance" "$t/projects/shared-pool/conformance"
+  fi
   [ -e "$SP/tla" ] && ln -s "$SP/tla" "$t/projects/shared-pool/tla"
   return 0
 }
 killed=0; survived=0
-for p in "$HERE"/mutants/model/*.patch "$HERE"/mutants/requirements/*.patch "$HERE"/mutants/code/*.patch; do
+for p in "$HERE"/mutants/model/*.patch "$HERE"/mutants/requirements/*.patch "$HERE"/mutants/code/*.patch "$HERE"/mutants/reads/*.patch; do
   [ -f "$p" ] || continue
   id=$(basename "$p" .patch)
-  t="$SCRATCH/$id"; mkdir -p "$t"; mirror "$t"
+  kind=$(basename "$(dirname "$p")")
+  t="$SCRATCH/$id"; mkdir -p "$t"; mirror "$t" "$kind"
   t0=$(now)
   if ! patch -s -p1 -d "$t/projects/shared-pool" <"$p" >"$LOGS/mut-$id-apply.log" 2>&1; then
     cat "$LOGS/mut-$id-apply.log"; fail "mutant $id does not apply"; rm -rf "$t"; continue
   fi
-  case "$p" in
-    */code/*)
+  case "$kind" in
+    code|reads)
       if ! python3 -I "$t/projects/shared-pool/prolog/extract.py" >"$LOGS/mut-$id-extract.log" 2>&1; then
         cat "$LOGS/mut-$id-extract.log"; fail "mutant $id: extract.py failed on the mutated source"; rm -rf "$t"; continue
       fi
-      if cmp -s "$HERE/extracted/code_facts.pl" "$t/projects/shared-pool/prolog/extracted/code_facts.pl"; then
+      if [ "$kind" = code ] && cmp -s "$HERE/extracted/code_facts.pl" "$t/projects/shared-pool/prolog/extracted/code_facts.pl"; then
         fail "mutant $id: extracted facts did not change"
       fi ;;
   esac
+  if [ "$kind" = reads ]; then
+    # One cargo target directory for all reads mutants; pool-core has no
+    # dependencies, so each rebuild takes seconds.
+    glog="$LOGS/mut-$id-generator.log"
+    (cd "$t/projects/shared-pool/conformance" \
+      && CARGO_TARGET_DIR="$SCRATCH/.cargo-target" cargo run --release --locked -- \
+           --out traces/core.txt --reads-out traces/reads.txt) >"$glog" 2>&1
+    echo $? >"$glog.rc"
+    if [ "$(cat "$glog.rc")" -ne 0 ] && ! grep -q '^# expect: generator ' "$p"; then
+      tail -20 "$glog"; fail "mutant $id: the generator failed on the mutated core"; rm -rf "$t"; continue
+    fi
+    if [ "$(cat "$glog.rc")" -eq 0 ] && cmp -s "$SP/conformance/traces/reads.txt" "$t/projects/shared-pool/conformance/traces/reads.txt"; then
+      fail "mutant $id: reads.txt did not change"
+    fi
+  fi
   ok=1; n_exp=0; why=""
   while IFS= read -r line; do
     set -- $line; suite=$3; shift 3; prefix="$*"
     n_exp=$((n_exp + 1))
     log="$LOGS/mut-$id-$suite.log"
-    if [ ! -f "$log.rc" ]; then
-      run_suite "$t/projects/shared-pool/prolog/tests" "$suite.pl" "$log"; echo $? >"$log.rc"
+    if [ "$suite" = generator ]; then
+      want="$prefix"
+    else
+      want="FAIL $prefix"
+      if [ ! -f "$log.rc" ]; then
+        run_suite "$t/projects/shared-pool/prolog/tests" "$suite.pl" "$log"; echo $? >"$log.rc"
+      fi
     fi
-    rc=$(cat "$log.rc")
-    if [ "$rc" -ne 0 ] && grep -qF "FAIL $prefix" "$log"; then
+    rc=$(cat "$log.rc" 2>/dev/null || echo none)
+    if [ "$rc" != 0 ] && [ "$rc" != none ] && grep -qF "$want" "$log"; then
       why="$why $suite"
     else
-      ok=0; why="$why $suite(exit $rc; want FAIL $prefix)"
+      ok=0; why="$why $suite(exit $rc; want $want)"
     fi
   done < <(grep '^# expect: ' "$p")
   dt=$(secs "$t0" "$(now)")

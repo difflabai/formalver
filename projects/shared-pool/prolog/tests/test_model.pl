@@ -293,7 +293,8 @@ test('observe: owner, all terminal, bounded values of the right length (spec:54)
     S = pool(_, _, _, 150, _, _) )).
 
 %%% ========================================================
-%%% Reads (spec:27; model only: not compared with the code)
+%%% Reads (spec:27) on the model. test_reads.pl compares the real core's
+%%% preview and best_quantity with the model (COV-2).
 %%% ========================================================
 
 test('RD-PREVIEW (model): preview_allowed <=> submit Ok, over a request grid', (

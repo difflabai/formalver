@@ -11,17 +11,23 @@ and python3 for `extract.py` (run with `-I`, stdlib only). Conformance traces:
 `05c0deb4c69e339ccdcb564ec8f35dbd545e2a94ef8ff1f367e413e1f9377818` (212 traces,
 8,804 calls, generated from the real core; traces 206-208 reach `Arithmetic`
 (submit, and F-2b's release `Arithmetic`) and `Full`, and traces 209-211
-reproduce F-2's `Bounds` form, F-4 and F-6). Property catalogue:
+reproduce F-2's `Bounds` form, F-4 and F-6). Reads (COV-2):
+`conformance/traces/reads.txt`, sha256
+`5545add52f2d6f99e77924abe7b9a17252a6e01ab6c508ef9a157989d59325ef` (the real
+core's `preview` and `best_quantity` on 36,797 requests at 1,246 states of
+those traces, written by the same generator). Property catalogue:
 `projects/shared-pool/strategy.md` §5 (97 IDs), which C-6 reads. Run:
 `projects/shared-pool/prolog/run.sh` (optional `PROLOG_LOGS=<dir>`). Final run on
-2026-11-12, after SH-11 joined the catalogue: exit 0 in 329.2 s,
+2026-11-12, after the COV-2 reads differential and its reads mutants were
+added: exit 0 in 510.5 s,
 `=== ALL PROLOG CHECKS PASSED ===` (suites, canaries, PROP tags
 `catalogue 97, prolog layer 39, tagged 39`, and
-`mutants: 28 killed, 0 survived`).
+`mutants: 33 killed, 0 survived`).
 
 Evidence vocabulary (near-approval strategy §12): this layer gives `check`
 (C-1..C-6), `model-check` (MC-1, LIVE-2) and `test` (the MC-2 replay, the step
-properties checked on the real core's traces and the step/4 unit tests).
+properties checked on the real core's traces, the COV-2 reads differential and
+the step/4 unit tests).
 
 ## Layout
 
@@ -37,16 +43,17 @@ properties checked on the real core's traces and the step/4 unit tests).
 | `verification/model_check.pl` | MC-1: breadth-first exploration of three universes through `step/4`; dead records; release-blocked states. |
 | `verification/props.pl` | Invariants (INV-WF, INV-LEDGER, INV-HARD, INV-HEALTHY, INV-DEP, INV-VER), step properties (TX-0, TX-NOOP, TX-VER, AUTH-1, STALE-1, ADM-1, ADM-2, HARD-STEP, DEP-1, LIFE-1, ASYNC-1, TERM-1, OBS-1, PAUSE-1) and LIVE-1. MC-1 and MC-2 both use them. |
 | `verification/{mc2,traces,util}.pl` | The MC-2 replay and the trace reader. |
-| `tests/test_{requirements,model,mc1,mc2}.pl` | The suites (`run_tests`), via `tests/support/harness.pl`. |
-| `mutants/{model,requirements,code}/*.patch` | 17 model mutants, 2 requirements mutants and 9 code mutants, each with `# expect: <suite> <test prefix>` lines. |
+| `verification/reads.pl` | COV-2: reads `reads.txt`, rebuilds each state and compares the real core's reads with the model's, field by field. |
+| `tests/test_{requirements,model,mc1,mc2,reads}.pl` | The suites (`run_tests`), via `tests/support/harness.pl`. |
+| `mutants/{model,requirements,code,reads}/*.patch` | 20 model mutants, 2 requirements mutants, 9 code mutants and 2 reads mutants, each with `# expect: <suite> <test prefix>` lines. A reads mutant patches the core; the generator is rebuilt from it and writes new traces. |
 | `run.sh` | The runner. |
 
 `run.sh` steps:
 1. `extract.py --check`: regeneration gives no diff.
 2. Each suite must exit 0 with no loader `Warning:` in its log. A discontiguous predicate silently drops clauses, so a warning fails the step.
-3. Canaries: `test_requirements`, `test_model` and `test_mc2` each run with `SHARED_POOL_PROLOG_CANARY=1` and must exit 1 with only the canary test failing.
+3. Canaries: `test_requirements`, `test_model` and `test_mc2` each run with `SHARED_POOL_PROLOG_CANARY=1` and must exit 1 with only the canary test failing. `test_mc1` and `test_reads` have no canary run; their mutants show they exit non-zero on a failing test.
 4. PROP tags: every catalogue ID with the prolog layer is tagged in a `.pl/.py/.sh` file here, and no tag is unknown.
-5. Mutants: each patch is applied to a scratch copy of `prolog/` and `strategy.md` (code mutants patch a copy of the source mirror and re-extract; requirements mutants patch `traceability.pl`). Every `# expect:` suite must exit non-zero and print `FAIL <prefix>`.
+5. Mutants: each patch is applied to a scratch copy of `prolog/` and `strategy.md` (code mutants patch a copy of the source mirror and re-extract; requirements mutants patch `traceability.pl`). Every `# expect:` suite must exit non-zero and print `FAIL <prefix>`. Reads mutants (the code side of COV-2) also patch a copy of the core, rebuild the conformance generator from it with cargo, and write `core.txt` and `reads.txt` into the copy; the step fails if `reads.txt` does not change. `# expect: generator <message>` means the generator itself exits non-zero and prints the message.
 
 ## Results
 
@@ -65,11 +72,12 @@ properties checked on the real core's traces and the step/4 unit tests).
 | MC-1 suite total | | | 34.1 s |
 | MC-2: every trace replayed through `step/4` from the code's pre-state; result and post-state compared exactly; invariants, step properties and LIVE-1 checked on the code's own states | MC-2, TX-*, INV-*, LIVE-1 | 0 divergences, 0 violations | 212 traces, 8,804 calls (2,547 Ok, 494 of them no-ops); every op kind Ok and all 15 error kinds the code can return from an INV state (incl. `full`, `arithmetic`); traces 0 and 209-211 also checked for their findings' shapes; suite (19 tests) 6.3 s |
 | step/4 unit tests (doc-cited), including the F-1..F-6 witnesses and the RD-PREVIEW/RD-BEST model checks | TX-*, RD-* | 29 pass | 0.4 s |
+| COV-2 reads differential: at each state of `reads.txt` the real core's `preview` (allowed, reason, candidate, before, after) and `best_quantity` equal the model's `preview_allowed/3`, first failing submit guard (`classify/3`), `add_vec/4` candidate, `energy/3` and `best_quantity/4`; coverage; a corrupted read is reported in each field | RD-PREVIEW, RD-BEST | 0 divergences | 1,246 states, 36,797 requests: 1,678 allowed, 35,119 rejected (paused 4,872, stale 1,895, expired 3,225, snapshot_expired 881, full 20, invalid_recipe 2,090, unauthorized 5,225, invalid_units 12,038, prerequisite 641, arithmetic 36, bounds 3,388, energy 808); candidate some 28,555, none 8,242; best some 5,739, none 31,058, 1,732 of the bests for units above MAX_UNITS; suite (3 tests) 35.9 s |
 | Requirements suite (C-1..C-6 and their non-vacuity tests, including C-6's comparison on a dropped, added, repeated and relabelled ID and its strategy.md reader on small documents) | C-* | 15 pass | 10.7 s |
 | Canaries | vacuity | each of the three suites exits 1 with only the canary failing | |
 | Planted faults (in `test_mc2`): each step-property checker fires on a corrupted real call and stays silent on the real one (TX-0, TX-NOOP, TX-VER, AUTH-1, STALE-1, ADM-1, ADM-2, HARD-STEP, DEP-1, LIFE-1, ASYNC-1, TERM-1, OBS-1, PAUSE-1); a corrupted trace shows as a divergence with its trace id and index. In `test_model`: the INV-* and LIVE-1 checkers fire on corrupted states. | vacuity | pass | |
 | PROP tags | | every prolog-layer catalogue ID is tagged; no unknown tag | 39 of 97 |
-| Mutants | | 28 of 28 killed | 256.2 s summed |
+| Mutants | | 33 of 33 killed | 400.5 s summed |
 
 MC-1 bounds. The exploration state is pool + clock + ghost. Time is monotone
 (ASM-TIME) over each universe's time set: wedge {100, 200}, healthy {100, 150,
@@ -200,8 +208,9 @@ and the model tags it `CODE-ONLY`:
 
 ## Mutants
 
-All 28 are killed. "Killed" means every `# expect:` suite exits non-zero and
-prints `FAIL <prefix>`.
+All 33 are killed. "Killed" means every `# expect:` suite exits non-zero and
+prints `FAIL <prefix>` (for `# expect: generator <message>`: the generator
+exits non-zero and prints the message).
 
 | Mutant | What it changes | Killed by |
 |---|---|---|
@@ -222,6 +231,9 @@ prints `FAIL <prefix>`.
 | m15-release-adds | TERM-1: cancellation adds the reservation instead of subtracting it | test_model, test_mc2, test_mc1 (healthy) |
 | m16-guard-order-paused-stale | C-2: the specified submit order checks Stale before Paused | test_requirements (C-2), test_model, test_mc2 |
 | m17-release-no-bounds | F-2 hidden: cancel and settle(false) skip the bounds check | test_requirements (C-5), test_mc2, test_mc1 (reliance) |
+| m18-best-tie-smaller | RD-BEST: an energy tie in best_quantity goes to the smaller units | test_model (RD-BEST), test_reads (1,617 divergences) |
+| m19-preview-ignores-paused | RD-PREVIEW: preview_allowed skips the paused check | test_reads only (181 divergences) |
+| m20-best-request-version | RD-BEST: best_quantity checks each quantity at the pool's version, not the request's | test_reads only (637 divergences) |
 | r01-property-dropped | C-6: `traceability.pl` loses the TLA-IND row (nothing else names it) | test_requirements (C-6: `strategy_id_not_in_catalogue('TLA-IND', _)`; the ID and layer counts) |
 | r02-layer-changed | C-6: NUM-2's layer list gains `tla` | test_requirements (C-6: `layers_differ('NUM-2', _, strategy([kani,lean]), catalogue([kani,lean,tla]))`; the layer count) |
 | c01-submit-stale-before-paused | core checks Stale before Paused | test_requirements (C-2) |
@@ -233,6 +245,26 @@ prints `FAIL <prefix>`.
 | c07-cancel-owner-dropped | the core no longer lets the owner cancel | test_requirements (C-1) |
 | c08-fixture-self-executor | a hiring recipe's actor is its executor | test_requirements (C-5, CASH-SELF) |
 | c09-validate-rejects-self-executor | F-4 fixed upstream: validate rejects actor = executor | test_requirements (C-5: `known_finding_not_reproduced`) |
+| d01-best-tie-smaller | RD-BEST, code side: the core's best_quantity breaks an energy tie to the smaller units | test_reads (1,617 `best` divergences) |
+| d02-preview-allows-paused | RD-PREVIEW, code side: the core's preview allows a request that candidate rejects as Paused | the generator ("preview and submit disagree", exit 1) |
+
+m19 and m20 pass `test_requirements`, `test_model`, `test_mc1` and
+`test_mc2`; only `test_reads` kills them. d01 is m18's edit made in the
+real core instead of the model. m18 is also killed by
+`test_model`'s brute-force RD-BEST test.
+
+**Code side of COV-2 (d01, d02).** These two mutants patch a copy of
+`pool-core` (never `source-mirror/` itself). `run.sh` rebuilds the generator
+from the copy and writes the copy's `core.txt` and `reads.txt`.
+- d01 changes `best_quantity`'s tie-break from `Reverse(units)` to `units`
+  (ties to the smaller units). `core.txt` is unchanged. `reads.txt` changes on
+  1,617 request lines (the 1,617 requests with an energy tie), and `test_reads`
+  fails with 1,617 `best` divergences (first: trace 5, call 1, request 11,
+  `req(a2, 1, 2, 0, 150, 100)`, code `some(1)`, model `some(2)`). CI's
+  `--reads-check` on the committed file would fail too.
+- d02 makes `preview` report `allowed` for a `Paused` result. The generator
+  stops with "preview and submit disagree" (exit 1) before it writes
+  `reads.txt`, so the generator's own check kills it, not `test_reads`.
 
 ## What is not shown
 
@@ -254,11 +286,16 @@ prints `FAIL <prefix>`.
   never reach a version near u32::MAX, so F-5 has a step/4 witness only, and
   the version guard is checked only by C-2 (order) and the step/4 unit tests.
   Trace 210 is the only trace config with actor = executor.
-- **Reads.** RD-PREVIEW and RD-BEST are checked on the model only: preview
-  allowed ⇔ submit Ok over a request grid, and best_quantity against brute
-  force. They are not compared with the code's `preview` or `best_quantity`.
-  near-tests covers the shell half of RD-PREVIEW; the core half and RD-BEST
-  are pending Kani.
+- **Reads.** The core half of RD-PREVIEW and RD-BEST are tested by a
+  differential (COV-2): the real core's `preview` and `best_quantity` on
+  36,797 requests at 1,246 trace states equal the model's. That is testing,
+  not proof. It covers only the recorded states and requests: other
+  states, other request values, `terms_before` / `terms_after` (preview's
+  per-term energies), the `name` and `unit` strings, and a version near
+  u32::MAX (where `submit` adds the version-overflow check) are not
+  compared. "preview allowed ⇒ submit Ok" is checked on the real core by
+  the generator for these requests, not proved. near-tests covers the shell
+  half of RD-PREVIEW. The proofs are pending Kani.
 - **C-2 unreachable sites.** The alignment may skip five kinds of code error
   site that cannot fire from an INV state. Each rule names what discharges it:
   - `add_length`: CFG-2, INV-WF.

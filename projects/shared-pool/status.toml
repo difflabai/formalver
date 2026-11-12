@@ -30,6 +30,8 @@ release_overflow_checks = true  # ASM-COMPILE: check-pin.sh fails unless upstrea
 #   finding: the F-n / NT-Fn that the row's
 #   section 5 Statement or Status cell names (a false property, a finding
 #   witness, or a caveat). status-lint ignores `finding`; it is for readers.
+#   Optional observed / observed_on (as for assumptions): what a test in
+#   `cross` saw while the primary layer is pending (RD-PREVIEW, RD-BEST).
 # Assumption keys: statement (strategy.md section 5.14), level
 #   (threat_model.pl assumption/3), checked_by (properties only: the union of
 #   assumption_checked_by/2 and section 5.14's Evidence cell), status, and,
@@ -297,16 +299,18 @@ prolog_requirements = "prolog/verification/props.pl"
 
 # ---------------------------------------------------------------------------
 # strategy.md section 5.5: reads. Kani primary: unverified until the Kani
-# layer lands. The shell half of RD-PREVIEW is tested (near-tests); the core
-# half and RD-BEST are checked on the Prolog model only.
+# layer lands. The shell half of RD-PREVIEW is tested (near-tests). The core
+# half and RD-BEST are tested by a differential of the real core against the
+# Prolog model (COV-2: conformance/traces/reads.txt, prolog/tests/test_reads.pl):
+# testing on the recorded states and requests, not proof.
 # ---------------------------------------------------------------------------
 [modules.reads]
 source = "crates/core/src/lib.rs"
 prolog_requirements = "prolog/model/pool_machine.pl"
 
   [modules.reads.properties]
-  RD-PREVIEW = { id = "RD-PREVIEW", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["difftest", "unit", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); near-tests: tests/store_diff.rs sh8_store_diff_host, sh8_store_diff_wasm and tests/shell.rs sh9_views_and_paging_at_256_records (the shell's preview equals the core's); prolog: tests/test_model.pl preview_allowed over a request grid (model only)", depends_on = ["crates/core/src/lib.rs", "crates/contract/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "preview.allowed <=> candidate Ok; allowed and version < u32::MAX => submit Ok; no mutation, no panic" }
-  RD-BEST = { id = "RD-BEST", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); prolog: tests/test_model.pl best_quantity against brute force on small cases (model only)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "best_quantity is sound and minimal as documented" }
+  RD-PREVIEW = { id = "RD-PREVIEW", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["difftest", "unit", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); near-tests: tests/store_diff.rs sh8_store_diff_host, sh8_store_diff_wasm and tests/shell.rs sh9_views_and_paging_at_256_records (the shell's preview equals the core's); prolog: tests/test_reads.pl via verification/reads.pl (COV-2 differential: the real core's preview in conformance/traces/reads.txt, written by conformance/src/main.rs --reads-out, against the model's preview_allowed, first failing submit guard, candidate and energies) and tests/test_model.pl preview_allowed over a request grid (model); conformance: src/main.rs also runs submit on a copy of the pool for every recorded preview and fails on a disagreement", observed = "COV-2: 36,797 requests at 1,246 states of the 212 conformance traces: 0 divergences between the real core's preview (allowed, reason, candidate, before, after) and the Prolog model. 1,678 allowed; every error candidate can return from these states occurs (paused 4,872, stale 1,895, expired 3,225, snapshot_expired 881, full 20, invalid_recipe 2,090, unauthorized 5,225, invalid_units 12,038, prerequisite 641, arithmetic 36, bounds 3,388, energy 808, both Energy exits). submit on a copy agrees with every preview. Model mutant m19 (preview ignores paused) gives 181 divergences; the four other suites miss it. Reads mutant d02 (the core's preview allows a Paused request, generator rebuilt by prolog/run.sh) stops the generator: preview and submit disagree on 4,872 requests. Testing, not proof. Not covered: other states and requests, terms_before/terms_after, a version near u32::MAX", observed_on = "conformance generator and Scryer Prolog 0.10.0 on a4bb5c3; reads.txt sha256 5545add5...59325ef; 2026-11-12", depends_on = ["crates/core/src/lib.rs", "crates/contract/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "preview.allowed <=> candidate Ok; allowed and version < u32::MAX => submit Ok; no mutation, no panic" }
+  RD-BEST = { id = "RD-BEST", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); prolog: tests/test_reads.pl via verification/reads.pl (COV-2 differential: the real core's best_quantity in conformance/traces/reads.txt against the model's best_quantity/4) and tests/test_model.pl best_quantity against brute force on small cases (model)", observed = "COV-2: the same 36,797 requests: 0 divergences between the real core's best_quantity and the model's. 5,739 some, 31,058 none; by the generator's brute force over preview, 1,617 requests have an energy tie among the allowed units (both take the larger), 545 have a best that is not the largest allowed units, and 1,732 have a best for units above MAX_UNITS. Reads mutant d01 (prolog/mutants/reads, run by prolog/run.sh: the core's ties broken to the smaller units, generator rebuilt) changes those 1,617 lines and test_reads reports 1,617 divergences; model mutants m18 (same edit) and m20 (request version ignored, 637 divergences) are caught, m20 by test_reads only. Testing, not proof. Not covered: other states and requests", observed_on = "conformance generator and Scryer Prolog 0.10.0 on a4bb5c3; reads.txt sha256 5545add5...59325ef; 2026-11-12", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "best_quantity is sound and minimal as documented" }
 
 # ---------------------------------------------------------------------------
 # strategy.md section 5.6: liveness.

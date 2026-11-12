@@ -25,9 +25,41 @@
 //! names are renamed to these. Booleans are `true`/`false`. A record's id is
 //! its index. `ok(Id)` is `submit`'s result; every other success is `ok`.
 //!
-//! usage: shared-pool-conformance [--traces N] [--len L] [--seed S] [--out FILE] [--check FILE]
+//! A second file, `traces/reads.txt` (COV-2), records the real core's two
+//! reads, `preview` and `best_quantity`, at states of those traces. The Prolog
+//! layer (tests/test_reads.pl) rebuilds each state and compares the model's
+//! `preview_allowed/3`, guard walk and `best_quantity/4` with it:
+//!
+//! ```text
+//! reads(Trace, Call).               % the pre-state of call Call (1-based) of
+//!                                   % trace Trace of core.txt; Call = calls+1:
+//!                                   % the final state
+//! config(..).                       % as in core.txt
+//! state(State).                     % as in core.txt
+//! q(Caller,Recipe,Units,Version,ExpiresAt,Now, Preview, Best).   % one per request
+//! end.
+//!
+//! Preview = preview(Allowed, Reason, Candidate, Before, After)
+//!   Reason    = allowed | Error (snake_case, as in core.txt)
+//!   Candidate = none | [Values..]     (Decision::candidate)
+//!   Before    = Energy                (Decision::before)
+//!   After     = none | Energy         (Decision::after)
+//! Best    = none | some(Units)        (best_quantity's units)
+//! ```
+//!
+//! States: every pre-state of the wedge, fixture and finding traces (but
+//! `full`, 515 calls), every READ_STRIDE-th pre-state of the others, and each
+//! trace's final state; a state equal to the last one read (same `now`) is
+//! skipped. Requests: see `requests`. The generator also checks, on the real
+//! core, that `submit` on a copy of the pool agrees with every `preview`
+//! (Ok with the candidate as the new values, or the same error), and fails if
+//! a read class in `REQUIRED_READS` never occurs.
+//!
+//! usage: shared-pool-conformance [--traces N] [--len L] [--seed S]
+//!        [--out FILE] [--check FILE] [--reads-out FILE] [--reads-check FILE]
 //! `--check FILE` regenerates and fails if FILE differs (CI: the checked-in
-//! traces are current).
+//! traces are current); `--reads-out` and `--reads-check` do the same for
+//! reads.txt. With none of the four, core.txt goes to stdout.
 
 use pool_core::*;
 use std::collections::BTreeMap;
@@ -58,7 +90,10 @@ impl Rng {
 }
 
 fn err_name(e: &Error) -> String {
-    let d = format!("{e:?}");
+    snake(&format!("{e:?}"))
+}
+/// `SnapshotExpired` -> `snapshot_expired`.
+fn snake(d: &str) -> String {
     let mut s = String::new();
     for (i, ch) in d.chars().enumerate() {
         if ch.is_ascii_uppercase() {
@@ -621,13 +656,21 @@ fn emit(out: &mut String, n: usize, cfg: &Config, ops: impl IntoIterator<Item = 
     writeln!(out, "end.").unwrap();
 }
 
-fn generate(traces: usize, len: usize, seed: u64) -> (String, BTreeMap<String, usize>) {
-    let mut out = String::new();
-    let mut n = 0;
-    let (c, ops) = wedge();
-    emit(&mut out, n, &c, ops, 100);
-    n += 1;
+/// One trace of core.txt. `dense`: reads.txt reads every state of it, not
+/// only every READ_STRIDE-th.
+struct Trace {
+    cfg: Config,
+    ops: Vec<Op>,
+    dense: bool,
+}
+
+/// The traces of core.txt, in file order (the trace number is the index).
+fn all_traces(traces: usize, len: usize, seed: u64) -> Vec<Trace> {
+    let mut all = vec![];
+    let (cfg, ops) = wedge();
+    all.push(Trace { cfg, ops, dense: true });
     for name in fixtures::NAMES {
+        let n = all.len();
         let c = fixture(name);
         let mut rng = Rng(seed ^ (0x9e37_79b9_7f4a_7c15 + n as u64));
         let mut p = Pool::new(c.clone(), 100).unwrap();
@@ -646,8 +689,7 @@ fn generate(traces: usize, len: usize, seed: u64) -> (String, BTreeMap<String, u
             apply(&mut p, &op);
             ops.push(op);
         }
-        emit(&mut out, n, &c, ops, 100);
-        n += 1;
+        all.push(Trace { cfg: c, ops, dense: true });
     }
     for t in 0..traces {
         let mut rng = Rng(seed.wrapping_mul(t as u64 + 1) ^ 0x2545_f491_4f6c_dd1d);
@@ -664,14 +706,28 @@ fn generate(traces: usize, len: usize, seed: u64) -> (String, BTreeMap<String, u
             apply(&mut p, &op);
             ops.push(op);
         }
-        emit(&mut out, n, &c, ops, 100);
-        n += 1;
+        all.push(Trace { cfg: c, ops, dense: false });
     }
     // Appended so the wedge, fixture and random trace numbers stay stable
-    // (the Prolog and shell layers address fixtures 1-5 by number).
-    for (c, ops) in [arith(), full(), release_arith(), f2_risk(), f4_self(), f6_stale()] {
-        emit(&mut out, n, &c, ops, 100);
-        n += 1;
+    // (the Prolog and shell layers address fixtures 1-5 by number). `full`
+    // (515 calls of near-identical states) is read at the stride.
+    for ((cfg, ops), dense) in [
+        (arith(), true),
+        (full(), false),
+        (release_arith(), true),
+        (f2_risk(), true),
+        (f4_self(), true),
+        (f6_stale(), true),
+    ] {
+        all.push(Trace { cfg, ops, dense });
+    }
+    all
+}
+
+fn generate(all: &[Trace]) -> (String, BTreeMap<String, usize>) {
+    let mut out = String::new();
+    for (n, t) in all.iter().enumerate() {
+        emit(&mut out, n, &t.cfg, t.ops.iter().cloned(), 100);
     }
     let mut hits = BTreeMap::new();
     for line in out.lines().filter(|l| l.starts_with("call(")) {
@@ -686,6 +742,224 @@ fn generate(traces: usize, len: usize, seed: u64) -> (String, BTreeMap<String, u
     (out, hits)
 }
 
+// ---------------------------------------------------------------------------
+// traces/reads.txt (COV-2): the real core's `preview` and `best_quantity`
+// ---------------------------------------------------------------------------
+
+/// Non-dense traces are read at every READ_STRIDE-th pre-state (and the final one).
+const READ_STRIDE: usize = 10;
+/// A units value far above MAX_UNITS, where `best_quantity` caps its search.
+const LARGE_UNITS: u32 = 1_000_000;
+
+/// Read classes reads.txt must reach; `preview:<reason>` for each error
+/// `candidate` can return from a reachable state (Arithmetic and Energy split
+/// by branch), both `preview.candidate` cases, both `best_quantity` cases, an
+/// energy tie among the allowed units (broken to the larger), a best that is
+/// not the largest allowed units, and a best for a request above MAX_UNITS.
+const REQUIRED_READS: [&str; 25] = [
+    "preview:allowed", "preview:paused", "preview:stale", "preview:expired", "preview:snapshot_expired",
+    "preview:full", "preview:invalid_recipe", "preview:unauthorized", "preview:invalid_units",
+    "preview:prerequisite", "preview:arithmetic:reserve", "preview:arithmetic:envelope", "preview:bounds",
+    "preview:energy:rise", "preview:energy:recovery", "candidate:some", "candidate:none",
+    "best:some", "best:none", "best:tie", "best:not_largest", "best:capped",
+    "state:paused", "state:full", "state:disturbed",
+];
+
+fn op_now(op: &Op) -> Option<u64> {
+    match op {
+        Op::Submit(_, _, n) | Op::Dispatch(_, _, n) | Op::Cancel(_, _, n) | Op::Observe(_, _, n) => Some(*n),
+        Op::Ack(..) | Op::Settle(..) | Op::Pause(..) => None,
+    }
+}
+
+/// The requests read at one state; `now` is the time of the call that follows
+/// the state. For every recipe: its actor with units 0, 1, 2, max_units,
+/// max_units + 1, MAX_UNITS, MAX_UNITS + 1 and LARGE_UNITS. For the index one
+/// past the last recipe: a1 with units 1 and MAX_UNITS + 1. For one recipe
+/// (rotating with `rot`) at its max_units: every account as caller; the
+/// version plus 1 and, above 0, minus 1; expires_at = now - 1, now,
+/// now + 86,400 and now + 86,401; with a max age, now = observed_at + max_age
+/// and one second later. Duplicates are dropped.
+fn requests(p: &Pool, now: u64, rot: usize) -> Vec<(String, Request, u64)> {
+    let cfg = &p.config;
+    let v = p.version;
+    let nr = cfg.recipes.len();
+    let mut qs: Vec<(String, Request, u64)> = vec![];
+    let mut q = |caller: &str, recipe: usize, units: u32, version: u32, expires_at: u64, now: u64| {
+        let r = (caller.to_string(), Request { recipe: recipe as u32, units, version, expires_at }, now);
+        if !qs.contains(&r) {
+            qs.push(r);
+        }
+    };
+    for (r, rec) in cfg.recipes.iter().enumerate() {
+        let mu = rec.max_units;
+        for u in [0, 1, 2, mu, mu + 1, MAX_UNITS, MAX_UNITS + 1, LARGE_UNITS] {
+            q(&rec.actor, r, u, v, now + 50, now);
+        }
+    }
+    for u in [1, MAX_UNITS + 1] {
+        q("a1", nr, u, v, now + 50, now);
+    }
+    let r = rot % nr;
+    let (a, mu) = (cfg.recipes[r].actor.as_str(), cfg.recipes[r].max_units);
+    for c in ACCOUNTS {
+        q(c, r, mu, v, now + 50, now);
+    }
+    q(a, r, mu, v.wrapping_add(1), now + 50, now);
+    if v > 0 {
+        q(a, r, mu, v - 1, now + 50, now);
+    }
+    for e in [now.saturating_sub(1), now, now + 86_400, now + 86_401] {
+        q(a, r, mu, v, e, now);
+    }
+    if cfg.max_age_seconds > 0 {
+        let t = p.observed_at + u64::from(cfg.max_age_seconds);
+        for t in [t, t + 1] {
+            q(a, r, mu, v, t + 50, t);
+        }
+    }
+    qs
+}
+
+#[derive(Default)]
+struct Reads {
+    out: String,
+    hits: BTreeMap<String, usize>,
+    /// `preview` and `submit` on a copy of the pool disagree (RD-PREVIEW on the real core).
+    bad: Vec<String>,
+    states: usize,
+    queries: usize,
+}
+
+impl Reads {
+    fn hit(&mut self, k: &str) {
+        *self.hits.entry(k.to_string()).or_insert(0) += 1;
+    }
+
+    fn state(&mut self, n: usize, call: usize, p: &Pool, now: u64, rot: usize) {
+        writeln!(self.out, "reads({n},{call}).").unwrap();
+        writeln!(self.out, "{}", config_term(&p.config)).unwrap();
+        writeln!(self.out, "state({}).", state(p)).unwrap();
+        self.states += 1;
+        if p.paused {
+            self.hit("state:paused");
+        }
+        if p.records.len() >= MAX_RECORDS {
+            self.hit("state:full");
+        }
+        if p.values.iter().zip(&p.config.metrics).any(|(v, m)| *v < m.min || *v > m.max) {
+            self.hit("state:disturbed");
+        }
+        for (caller, req, now) in requests(p, now, rot) {
+            self.query(n, call, p, &caller, &req, now);
+        }
+        writeln!(self.out, "end.").unwrap();
+    }
+
+    fn query(&mut self, n: usize, call: usize, p: &Pool, caller: &str, req: &Request, now: u64) {
+        let d = p.preview(caller, req, now);
+        let best = p.best_quantity(caller, req, now);
+        let reason = if d.allowed { "allowed".to_string() } else { snake(&d.reason) };
+        let cand = d.candidate.as_deref().map_or("none".to_string(), ints);
+        let after = d.after.clone().unwrap_or_else(|| "none".into());
+        let b = best.as_ref().map_or("none".to_string(), |r| format!("some({})", r.units));
+        writeln!(
+            self.out,
+            "q({caller},{},{},{},{},{now},preview({},{reason},{cand},{},{after}),{b}).",
+            req.recipe, req.units, req.version, req.expires_at, d.allowed, d.before
+        )
+        .unwrap();
+        self.queries += 1;
+
+        // Classes, for the coverage check only (the oracle is the Prolog model).
+        let class = match reason.as_str() {
+            "arithmetic" if d.candidate.is_none() => "arithmetic:reserve".to_string(),
+            "arithmetic" => "arithmetic:envelope".to_string(),
+            "energy" => {
+                let e = |s: &Option<String>| s.as_deref().and_then(|x| x.parse::<u64>().ok());
+                if e(&d.after) > e(&Some(d.before.clone())) { "energy:rise" } else { "energy:recovery" }.to_string()
+            }
+            r => r.to_string(),
+        };
+        self.hit(&format!("preview:{class}"));
+        self.hit(if d.candidate.is_some() { "candidate:some" } else { "candidate:none" });
+        self.hit(if best.is_some() { "best:some" } else { "best:none" });
+        if best.is_some() {
+            // Every allowed units value 1..=min(units, MAX_UNITS) by preview,
+            // with its candidate's energy.
+            let allowed: Vec<u64> = (1..=req.units.min(MAX_UNITS))
+                .map(|u| p.preview(caller, &Request { units: u, ..req.clone() }, now))
+                .filter(|e| e.allowed)
+                .filter_map(|e| e.after.and_then(|x| x.parse().ok()))
+                .collect();
+            if let Some(&emin) = allowed.iter().min() {
+                if allowed.iter().filter(|e| **e == emin).count() >= 2 {
+                    self.hit("best:tie");
+                }
+                if allowed.last() != Some(&emin) {
+                    self.hit("best:not_largest");
+                }
+                if req.units > MAX_UNITS {
+                    self.hit("best:capped");
+                }
+            }
+        }
+
+        // RD-PREVIEW on the real core: submit on a copy agrees with preview.
+        let mut c = p.clone();
+        match c.submit(caller, req.clone(), now) {
+            Ok(id) if d.allowed && id as usize == p.records.len() && d.candidate.as_ref() == Some(&c.values) => {}
+            Err(e) if !d.allowed && e.to_string() == d.reason => {}
+            r => self.bad.push(format!(
+                "trace {n} call {call}: {caller} {req:?} at {now}: preview {} {}, submit {r:?}",
+                d.allowed, d.reason
+            )),
+        }
+    }
+}
+
+/// reads.txt: see the header of this file.
+fn reads(all: &[Trace]) -> Reads {
+    let mut rd = Reads::default();
+    for (n, t) in all.iter().enumerate() {
+        let mut p = Pool::new(t.cfg.clone(), 100).expect("valid config");
+        let mut now = 100;
+        let mut last: Option<(String, u64)> = None;
+        let mut k = 0;
+        for i in 0..=t.ops.len() {
+            let at = t.ops.get(i).and_then(op_now).unwrap_or(now);
+            if t.dense || i % READ_STRIDE == 0 || i == t.ops.len() {
+                let key = (state(&p), at);
+                if last.as_ref() != Some(&key) {
+                    rd.state(n, i + 1, &p, at, n + k);
+                    k += 1;
+                    last = Some(key);
+                }
+            }
+            if let Some(op) = t.ops.get(i) {
+                apply(&mut p, op);
+                now = op_now(op).unwrap_or(now);
+            }
+        }
+    }
+    rd
+}
+
+/// `--check F`: F must equal `text`; `--out F`: write it.
+fn check_or_write(text: &str, check: Option<String>, out: Option<String>, out_flag: &str) -> bool {
+    if let Some(f) = check {
+        let have = std::fs::read_to_string(&f).unwrap_or_default();
+        if have != text {
+            eprintln!("{f} is stale: regenerate with {out_flag} {f}");
+            return false;
+        }
+        eprintln!("{f} is current");
+    } else if let Some(f) = out {
+        std::fs::write(&f, text).expect("write");
+    }
+    true
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let get = |flag: &str, d: u64| -> u64 {
@@ -695,7 +969,8 @@ fn main() {
             .map_or(d, |v| v.parse().expect("number"))
     };
     let path = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
-    let (out, hits) = generate(get("--traces", 200) as usize, get("--len", 40) as usize, get("--seed", 0x5eed));
+    let all = all_traces(get("--traces", 200) as usize, get("--len", 40) as usize, get("--seed", 0x5eed));
+    let (out, hits) = generate(&all);
     // Coverage the replayers rely on: every reachable error of every call.
     let required = [
         "submit:ok", "submit:arithmetic", "submit:full", "submit:paused", "submit:stale", "submit:expired", "submit:snapshot_expired",
@@ -715,16 +990,34 @@ fn main() {
         eprintln!("coverage: missing {missing:?}");
         std::process::exit(1);
     }
-    if let Some(f) = path("--check") {
-        let have = std::fs::read_to_string(&f).unwrap_or_default();
-        if have != out {
-            eprintln!("{f} is stale: regenerate with --out {f}");
+    let (check, write) = (path("--check"), path("--out"));
+    let (reads_check, reads_write) = (path("--reads-check"), path("--reads-out"));
+    let quiet = check.is_some() || write.is_some() || reads_check.is_some() || reads_write.is_some();
+    let mut ok = check_or_write(&out, check, write, "--out");
+    if reads_check.is_some() || reads_write.is_some() {
+        let rd = reads(&all);
+        for (k, v) in &rd.hits {
+            eprintln!("reads {k:26} {v}");
+        }
+        eprintln!("reads: {} states, {} requests", rd.states, rd.queries);
+        if !rd.bad.is_empty() {
+            for b in rd.bad.iter().take(10) {
+                eprintln!("preview and submit disagree: {b}");
+            }
+            eprintln!("reads: {} preview/submit disagreements", rd.bad.len());
             std::process::exit(1);
         }
-        eprintln!("{f} is current");
-    } else if let Some(f) = path("--out") {
-        std::fs::write(&f, &out).expect("write");
-    } else {
+        let missing: Vec<&str> = REQUIRED_READS.iter().copied().filter(|k| !rd.hits.contains_key(*k)).collect();
+        if !missing.is_empty() {
+            eprintln!("reads coverage: missing {missing:?}");
+            std::process::exit(1);
+        }
+        ok &= check_or_write(&rd.out, reads_check, reads_write, "--reads-out");
+    }
+    if !quiet {
         print!("{out}");
+    }
+    if !ok {
+        std::process::exit(1);
     }
 }

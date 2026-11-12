@@ -120,7 +120,10 @@ F-6's expired snapshot). The file is checked in. TLA+ (REF-5), Lean (REF-5L), Pr
 the shell (`near-tests/tests/traces.rs`, on the host and on both wasm builds)
 each replay all of it and must match every result and post-state. CI's
 `conformance` job regenerates the file and fails on any difference, so no layer
-replays traces of other code.
+replays traces of other code. The same generator writes `traces/reads.txt`
+(COV-2): the core's `preview` and `best_quantity` on 36,797 requests at 1,246
+trace states, which Prolog's `test_reads` compares with its model; CI checks
+that file the same way.
 
 **One runner per layer.** Each layer directory has a `run.sh`. Exit 0 means
 every check passed, vacuity guards included: TLC witnesses violated, Lean

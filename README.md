@@ -130,7 +130,7 @@ The label is In-Progress because the pin is an unmerged PR head, the Kani layer 
 
 - TLA+: no error in 2,306,738 distinct states (TLA-SAFE) in a small universe (2 metrics, at most 3 records). Every witness is reachable. LIVE-2 holds on the completion path and fails as F-1 and F-2, as required. 31 of 31 spec mutants killed. No Apalache inductive check (TLA-IND is open).
 - Lean: `Inv`, the step properties and LIVE-1 proved for states of every size on the Lean transcription of the core (not the Rust code). F-1 proved permanent (`f1_forever`). 40 of 40 headline theorems use only `propext`, `Classical.choice` and `Quot.sound`. 16 of 16 mutants killed.
-- Prolog: C-1 to C-6 pass, with F-2 and F-4 reproduced by C-5. MC-1 explores three universes (3,740, 3,856 and 630 states). MC-2: 0 divergences. 28 of 28 mutants killed.
+- Prolog: C-1 to C-6 pass, with F-2 and F-4 reproduced by C-5. MC-1 explores three universes (3,740, 3,856 and 630 states). MC-2: 0 divergences. COV-2: the core's preview and best_quantity equal the model's on 36,797 requests. 33 of 33 mutants killed (2 of them mutate the core's reads).
 - near-tests: all 29 tests pass, on the host path and on two wasm builds (plain cargo and `--cfg near`). SH-8 alone makes 80,000 random host calls. 21 of 21 shell mutants killed.
 - Sandbox: RT-PRED, RT-PRIVATE, RT-CALLBACK, RT-REVERT, RT-RACE and RES-1 pass on both wasm builds. The worst pool receipt is 12.56 Tgas at 256 records. RT-WEDGE reproduces F-1.
 - Kani: no result yet, and no CI job.
@@ -142,7 +142,7 @@ Two findings are high. F-1: after an `observe` puts a metric out of bounds, a di
 ```bash
 git submodule update --init projects/shared-pool/source-mirror
 ./tools/scripts/check-pin.sh shared-pool
-(cd projects/shared-pool/conformance && cargo run --release --locked -- --check traces/core.txt)
+(cd projects/shared-pool/conformance && cargo run --release --locked -- --check traces/core.txt --reads-check traces/reads.txt)
 projects/shared-pool/tla/run.sh safety liveness trace mutants   # Java 17+
 projects/shared-pool/lean/run.sh                                # fetches Lean via get-lean.sh
 projects/shared-pool/prolog/run.sh                              # scryer-prolog 0.10.0

@@ -164,8 +164,8 @@ prolog_evidence(P, test("MC-2: checked on every edge/state of the real core's tr
 prolog_evidence(P, test("MC-2: exact result and post-state of every replayed call of this kind")) :-
     member(P, ['TX-SUBMIT', 'TX-DISPATCH', 'TX-ACK', 'TX-CANCEL', 'TX-SETTLE', 'TX-PAUSE', 'TX-OBSERVE']).
 prolog_evidence('LIVE-2', 'model-check'("MC-1: healthy universe has no dead or release-blocked record; wedge universe has dead in-flight records (F-1); reliance universe has release-blocked in-flight records with B = 0 (F-2)")).
-prolog_evidence('RD-PREVIEW', test("model only: preview_allowed = candidate guards; unit tests; not compared with the code")).
-prolog_evidence('RD-BEST', test("model only: best_quantity against brute force on small cases; not compared with the code")).
+prolog_evidence('RD-PREVIEW', test("COV-2 differential (test_reads): the real core's preview (allowed, reason, candidate, energies) at 1,246 trace states, 36,797 requests (conformance/traces/reads.txt) equals the model's; model unit tests (preview_allowed <=> submit Ok)")).
+prolog_evidence('RD-BEST', test("COV-2 differential (test_reads): the real core's best_quantity on the same 36,797 requests equals the model's best_quantity/4; model unit test against brute force on small cases")).
 
 %%% ========================================================
 %%% Requirements -> properties
