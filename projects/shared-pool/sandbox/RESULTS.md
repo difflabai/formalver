@@ -299,8 +299,14 @@ decision. RD-PREVIEW already excludes `version = u32::MAX`. The state needs
   - attached deposits (SH-10)
   - expiry by block time (`Expired`, `SnapshotExpired`)
   - paging of `get_commitments` beyond one page
+- **Prepaid gas below the maximum.** Every transaction attaches 300 Tgas
+  (`max_gas`), so behaviour with less prepaid gas is not observed. Upstream
+  `docs/api.md` states no minimum prepaid gas.
+- **The executor at its cap.** RES-1 measures the executor's `execute` and
+  `finish` at about 32 jobs, not at its 256-job cap.
 - **Storage staking.** The 50 NEAR account held the max state. Storage staking
-  limits were not probed.
+  limits were not probed. The executor's `finish` grows its state by 3 bytes
+  per job (`active` to `completed` or `cancelled`).
 - **Live deployment.** Nothing here touches testnet or mainnet, deployment locks,
   or code replacement (ASM-DEPLOY).
 

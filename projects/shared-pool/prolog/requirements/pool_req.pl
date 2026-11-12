@@ -491,7 +491,7 @@ known_finding('CASH-SELF-ENFORCED', 'F-4').
 finding('F-1', high, 'spec:23, 46; handoff:31',
     "Wedge: in a state disturbed by observe the recovery rule admits a hedge whose completion moves the disturbed metric back out; once the reservation brought it inside, settle(true) and settle(false) fail Bounds, cancel fails Pending, observe fails Pending forever.").
 finding('F-2', high, 'spec:46, 66; handoff:23, 31',
-    "Healthy-state release wedge: in the risk fixture a hedge admitted on the strength of a credit position's reservation blocks the position's release; the executor's honest settle(false) and cancel fail Bounds, observe fails Pending. No observe needed. Contradicts spec:46's fixture sentence.").
+    "Healthy-state release wedge: in the risk fixture a hedge admitted on the strength of a credit position's reservation blocks the position's release; the executor's honest settle(false) fails Bounds; cancel fails Pending once in flight (Bounds while still Reserved); observe fails Pending. No observe needed. Contradicts spec:46's fixture sentence.").
 finding('F-3', low, 'handoff:34; api:8',
     "Slot exhaustion: one actor exhausts the 256 lifetime records with free submit+cancel cycles; Full is permanent (observe does not prune, spec:54).").
 finding('F-4', low, 'spec:9, 50, 64',

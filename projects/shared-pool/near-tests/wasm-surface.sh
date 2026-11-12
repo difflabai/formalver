@@ -21,10 +21,11 @@
 # catalogue IDs the check bears on):
 #   SURF-1  the surface (exports, imports, classes) == wasm-surface.expected.
 #           Pins the exports to the documented methods plus
-#           contract_source_metadata (no upgrade or migrate export:
-#           ASM-DEPLOY), and records that the plain build does not import
-#           panic_utf8, so its panics carry no message (SH-5, finding NT-F1).
-#           PROP: SH-5 ASM-DEPLOY
+#           contract_source_metadata (no upgrade, migrate or reset export:
+#           SH-11; it bears on ASM-DEPLOY), and records that the plain build
+#           does not import panic_utf8, so its panics carry no message (SH-5,
+#           finding NT-F1).
+#           PROP: SH-5 SH-11 ASM-DEPLOY
 #   SURF-2  no import is `forbidden`. If it held, the contracts could not
 #           deploy code, delete the account or add keys (the in-contract
 #           half of ASM-DEPLOY). It fails on the pin (NT-F3), so ASM-DEPLOY

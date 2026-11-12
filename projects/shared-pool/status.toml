@@ -2,7 +2,7 @@
 name = "shared-pool"
 upstream = "https://github.com/difflabai/shared-pool-controls"
 upstream_path = ""
-pinned_commit = "a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7"   # PR #1 head (feat/shared-pool-controls, 2026-11-12): "Address review: reconcile griefing, broken doc link, CI robustness". Not on main yet: re-pin when the PR merges.
+pinned_commit = "a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7"   # PR #1 head (feat/shared-pool-controls, 2026-11-12 UTC): "Address review: reconcile griefing, broken doc link, CI robustness". Not on main yet: re-pin when the PR merges.
 last_reviewed = "2026-11-12"
 release_overflow_checks = true  # ASM-COMPILE: check-pin.sh fails unless upstream [profile.release] sets overflow-checks = true
 
@@ -12,7 +12,7 @@ release_overflow_checks = true  # ASM-COMPILE: check-pin.sh fails unless upstrea
 #   - Nothing here goes past in-progress: the pin is an unmerged PR head and
 #     [review] spec_reviewer is empty.
 #   - One module per strategy.md section 5 subsection (5.1 .. 5.13); the
-#     properties are exactly section 5's non-ASM rows (82), the
+#     properties are exactly section 5's non-ASM rows (83), the
 #     [assumptions.<ID>] tables its ASM-* rows (14). IDs equal
 #     prolog/requirements/traceability.pl's property/3.
 #   - `layer` is the first layer of the row's Layer(s) cell (near-tests maps
@@ -161,7 +161,7 @@ statement = "No code replacement; the deployment lock is out of scope"
 level = "policy"
 checked_by = []
 source = ["spec:56", "handoff:40"]
-observed = "near-tests/wasm-surface.sh, both builds: SURF-1 passes (pool_contract exports the 12 documented methods and contract_source_metadata, no upgrade or migrate method); SURF-2 fails as recorded: both contracts import 15 host functions that deploy, delete accounts, add keys, transfer, stake, or use gas keys or global contracts (NT-F3), so the import surface cannot rule out code replacement"
+observed = "near-tests/wasm-surface.sh, both builds: SURF-1 passes (SH-11: pool_contract exports the 12 documented methods and contract_source_metadata, no upgrade or migrate method); SURF-2 fails as recorded: both contracts import 15 host functions that deploy, delete accounts, add keys, transfer, stake, or use gas keys or global contracts (NT-F3), so the import surface cannot rule out code replacement"
 observed_on = "near-tests ./run.sh surface on a4bb5c3 (Plain and --cfg near builds), 2026-11-12"
 status = "unverified"
 
@@ -352,6 +352,10 @@ prolog_requirements = "prolog/requirements/pool_req.pl"
   # check; it accepts and keeps an attached deposit (api:3 says every
   # mutating method is nonpayable).
   SH-10 = { id = "SH-10", status = "in-progress", layer = "unit", evidence = "test", cross = [], harness = "near-tests/tests/shell.rs sh10_mutating_methods_reject_attached_deposits, nt_f2_reconcile_accepts_and_keeps_an_attached_deposit (NT-F2); mutant m12", depends_on = ["crates/contract/src/lib.rs", "crates/core/src/lib.rs", "Cargo.lock"], assumptions = [], finding = "NT-F2", description = "Nonpayable methods reject deposits: new, submit, dispatch, settle, cancel, set_paused, observe and on_result do. Fails against api:3 (all mutating methods are nonpayable) for reconcile, a &self method with no deposit check, which accepts and keeps an attached deposit (NT-F2)" }
+  # NT-F3: the exports are pinned, but both wasm files still import
+  # transfer, deploy and add-key host functions (SURF-2 expected-fail), so
+  # S-NOADMIN's funds-transfer and plugin clauses rest on source review.
+  SH-11 = { id = "SH-11", status = "in-progress", layer = "wasm-check", evidence = "check", cross = [], harness = "near-tests/wasm-surface.sh SURF-1 vs wasm-surface.expected (Plain and --cfg near builds; near-tests/run.sh surface)", depends_on = ["crates/contract/src/lib.rs", "crates/executor/src/lib.rs", "Cargo.lock"], assumptions = [], finding = "NT-F3", description = "Export surface, both builds: pool_contract exports exactly the 12 documented methods plus contract_source_metadata and memory, and pool_executor its 7 methods plus the same two; no upgrade, migrate or reset export. The imports do not exclude transfer, deploy or add-key actions (NT-F3: source review only)" }
 
 # ---------------------------------------------------------------------------
 # strategy.md section 5.8: the executor (near-tests/tests/executor.rs, host
@@ -403,7 +407,7 @@ prolog_requirements = "prolog/requirements/pool_req.pl"
   # Finding witness: passes while F-2 (risk fixture release search) and F-4
   # (CASH-SELF-ENFORCED) reproduce; it fails if either stops reproducing.
   C-5 = { id = "C-5", status = "in-progress", layer = "prolog", evidence = "check", cross = [], harness = "verification/consistency.pl c_check('C-5'); tests/test_requirements.pl (fixture claims on trace configs 1-5, a two-record release search per fixture)", depends_on = ["docs/spec.md", "docs/verification-handoff.md", "crates/core/src/lib.rs", "crates/core/src/fixtures.rs"], assumptions = ["ASM-SPEC", "ASM-TOOLS"], finding = "F-2, F-4", description = "Fixture conservation (STOCK, CASH, RISK, self-authorization): 23 claims; F-2 and F-4 reproduced" }
-  C-6 = { id = "C-6", status = "in-progress", layer = "prolog", evidence = "check", cross = [], harness = "verification/consistency.pl c_check('C-6') over requirements/traceability.pl, requirements/threat_model.pl and strategy.md section 5; tests/test_requirements.pl", depends_on = ["docs/spec.md", "docs/api.md", "docs/verification-handoff.md"], assumptions = ["ASM-TOOLS"], description = "Traceability: traceability.pl = strategy.md section 5 (IDs and layer lists: 96 IDs, 96 rows, 96 equal layer lists); requirements, threats and findings traced" }
+  C-6 = { id = "C-6", status = "in-progress", layer = "prolog", evidence = "check", cross = [], harness = "verification/consistency.pl c_check('C-6') over requirements/traceability.pl, requirements/threat_model.pl and strategy.md section 5; tests/test_requirements.pl", depends_on = ["docs/spec.md", "docs/api.md", "docs/verification-handoff.md"], assumptions = ["ASM-TOOLS"], description = "Traceability: traceability.pl = strategy.md section 5 (IDs and layer lists: 97 IDs, 97 rows, 97 equal layer lists); requirements, threats and findings traced" }
   MC-1 = { id = "MC-1", status = "in-progress", layer = "prolog", evidence = "model-check", cross = [], harness = "verification/model_check.pl via tests/test_mc1.pl (universes wedge 3,740 states, healthy 3,856, reliance 630; all complete)", depends_on = ["docs/spec.md", "docs/api.md", "crates/core/src/lib.rs"], assumptions = ["ASM-EXEC", "ASM-MODEL", "ASM-TIME", "ASM-TOOLS", "ASM-SPEC"], description = "Small model check of step/4: no INV or step-property violation; F-1 dead records in wedge, F-2 release-blocked states in reliance, neither in healthy" }
   MC-2 = { id = "MC-2", status = "in-progress", layer = "prolog", evidence = "test", cross = [], harness = "verification/mc2.pl via tests/test_mc2.pl", depends_on = ["docs/spec.md", "docs/api.md", "crates/core/src/lib.rs"], assumptions = ["ASM-TOOLS", "ASM-SPEC"], description = "Replay of every trace through step/4: 212 traces, 8,804 calls, 0 divergences; invariants, step properties and LIVE-1 on the code's own states" }
 

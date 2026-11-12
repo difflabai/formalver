@@ -12,10 +12,11 @@ and python3 for `extract.py` (run with `-I`, stdlib only). Conformance traces:
 8,804 calls, generated from the real core; traces 206-208 reach `Arithmetic`
 (submit, and F-2b's release `Arithmetic`) and `Full`, and traces 209-211
 reproduce F-2's `Bounds` form, F-4 and F-6). Property catalogue:
-`projects/shared-pool/strategy.md` §5 (96 IDs), which C-6 reads. Run:
+`projects/shared-pool/strategy.md` §5 (97 IDs), which C-6 reads. Run:
 `projects/shared-pool/prolog/run.sh` (optional `PROLOG_LOGS=<dir>`). Final run on
-2026-11-12: exit 0 in 332.4 s, `=== ALL PROLOG CHECKS PASSED ===` (suites,
-canaries, PROP tags `catalogue 96, prolog layer 39, tagged 39`, and
+2026-11-12, after SH-11 joined the catalogue: exit 0 in 329.2 s,
+`=== ALL PROLOG CHECKS PASSED ===` (suites, canaries, PROP tags
+`catalogue 97, prolog layer 39, tagged 39`, and
 `mutants: 28 killed, 0 survived`).
 
 Evidence vocabulary (near-approval strategy §12): this layer gives `check`
@@ -28,7 +29,7 @@ properties checked on the real core's traces and the step/4 unit tests).
 |---|---|
 | `requirements/pool_req.pl` | 65 `requirement/3` facts (one per doc statement used); the api.md method table and authority (`method/4`, `method_core/2`); the guard tables in the order the docs list them (`guard/5`, 56 rows; each row is `doc`, `doc_condition` (the docs state the condition but not its name or position) or `code_only`); the lifecycle table (`life/5`); constants; the five fixtures with 23 claims (`fixture_claim/4`); `known_finding/2`; `finding/4` (F-1..F-6); 4 `divergence/4` and 8 `ambiguity/4` facts. |
 | `requirements/threat_model.pl` | 6 adversaries, 22 threats with mitigating properties and residuals (every finding is named in a residual, which C-6 checks), and the 14 ASM-* assumptions of strategy.md §5.14. |
-| `requirements/traceability.pl` | The 96-ID catalogue of strategy.md §5 with each ID's layer list, `prolog_evidence/2` for the 39 IDs this layer carries, and requirement → property rows. |
+| `requirements/traceability.pl` | The 97-ID catalogue of strategy.md §5 with each ID's layer list, `prolog_evidence/2` for the 39 IDs this layer carries, and requirement → property rows. |
 | `model/pool_machine.pl` | `step/4`, written from the docs. `step` walks the guard table of `pool_req.pl` in order, so the model's behaviour *is* the requirement table. 16 places are tagged `CODE-ONLY` where the docs are silent (NotFound, saturating u64 time sums, the observe length check, ack from Reserved/Active, the MAX_* bounds, actor = executor accepted, ...). Where docs and code disagree, the place carries a divergence id. Reads: `admissible/3`, `preview_allowed/3`, `best_quantity/4`. |
 | `extract.py` → `extracted/code_facts.pl` | Generated from `crates/core/src/lib.rs`: constants, enums, field widths, per-function error sites, fallible calls, early `Ok` returns, caller checks, status guards and writes, and role comparisons in `Config::validate`. Also from `crates/contract/src/lib.rs` (`#[near]` methods, attributes, receivers, core calls and each one's caller source) and `crates/core/src/fixtures.rs` (fixture order, account names). The parser is narrow and fails loudly on constructs it does not know. |
 | `extract.py` → `extracted/tla_facts.pl` | `GuardOrder` from `tla/SharedPool.tla` and the LIFE-1 `Edges` from `tla/Props.tla`. |
@@ -57,18 +58,18 @@ properties checked on the real core's traces and the step/4 unit tests).
 | Lifecycle: `life/5` = the code's status guards = TLA+ `Edges` = the props LIFE-1 graph, and = the status changes seen in the real traces | C-3 | pass, with one recorded divergence (`div-ack-noop-version`) | 36 (op, flag, status) rows, 11 edges; all 36 rows observed in the traces, 2 trace calls on the divergent row |
 | Constants: docs = code (MAX_VALUE, MAX_TERMS, MAX_WEIGHT, MAX_RECORDS, 86,400 s, page 50, u32 version, u64 times); spec:13's derived bounds; the model's code-only bounds = code | C-4 | pass | 8 compared, 4 derived; MAX_METRICS 32, MAX_RECIPES 32 and MAX_UNITS 100 are code-only |
 | Fixture claims on trace configs 1-5 (STOCK, CASH, RISK, GPU/Friday, self-authorization, spec:46 release) | C-5 | pass, with 2 known findings reproduced (F-2, F-4); the real core shows both in conformance traces 209 (F-2) and 210 (F-4), which MC-2 replays | 23 claims. STOCK-SUM over 41 calls; CASH-SUM over 40 (until the first observe). RISK-HEADROOM on 46 states, 474 admissible requests. Release search: 1,308 / 1,308 / 36 / 28 / 86 admitted pairs (gpu / friday / inventory / hiring / risk) and 22,128 releases tried, plus 448 releases on 179 trace states. |
-| Traceability: `property/3` = strategy.md §5, read from the committed file (the IDs: none missing, extra or repeated; each row's `Layer(s)` cell = the property's layer list, in order; a missing file, missing §5 or empty ID set fails C-6); every requirement traced; every threat mitigated; every finding named in a threat; prolog evidence for each prolog property | C-6 | pass | 96 properties, 96 §5 rows, 96 equal layer lists; 65 requirements, 22 threats, 6 findings, 14 assumptions |
+| Traceability: `property/3` = strategy.md §5, read from the committed file (the IDs: none missing, extra or repeated; each row's `Layer(s)` cell = the property's layer list, in order; a missing file, missing §5 or empty ID set fails C-6); every requirement traced; every threat mitigated; every finding named in a threat; prolog evidence for each prolog property | C-6 | pass | 97 properties, 97 §5 rows, 97 equal layer lists; 65 requirements, 22 threats, 6 findings, 14 assumptions |
 | MC-1 `wedge` (trace 0's config) | MC-1, LIVE-2 | no violation; F-1 dead in-flight records found | 3,740 states, 113,172 edges, complete; 228 states with a dead in-flight record |
 | MC-1 `healthy` (2 recipes, a prerequisite, freshness) | MC-1, LIVE-2 | no violation; no dead or release-blocked record | 3,856 states, 98,056 edges, complete; 10 error kinds reached |
 | MC-1 `reliance` (F-2, scaled down) | MC-1, LIVE-2 | no violation; 150 release-blocked states with B = 0 | 630 states, 14,236 edges, complete |
-| MC-1 suite total | | | 34.8 s |
+| MC-1 suite total | | | 34.1 s |
 | MC-2: every trace replayed through `step/4` from the code's pre-state; result and post-state compared exactly; invariants, step properties and LIVE-1 checked on the code's own states | MC-2, TX-*, INV-*, LIVE-1 | 0 divergences, 0 violations | 212 traces, 8,804 calls (2,547 Ok, 494 of them no-ops); every op kind Ok and all 15 error kinds the code can return from an INV state (incl. `full`, `arithmetic`); traces 0 and 209-211 also checked for their findings' shapes; suite (19 tests) 6.3 s |
-| step/4 unit tests (doc-cited), including the F-1..F-6 witnesses and the RD-PREVIEW/RD-BEST model checks | TX-*, RD-* | 29 pass | 0.5 s |
-| Requirements suite (C-1..C-6 and their non-vacuity tests, including C-6's comparison on a dropped, added, repeated and relabelled ID and its strategy.md reader on small documents) | C-* | 15 pass | 11.0 s |
+| step/4 unit tests (doc-cited), including the F-1..F-6 witnesses and the RD-PREVIEW/RD-BEST model checks | TX-*, RD-* | 29 pass | 0.4 s |
+| Requirements suite (C-1..C-6 and their non-vacuity tests, including C-6's comparison on a dropped, added, repeated and relabelled ID and its strategy.md reader on small documents) | C-* | 15 pass | 10.7 s |
 | Canaries | vacuity | each of the three suites exits 1 with only the canary failing | |
 | Planted faults (in `test_mc2`): each step-property checker fires on a corrupted real call and stays silent on the real one (TX-0, TX-NOOP, TX-VER, AUTH-1, STALE-1, ADM-1, ADM-2, HARD-STEP, DEP-1, LIFE-1, ASYNC-1, TERM-1, OBS-1, PAUSE-1); a corrupted trace shows as a divergence with its trace id and index. In `test_model`: the INV-* and LIVE-1 checkers fire on corrupted states. | vacuity | pass | |
-| PROP tags | | every prolog-layer catalogue ID is tagged; no unknown tag | 39 of 96 |
-| Mutants | | 28 of 28 killed | 258.3 s summed |
+| PROP tags | | every prolog-layer catalogue ID is tagged; no unknown tag | 39 of 97 |
+| Mutants | | 28 of 28 killed | 256.2 s summed |
 
 MC-1 bounds. The exploration state is pool + clock + ghost. Time is monotone
 (ASM-TIME) over each universe's time set: wedge {100, 200}, healthy {100, 150,
@@ -255,8 +256,9 @@ prints `FAIL <prefix>`.
   Trace 210 is the only trace config with actor = executor.
 - **Reads.** RD-PREVIEW and RD-BEST are checked on the model only: preview
   allowed ⇔ submit Ok over a request grid, and best_quantity against brute
-  force. They are not compared with the code's `preview` or `best_quantity`;
-  Kani and near-tests cover that.
+  force. They are not compared with the code's `preview` or `best_quantity`.
+  near-tests covers the shell half of RD-PREVIEW; the core half and RD-BEST
+  are pending Kani.
 - **C-2 unreachable sites.** The alignment may skip five kinds of code error
   site that cannot fire from an INV state. Each rule names what discharges it:
   - `add_length`: CFG-2, INV-WF.
@@ -264,7 +266,9 @@ prints `FAIL <prefix>`.
   - `recovery_add`: INV-HARD.
   - `release_record`: no property (release looks up again a record it has just
     found).
-  The other layers prove these; this layer assumes them.
+  Lean proves INV-WF and INV-HARD for its model; CFG-2 and NUM-1 are pending
+  Kani; `release_record` has no discharging property. This layer assumes all
+  of them.
 - **TLA leg.** C-2 and C-3 compare `GuardOrder` and `Edges` as written in the
   TLA+ files. That the TLA+ operators follow `GuardOrder` is the TLA layer's
   REF-5.

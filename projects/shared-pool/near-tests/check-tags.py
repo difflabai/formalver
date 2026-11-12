@@ -17,7 +17,8 @@ Exits 1, listing every problem, unless:
   2. every `#[test]` in tests/*.rs has its own tag line directly above it;
   3. every catalogue property whose layers include near-tests has at least
      one per-test tag on a test that checks it (lockfile.rs's scope tag does
-     not count);
+     not count), or a tag line in the block of a wasm-surface.sh check
+     SURF-n that checks it (SH-11 is checked only there);
   4. each test file's header tag line equals the union of its tests' tags;
   5. run.sh, run-mutants.sh and wasm-surface.sh carry tags, and each local
      check SURF-n in wasm-surface.sh has a tag line in its block; no tag
@@ -129,10 +130,6 @@ for f in sorted((nt / "tests").glob("*.rs")):
         elif set(header[0]) != union:
             errors.append(f"{rel}: header tags {sorted(header[0])} != union of per-test tags {sorted(union)}")
 
-for pid in layer_ids:
-    if pid not in covered:
-        errors.append(f"{pid}: catalogue layer near-tests, but no test carries a per-test tag for it")
-
 # --- scripts -----------------------------------------------------------------
 for s in ["run.sh", "run-mutants.sh", "wasm-surface.sh"]:
     if not tags_by_file.get(pathlib.Path("near-tests") / s):
@@ -144,10 +141,21 @@ if end is None:
     errors.append("near-tests/wasm-surface.sh: no `# Exit:` line ending the SURF-n blocks")
     end = len(ws)
 for a, b in zip(starts, starts[1:] + [end]):
-    if not any(re.match(r"^\s*#\s*PROP:", l) for l in ws[a:b]):
-        errors.append(f"near-tests/wasm-surface.sh:{a + 1}: {ws[a].split()[1]} has no tag line in its block")
+    surf = ws[a].split()[1]
+    block_tags = [re.match(r"^\s*#\s*PROP:(.*)$", l) for l in ws[a:b]]
+    block_tags = [m.group(1).split() for m in block_tags if m]
+    if not block_tags:
+        errors.append(f"near-tests/wasm-surface.sh:{a + 1}: {surf} has no tag line in its block")
+    # A SURF-n check checks the IDs on its own tag line (rule 3).
+    for toks in block_tags:
+        for t in toks:
+            covered.setdefault(t, []).append(f"wasm-surface.sh {surf}")
 if len(starts) != 2:
     errors.append(f"wasm-surface.sh: expected SURF-1 and SURF-2 definitions, found {len(starts)}")
+
+for pid in layer_ids:
+    if pid not in covered:
+        errors.append(f"{pid}: catalogue layer near-tests, but no test or SURF-n check carries a tag for it")
 
 # --- same view as check-status.sh (layers unit and difftest: dir near-tests) --
 lint = set()
@@ -165,7 +173,7 @@ print(f"tag lines: {sum(len(v) for v in tags_by_file.values())} in {len(tags_by_
 print("IDs outside layer near-tests (cross-layer references): "
       + " ".join(sorted(t for t in found if t in cat and "near-tests" not in cat[t])))
 for pid in layer_ids:
-    print(f"  {pid:<11} {len(covered.get(pid, []))} tests: {', '.join(covered.get(pid, []))}")
+    print(f"  {pid:<11} {len(covered.get(pid, []))} checks: {', '.join(covered.get(pid, []))}")
 for e in errors:
     print(f"check-tags: {e}")
 print(f"check-tags: {len(errors)} problem(s)")

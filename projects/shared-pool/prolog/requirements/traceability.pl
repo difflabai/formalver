@@ -86,6 +86,7 @@ property('SH-7', ['near-tests'], "reconcile guard and promise shape").
 property('SH-8', ['near-tests'], "Borsh state round trip").
 property('SH-9', ['near-tests'], "views; get_commitments paging <= 50").
 property('SH-10', ['near-tests'], "nonpayable methods reject deposits").
+property('SH-11', ['near-tests'], "wasm exports are the documented methods plus contract_source_metadata; no upgrade, migrate or reset export").
 property('EX-1', ['near-tests'], "only lock executes").
 property('EX-2', ['near-tests'], "payload binding and dedupe").
 property('EX-3', ['near-tests'], "only operator finishes/confirms/sets mode").
@@ -206,7 +207,13 @@ trace_row('S-NOEXPIRY',    ['LIFE-1', 'SH-7', 'C-3']).
 trace_row('S-ADAPTER',     ['EX-1', 'EX-2', 'EX-3', 'EX-4', 'EX-5']).
 trace_row('S-PAUSE',       ['PAUSE-1', 'TX-PAUSE', 'C-1', 'C-2']).
 trace_row('S-OBSERVE',     ['OBS-1', 'TX-OBSERVE', 'C-1', 'C-2']).
-trace_row('S-NOADMIN',     ['C-1', 'OBS-1']).
+% S-NOADMIN (spec:56): C-1 (no role-mutation method in the authority matrix),
+% OBS-1 (observe leaves the policy unchanged), SH-11 (no upgrade, migrate or
+% reset export). The funds-transfer and dynamic-plugin clauses rest on source
+% review only: both wasm files import transfer, deploy and add-key host
+% functions, and no check here excludes them (NT-F3). Code replacement through
+% a deployment-account key is ASM-DEPLOY.
+trace_row('S-NOADMIN',     ['C-1', 'OBS-1', 'SH-11', 'ASM-DEPLOY']).
 trace_row('S-GPU',         ['C-5']).
 trace_row('S-STOCK',       ['C-5']).
 trace_row('S-CASH',        ['C-5', 'DEP-1']).

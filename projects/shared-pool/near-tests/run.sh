@@ -18,9 +18,9 @@
 #            must hold; SURF-2 (no deploy/delete/add-key/transfer imports)
 #            fails on the pinned code with exactly the recorded imports, the
 #            known finding NT-F3, reported as expected-fail (STRICT_SURFACE=1
-#            makes it an error). SURF-1 bears on SH-5 and ASM-DEPLOY, SURF-2
-#            on ASM-DEPLOY (see wasm-surface.sh).
-#            PROP: SH-5 ASM-DEPLOY
+#            makes it an error). SURF-1 checks SH-11 and bears on SH-5 and
+#            ASM-DEPLOY, SURF-2 on ASM-DEPLOY (see wasm-surface.sh).
+#            PROP: SH-5 SH-11 ASM-DEPLOY
 #   all      test (tag check included), surface, mutants (default).
 set -uo pipefail
 export PATH="$HOME/.cargo/bin:$PATH"

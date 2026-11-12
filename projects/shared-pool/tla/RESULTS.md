@@ -56,7 +56,8 @@ for a valid config (an argument, not a proof: NUM-1), but the values are
 far beyond what TLC can represent. The traces stay
 inside the range: trace 206 reaches values of 10^6 but keeps the energy
 residual at most 10 (excess term with target 999,990). Energy at large
-residuals (NUM-1) is the Kani and Lean layers' job, not shown here.
+residuals (NUM-1) is Kani's job (Lean computes exactly in Int and does not
+model overflow), not shown here.
 
 **Abstractions.** Names and units of metrics and recipes are not modelled
 (the core only checks their lengths). Numbers are exact integers within the
@@ -340,6 +341,15 @@ recovery add is unreachable (above). The same holds in the core. A
   are independent steps" (ASM-INTERLEAVE).
 - **Refinement to the code.** The link from this model to the Rust is only
   REF-5 (traces); per-step Kani refinement (REF-1..3) is not done yet.
+- **CI memory (unmeasured).** The `tla` job runs `safety liveness trace`
+  and `mutants` with `TLA_HEAP=5g` on GitHub-hosted runners
+  (`.github/workflows/shared-pool.yml`). It has not run there, and the runs
+  recorded here give no heap size or peak RSS, so whether MC_Safety
+  (2,306,738 distinct states) fits a hosted runner is not known. To do once
+  the Kani run has freed memory on this machine: run
+  `TLA_HEAP=5g /usr/bin/time -l tla/run.sh safety` once, record the peak
+  RSS here, and lower `TLA_WORKERS` or use a larger runner if it does not
+  fit.
 
 ## PROP tags
 

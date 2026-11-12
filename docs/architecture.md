@@ -224,10 +224,11 @@ tracked:
   NEAR-facing assumptions also cite the Nomicon pages they rely on.
 - **shared-pool:** 14 `ASM-*` assumptions, listed with level and check in
   [strategy §3.3](../projects/shared-pool/strategy.md). They are
-  `assumption/3` facts in `prolog/requirements/threat_model.pl` and catalogue
-  entries in `traceability.pl`, not yet a `status.toml` table. Three are
-  policy, with no check: ASM-EXEC (the executor is honest; F-2 is the case
-  where the honest report fails), ASM-OWNER and ASM-DEPLOY.
+  `assumption/3` facts in `prolog/requirements/threat_model.pl`, catalogue
+  entries in `traceability.pl`, and `[assumptions.ASM-*]` tables in
+  `status.toml`. Three are policy, with no check: ASM-EXEC (the executor is
+  honest; F-2 is the case where the honest report fails), ASM-OWNER and
+  ASM-DEPLOY.
 
 ## Verification status
 
@@ -245,7 +246,6 @@ near-approval also records each property's `evidence`
 and its `layer`, so a Kani result can never be reported as more than a
 bounded proof, and a Lean result never as a proof of the code (strategy §12).
 
-shared-pool's `status.toml` records no properties yet: only `[project]`,
-`[review]`, `[tools]` and `[source_hashes]`. Its strategy §12 adopts
-near-approval's conventions. While the pin is an unmerged PR head, no property
-goes past `in-progress`.
+shared-pool's `status.toml` records 83 properties and 14 assumptions; none
+is past `in-progress`, and none may be while the pin is an unmerged PR head.
+Its strategy §12 adopts near-approval's conventions.

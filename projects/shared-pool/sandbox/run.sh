@@ -16,11 +16,20 @@
 #
 # Env: SANDBOX_VARIANTS (default "upstream cfg-near"), SANDBOX_TEST_THREADS
 # (default 3), SANDBOX_SKIP_RES=1 skips RES-1 (about 4 minutes per variant),
-# SANDBOX_SKIP_BUILD=1 reuses the built wasm (still checks the lock).
+# SANDBOX_SKIP_BUILD=1 reuses the built wasm (still checks the lock),
+# POOL_TOOLCHAIN overrides the channel read from
+# ../source-mirror/rust-toolchain.toml.
 set -euo pipefail
 cd "$(dirname "$0")"
 export PATH="$HOME/.cargo/bin:$PATH"
-toolchain="+1.98"
+# The upstream channel, read as the workflow's sandbox job reads it, so a
+# re-pin that changes rust-toolchain.toml changes the toolchain here too.
+# POOL_TOOLCHAIN, if set, overrides it; it is passed on to
+# scripts/build-wasm.sh and scripts/build-res.sh.
+channel=${POOL_TOOLCHAIN:-$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' ../source-mirror/rust-toolchain.toml)}
+[ -n "$channel" ] || { echo "no channel in ../source-mirror/rust-toolchain.toml" >&2; exit 2; }
+export POOL_TOOLCHAIN="$channel"
+toolchain="+$channel"
 start=$(date +%s)
 
 python3 scripts/check-lock.py results/lock-check.json

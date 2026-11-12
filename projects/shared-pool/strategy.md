@@ -18,7 +18,7 @@ the pool and, when no record is open, replaces the measured values
 
 | | |
 |---|---|
-| Pinned commit | `a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7`, head of PR #1 (branch `feat/shared-pool-controls`, 2026-11-11, "Address review: reconcile griefing, broken doc link, CI robustness"). **Not on upstream `main`.** Re-pin when the PR merges (§13). |
+| Pinned commit | `a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7`, head of PR #1 (branch `feat/shared-pool-controls`, 2026-11-12 UTC, "Address review: reconcile griefing, broken doc link, CI robustness"). **Not on upstream `main`.** Re-pin when the PR merges (§13). |
 | Crates | `pool-core` (`crates/core/src/lib.rs`, 492 lines): every decision; zero dependencies in the default build; `#![forbid(unsafe_code)]`; serde and borsh optional. `pool-contract`: a near-sdk 5.29.1 shell (predecessor → caller, block time in whole seconds, core errors → panics, a promise to the executor, a private callback, views). `pool-executor`: the synthetic executor (`execute`, `status`, `finish`, `confirm_not_executed`, fault modes). `crates/sandbox`: upstream's near-workspaces tests. |
 | Toolchain | Upstream `rust-toolchain.toml` 1.98. Release profile: codegen-units 1, `opt-level = "z"`, LTO, `panic = "abort"`, `overflow-checks = true` (ASM-COMPILE). |
 | TCB via `Cargo.lock` | near-sdk 5.29.1, borsh 1.8.1, serde_json 1.0.154, and their dependencies |
@@ -33,11 +33,12 @@ local chain.
 **Status (2026-11-12, pin `a4bb5c3`).** TLA+, Lean, Prolog, the shell
 tests and the sandbox are built and pass locally. TLA+, Lean, Prolog and
 the shell tests replay the same 212 real-core traces (§10). The sandbox
-compares the chain with a host `pool-core` oracle. Kani and CI are in
-progress. Two high findings, F-1 and F-2, show that the settlement
-liveness the docs rely on does not hold. Nothing is verified: there is no
-spec reviewer, and the pin is an unmerged PR head. Next: land Kani, report
-the findings on PR #1, and re-pin when it merges (§13).
+compares the chain with a host `pool-core` oracle. Kani is in progress;
+CI is written (not yet run on GitHub), Kani jobs pending. Two high
+findings, F-1 and F-2, show that the settlement liveness the docs rely on
+does not hold. Nothing is verified: there is no spec reviewer, and the pin
+is an unmerged PR head. Next: land Kani, report the findings on PR #1, and
+re-pin when it merges (§13).
 
 ---
 
@@ -62,9 +63,10 @@ wasm builds and a local chain. SH-5 holds only on the `--cfg near` build
 (NT-F1). Kani on the real code is pending. None is verified (§12).
 
 **Not established:** that a deployment runs this code (ASM-DEPLOY);
-executor honesty or true observations (ASM-EXEC, ASM-OWNER; F-2 shows the
-honest executor is the one that gets stuck); that a policy models the
-world (spec:31); receipt order across shards; optimality of
+that no code path transfers funds, deploys code or adds keys (source review
+only, NT-F3); executor honesty or true observations (ASM-EXEC, ASM-OWNER;
+F-2 shows the honest executor is the one that gets stuck); that a policy
+models the world (spec:31); receipt order across shards; optimality of
 `best_quantity` (spec:27); eventual completion (handoff:29).
 
 ### Tiers
@@ -110,8 +112,10 @@ upstream decides on F-1 and F-2, since a fix changes what a proof covers.
 
 **Out of scope:** `crates/demo`, `ui/`, `scenarios/` and upstream's HTTP
 smoke checks; deployment (none exists; code replacement, spec:56, is
-ASM-DEPLOY); policy design and economics; executor honesty and owner
-truth; broker fills, physical delivery and token custody (handoff:40).
+ASM-DEPLOY); storage staking (no layer runs an account at its storage-stake
+minimum; §9.2, §9.3); policy design and economics; executor honesty and
+owner truth; broker fills, physical delivery and token custody
+(handoff:40).
 
 ---
 
@@ -192,8 +196,8 @@ Severity rates the harm to the property the docs promise.
 | ID | Finding | Reproducer and layers | Contradicts |
 |---|---|---|---|
 | F-1 (high) | **Disturbed-state hedge wedge.** An `observe` puts a metric outside [min, max]. The recovery rule (spec:23) then admits a hedge whose reservation brings the point inside, but whose completion moves it back out. From then on `settle(true)` and `settle(false)` both fail `Bounds`, and `cancel` and `observe` fail `Pending`, forever. The record never becomes terminal, and the pool can never be observed again. | **Trace 0.** Metrics m(0,10,5), m(−100,100,5); term t(1,0,1,target); recipe r(a1,x1,[−2,0],[2,−5],1,[]). `observe [12,5]`; submit 1 → `ok(0)`, values [10,5]; dispatch; `ack(true)` → Active; `settle` true and false → `Bounds`; the owner's `cancel` → `Pending`; `observe` → `Pending`. <br>**TLA+:** `Witness_Wedge` (4 states); TLA-LIVE-F1; `MC_Liveness_F1Shape` shows that, in the small universe, every LIVE-2 counterexample is this wedge. <br>**Lean:** `f1_forever` (for every later call sequence, the record stays Active and every observe fails). <br>**Prolog:** MC-1 `wedge` has 228 dead states. <br>**near-tests:** `wedge.rs` (from Dispatched, Unknown and Active; host and both builds). <br>**Sandbox:** RT-WEDGE. The executor commits "completed", its `settle(true)` fails `Bounds`, and the record stays Active. The executor then refuses `finish(cancelled)` ("terminal outcome conflict") and `confirm_not_executed` ("job exists"). The two contracts disagree permanently. | spec:46: a checked inverse "can fail if another commitment depends on its contribution". handoff:31 makes liveness conditional on resolving dependencies. Here no other commitment is open, so there is nothing to resolve (`div-F1-inverse`). |
-| F-2 (high) | **Healthy-state release wedge in the supplied `risk` fixture.** No observe; every metric in bounds. A credit position is reserved (recipe 0, +20 on selloff loss). A selloff hedge (recipe 3, −10 per unit on completion) is admitted only because the position's +20 is counted: 60 + 20 − 70 ≥ 0 at 7 units. The hedge completes, and selloff loss is 10. The position's job never ran, so the executor honestly calls `settle(false)`. Releasing the +20 gives 10 − 20 < 0, so it fails `Bounds`. `cancel` and `observe` fail `Pending`. Only `settle(true)`, an attestation of work that did not happen, ends the record. The same check blocks `cancel` of a Reserved position. LIVE-1 is unaffected. <br>**F-2b** (found by the TLA+ layer): a release is not bounded by the envelope. After a sibling relied on the reservation, `values − reserve·units` can leave ±1,000,000. Then `cancel` (actor and owner) and the honest `settle(false)` fail `Arithmetic`. | **Trace 209** (`f2-risk`, 13 calls, the supplied `risk` config of trace 5, no observe): position × 1 (recipe 0, selloff loss 60 → 80), hedge × 8 (recipe 3, admitted with the position counted: 80 − 80 = 0), both dispatched and Active; the hedge settles completed (selloff loss 0). Then the executor's `settle(false)` for the position → `Bounds`, `cancel` by the owner and by the actor → `Pending`, `observe` → `Pending`; `settle(true)` → Ok, then `observe` → Ok. Equal under TLC, Lean, Prolog (MC-2) and the shell. <br>**Prolog:** `test_model` "F-2 witness" (position × 1, hedge × 7, hedge completed). C-5's release search finds 20 counterexamples in `risk` and none in `gpu`, `friday`, `inventory` or `hiring`. The first is `rel(p(0,1,3,7), release(0), other(reserved), via(cancel)) - err(bounds)`. MC-1 `reliance`: 150 release-blocked states with B = 0. <br>**TLA+:** TLA-LIVE-F2 (weak fairness of the honest `settle(false)` and of `cancel`); `MC_Liveness_F2Shape` shows that, in its small universe (`CreditHedgeConfig`), every LIVE-2 counterexample is this wedge. <br>**F-2b: trace 208** (`release-arith`, 13 calls), equal under TLC, Lean, Prolog and the shell. | spec:46: "In the supplied fixtures, physical availability and risk-credit timing prevent ordinary unsafe reliance on unexecuted work." spec:46 also says "resolve dependent work first", yet the dependent hedge is resolved and the release still fails. handoff:23 (RISK). `div-F2-fixture-release`. |
-| F-3 (low/medium) | **Lifetime slot exhaustion.** One actor fills all 256 lifetime records with free submit-and-cancel cycles. After that, `Full` is permanent for every actor. `observe` does not prune (spec:54), and nothing else does. | **Trace 207** (`full`, 515 calls): submit `ok` 256, cancel `ok` 256, then submit `full` 2 (another actor, also after an observe). TLC TraceCheck (it also kills TLA+ mutants 13 and 25), REF-5L, MC-2, near-tests `traces.rs` and `sh4`. Sandbox RES-1: submit #257 is rejected `Full`. | Not explicit. handoff:34: "256 lifetime records bound ordinary growth". |
+| F-2 (high) | **Healthy-state release wedge in the supplied `risk` fixture.** No observe; every metric in bounds. A credit position is reserved (recipe 0, +20 on selloff loss). A selloff hedge (recipe 3, −10 per unit on completion) is admitted only because the position's +20 is counted: 60 + 20 − 70 ≥ 0 at 7 units. The hedge completes, and selloff loss is 10. The position's job never ran, so the executor honestly calls `settle(false)`. Releasing the +20 gives 10 − 20 < 0, so it fails `Bounds`. `cancel` and `observe` fail `Pending`. Only `settle(true)`, an attestation of work that did not happen, ends the record. The same check blocks `cancel` of a Reserved position. LIVE-1 is unaffected. <br>**F-2b** (found by the TLA+ layer): a release is not bounded by the envelope. After a sibling relied on the reservation, `values − reserve·units` can leave ±1,000,000. Then `cancel` (actor and owner) and the honest `settle(false)` fail `Arithmetic`. | **Trace 209** (`f2-risk`, 13 calls, the supplied `risk` config of trace 5, no observe): position × 1 (recipe 0, selloff loss 60 → 80), hedge × 8 (recipe 3, admitted with the position counted: 80 − 80 = 0), both dispatched and Active; the hedge settles completed (selloff loss 0). Then the executor's `settle(false)` for the position → `Bounds`, `cancel` by the owner and by the actor → `Pending`, `observe` → `Pending`; `settle(true)` → Ok, then `observe` → Ok. Equal under TLC, Lean, Prolog (MC-2) and the shell. <br>**Prolog:** `test_model` "F-2 witness" (position × 1, hedge × 7, hedge completed). C-5's release search finds 20 counterexamples in `risk` and none in `gpu`, `friday`, `inventory` or `hiring`. The first is `rel(p(0,1,3,7), release(0), other(reserved), via(cancel)) - err(bounds)`. MC-1 `reliance`: 150 release-blocked states with B = 0. <br>**TLA+:** TLA-LIVE-F2 (weak fairness of the honest `settle(false)` and of `cancel`); `MC_Liveness_F2Shape` shows that, in its small universe (`CreditHedgeConfig`), every LIVE-2 counterexample is this wedge. <br>**F-2b: trace 208** (`release-arith`, 13 calls), equal under TLC, Lean, Prolog and the shell. | spec:46: "In the supplied fixtures, physical availability and risk-credit timing prevent ordinary unsafe reliance on unexecuted work." spec:46 also says "resolve dependent work first", yet the dependent hedge is resolved and the release still fails. handoff:23 (RISK) is the related obligation, not contradicted. `div-F2-fixture-release`. |
+| F-3 (low) | **Lifetime slot exhaustion.** One actor fills all 256 lifetime records with free submit-and-cancel cycles. After that, `Full` is permanent for every actor. `observe` does not prune (spec:54), and nothing else does. | **Trace 207** (`full`, 515 calls): submit `ok` 256, cancel `ok` 256, then submit `full` 2 (another actor, also after an observe). TLC TraceCheck (it also kills TLA+ mutants 13 and 25), REF-5L, MC-2, near-tests `traces.rs` and `sh4`. Sandbox RES-1: submit #257 is rejected `Full`. | Not explicit. handoff:34: "256 lifetime records bound ordinary growth". |
 | F-4 (low) | **A principal can attest its own work.** `Config::validate` accepts a recipe whose actor is its executor, or the owner. That account can then submit, dispatch and settle its own work as completed. | **Trace 210** (`f4-self`, 8 calls): `validate` accepts recipe 0 with actor = executor = a1 and recipe 1 with actor = executor = the owner o. a1 submits, dispatches and settles record 0 completed, and o does the same with record 1; every call is Ok. Equal under TLC, Lean, Prolog and the shell. <br>**Prolog:** `test_model` "F-4 witness" (step/4). `extract.py` records `code_role_checks(validate, [])`. Code mutant c09 (validate rejects actor = executor) makes C-5 fail. | spec:64: "No worker can authorize its own acceptance through the wrapper". spec:50: "the independent operator". `amb-self-executor`. |
 | F-5 (low) | **Version saturation freezes every transition.** At version = u32::MAX, every transition fails `Arithmetic`, including settling in-flight records and `set_paused(false)`. Reaching it takes 2³² − 1 effective transitions. | **No trace:** reaching version u32::MAX takes 2³² − 1 effective transitions; the highest version in the traces is 513. <br>**Prolog:** `test_model` "F-5 witness" (step/4 from a paused state at version u32::MAX with record 0 Dispatched: `settle` both ways, `ack` and `set_paused(false)` fail `Arithmetic`, `observe` fails `Pending`). <br>**Lean:** mutant 04 (version overflow one too late) is killed by the proofs. <br>**TLA+:** no witness; `VerErr` transcribes the bump, but `MaxVersion` is 2³¹ − 1 and no run gets near it (§17.5). <br>**Sandbox:** RT-REVERT patches version = u32::MAX into the state: `set_paused` and `submit` fail, and storage is unchanged. | None. handoff:34 documents "Version overflow is an explicit rejection". The effect on in-flight records is not documented. |
 | F-6 (low) | **An open record blocks the only snapshot refresh.** With `max_age > 0`, one record open longer than `max_age` freezes the pool. `observe` needs every record terminal, so it fails `Pending`. `submit` and `dispatch` fail `SnapshotExpired` until the executor settles. | **Trace 211** (`f6-stale`, 12 calls): max_age 50, observed at 100; record 0 dispatched and Active. At now = 151, `submit` and `dispatch` fail `SnapshotExpired` and `observe` fails `Pending`; with the other record cancelled, `observe` still fails `Pending` while record 0 is open. Once the executor settles record 0, `observe` and then `submit` are Ok. Equal under TLC, Lean, Prolog and the shell. <br>**Prolog:** `test_model` "F-6 witness" on the risk fixture: max_age 300, observed at 100, one record in flight. At now = 401, `dispatch` and `submit` fail `SnapshotExpired`, and `observe` fails `Pending`. | Not explicit. spec:19, 37 and 54 state the two rules separately. |
@@ -241,7 +245,7 @@ record's version at most twice.
 
 ## 5. Property catalogue
 
-The IDs below are exactly the 96 `property/3` IDs of
+The IDs below are exactly the 97 `property/3` IDs of
 `prolog/requirements/traceability.pl`. C-6
 (`prolog/verification/consistency.pl`) now compares `traceability.pl`
 with this section, not with the brief: the IDs are the first cell of every
@@ -265,11 +269,12 @@ other tables.
 
 **Columns.** *Layer(s)* is `property/3`'s layer list. *Evidence* names
 the artifact. Its §12 kind follows from the layer: Lean is model-proof, TLC
-and MC-1 model-check, replays and tests test, Prolog C-* check, and Kani
-bounded-proof. *Status* values:
+and MC-1 model-check, replays and tests test, Prolog C-* and the wasm
+surface (SH-11) check, and Kani bounded-proof. *Status* values:
 - `proved (model)`: a Lean theorem about the transcription, at every size.
 - `model-checked`: TLC or MC-1, within bounds. `tested`: on the real code.
-- `checked`: a Prolog consistency check. `pending (Kani layer)`: no result
+- `checked`: a Prolog consistency check, or SH-11's comparison of the
+  built wasm with `wasm-surface.expected`. `pending (Kani layer)`: no result
   yet. `fails: F-n`: false, with a reproducer. No row is verified (§12).
 
 ### 5.1 Configuration and numerics
@@ -347,6 +352,7 @@ with `inv_init`, `inv_step` and `reach_inv`.
 ### 5.7 Contract shell
 
 Mocked runtime (`near-tests/`), on the host and on two wasm builds.
+SH-11 is the surface check of both builds (`near-tests/wasm-surface.sh`).
 
 | ID | Statement | Layer(s) | Evidence | Status |
 |---|---|---|---|---|
@@ -360,6 +366,7 @@ Mocked runtime (`near-tests/`), on the host and on two wasm builds.
 | SH-8 | Borsh state round trip: the shell equals the core, with a reload before every call | near-tests | `sh8_store_diff_host` (80,000 calls), `sh8_store_diff_wasm` (12,000 calls per build), `conformance_traces_through_the_shell` (8,804 calls × 3 paths) | tested |
 | SH-9 | Views: `get_pool`, `get_commitments` pages of at most 50 | near-tests | `sh9_views_and_paging_at_256_records`; mutant m06 | tested |
 | SH-10 | Nonpayable methods reject deposits | near-tests | `sh10_mutating_methods_reject_attached_deposits`; mutant m12 | tested; NT-F2 (`reconcile` keeps deposits) |
+| SH-11 | Export surface, both builds: `pool_contract` exports exactly the 12 documented methods plus `contract_source_metadata` and `memory`, and `pool_executor` its 7 methods plus the same two; no upgrade, migrate or reset export | near-tests | `wasm-surface.sh` SURF-1 against `wasm-surface.expected` (`run.sh surface`) | checked; NT-F3 (the imports do not exclude transfer, deploy or add-key actions: source review only) |
 
 ### 5.8 Executor
 
@@ -394,7 +401,7 @@ Every row ran on both builds (§9.2).
 | C-3 | Lifecycle: docs = code = TLA+ `Edges` = the traces | prolog | 36 rows, 11 edges, all 36 rows observed in the traces | checked; one divergence (`div-ack-noop-version`) |
 | C-4 | Constants: docs = code | prolog | 8 compared, 4 derived | checked |
 | C-5 | Fixture conservation (STOCK, CASH, RISK, self-authorization) | prolog | 23 claims on trace configs 1-5; a two-record release search per fixture | checked; F-2 and F-4 reproduced |
-| C-6 | Traceability: `traceability.pl` = this section (IDs and layer lists); requirements, threats and findings traced | prolog | `verification/consistency.pl` reads the first cell and the *Layer(s)* cell of every table row of §5 from this file. Requirements suite, 2026-11-12: 96 IDs, 96 rows, 96 equal layer lists | checked |
+| C-6 | Traceability: `traceability.pl` = this section (IDs and layer lists); requirements, threats and findings traced | prolog | `verification/consistency.pl` reads the first cell and the *Layer(s)* cell of every table row of §5 from this file. Requirements suite, 2026-11-12: 97 IDs, 97 rows, 97 equal layer lists | checked |
 | MC-1 | Small model check of `step/4` | prolog | `wedge` 3,740 states, `healthy` 3,856, `reliance` 630; all complete | model-checked |
 | MC-2 | Replay of every trace through `step/4` | prolog | 212 traces, 8,804 calls, 0 divergences | tested |
 
@@ -588,19 +595,20 @@ Results: `near-tests/RESULTS.md` (2026-11-11). Toolchain 1.98, near-sdk
 | `tests/wedge.rs` | 3 | F-1 through the shell; a control without the observe; F-1 with the executor |
 | `tests/lockfile.rs` | 1 | 280 packages resolve exactly as in the mirror |
 
-All 29 tests pass in about 30 s. `run.sh test` and `run.sh all` first
-run `check-tags.py` (stdlib Python, under a second), which fails the run
+All 29 tests pass in about 30 s. `run.sh test` and `run.sh all` first run
+`check-tags.py` (stdlib Python, under a second), which fails the run
 unless every test has its own PROP tag line, every tag is a `property/3`
-ID, and each near-tests property is tagged on a test that checks it. Each
-of the 21 mutants (15 contract, 6 executor) is applied to a copy of the
-source, and both builds are rebuilt. All 21 are killed (9 min).
+ID, and each near-tests property is tagged on a test that checks it (SH-11
+on the surface check SURF-1). Each of the 21 mutants (15 contract, 6
+executor) is applied to a copy of the source, and both builds are rebuilt.
+All 21 are killed (9 min).
 
 **Wasm surface.** `near-tests/wasm-surface.sh` compares both builds with
 `wasm-surface.expected`. SURF-1 (exports, and each import classed as
-promise, forbidden or other) passes. SURF-2 fails as expected, with exactly
-the recorded forbidden imports (NT-F3). `pool_contract` exports the 12
-methods, `contract_source_metadata` and `memory`. Only the `--cfg near`
-build imports `panic_utf8` (NT-F1).
+promise, forbidden or other) passes; it is SH-11's check. SURF-2 fails as
+expected, with exactly the recorded forbidden imports (NT-F3).
+`pool_contract` exports the 12 methods, `contract_source_metadata` and
+`memory`. Only the `--cfg near` build imports `panic_utf8` (NT-F1).
 
 ### 9.2 Sandbox (real wasm, local chain)
 
@@ -631,14 +639,18 @@ wasm32-unknown-unknown --release --locked`; a rebuild gives the same hashes:
 - `run.sh` took 438 s with warm caches.
 - **Not shown:** multiple shards and congestion; other protocol versions'
   gas; that RES-1's state is the worst case; storage staking; any live
-  deployment.
+  deployment. Every transaction attaches 300 Tgas, so behaviour with less
+  prepaid gas is not observed (`docs/api.md` states no minimum). The
+  executor is measured at about 32 jobs, not its 256-job cap.
 
 ### 9.3 Deployment
 
 Out of scope: no deployment of this pin exists. If one is made, follow
-near-approval §5.10 (code hash, lock at deploy, owner as a multisig), and
-build with cargo-near or `--cfg near` (NT-F1). The import surface does not
-rule out code replacement (NT-F3).
+near-approval §5.10 (code hash, lock at deploy, owner as a multisig), fund
+the pool and executor accounts above their storage stake (the executor's
+`finish` grows its state by 3 bytes per job), and build with cargo-near or
+`--cfg near` (NT-F1). The import surface does not rule out code
+replacement (NT-F3).
 
 ---
 
@@ -694,8 +706,8 @@ whole post-state.
 ### 10.2 What the traces do not establish
 
 - **Equivalence.** 8,804 equal calls are evidence that the models
-  transcribe the code, not a proof (ASM-LEAN-TLA). REF-1..3 add a bounded
-  proof per step.
+  transcribe the code, not a proof (ASM-LEAN-TLA). REF-1..3 (Kani,
+  pending) will add a bounded proof per step.
 - **Exits no trace reaches:** the version-overflow bump (the highest state
   version is 513); `settle(true)`'s add and envelope `Arithmetic`;
   submit's recovery add; release's envelope `Arithmetic`.
@@ -761,7 +773,7 @@ Specific to this project:
 |---|---|
 | `release_overflow_checks = true` | In `[project]`. `check-pin.sh` fails unless upstream keeps `overflow-checks = true` (ASM-COMPILE). |
 | Unmerged pin | While `pinned_commit` is not on upstream `main`, no property goes past `in-progress`. The `pinned_commit` comment says it is a PR head. |
-| Properties | The 82 non-ASM rows of §5, under `[modules.<m>.properties]`, one module per §5 subsection: `config_numerics` (§5.1), `transitions` (§5.2), `step_properties` (§5.3), `invariants` (§5.4), `reads` (§5.5), `liveness` (§5.6), `contract_shell` (§5.7), `executor` (§5.8), `runtime` (§5.9), `requirements` (§5.10), `tla_model` (§5.11), `lean_model` (§5.12) and `kani_refinement` (§5.13). IDs equal `traceability.pl`'s. `layer` is the first layer of the row's *Layer(s)* cell. `cross` holds the row's other layers, plus any other layer whose files carry the ID's `PROP:` tag. |
+| Properties | The 83 non-ASM rows of §5, under `[modules.<m>.properties]`, one module per §5 subsection: `config_numerics` (§5.1), `transitions` (§5.2), `step_properties` (§5.3), `invariants` (§5.4), `reads` (§5.5), `liveness` (§5.6), `contract_shell` (§5.7), `executor` (§5.8), `runtime` (§5.9), `requirements` (§5.10), `tla_model` (§5.11), `lean_model` (§5.12) and `kani_refinement` (§5.13). IDs equal `traceability.pl`'s. `layer` is the first layer of the row's *Layer(s)* cell. `cross` holds the row's other layers, plus any other layer whose files carry the ID's `PROP:` tag. |
 | Kani pending | Every property with `layer = "kani"` stays `unverified` until the Kani layer lands (§6), even where TLA+, Lean or Prolog already check it. Those results are in `cross` and `harness`. The §5.4 invariants list `tla` first, so TLC is their primary layer and they are `in-progress`. |
 | Layer names | `near-tests/` carries `unit` (`shell.rs`, `executor.rs`, `wedge.rs`) and `difftest` (`store_diff.rs`, `traces.rs`). The surface check is `wasm-check`. The conformance generator is not a layer: each replay is recorded under the layer that runs it (REF-5 `tla`, REF-5L `lean`, MC-2 `prolog`, SH-8 `difftest`). REF-5 is `model-check`, a TLC run. REF-5L is a replay, test-class evidence (§5.12 says tested), recorded as `model-check` because `lean` allows no `test`; its `harness` says so. |
 | False properties | LIVE-2 stays `unverified` with `finding = "F-1, F-2"`. SH-5 is `in-progress` with `finding = "NT-F1"`: it holds on the `--cfg near` build that §1 scopes, and is false on `scripts/build.sh`. Every row whose §5 Statement or Status cell names a finding carries `finding` too: the witnesses below, and the caveats on AUTH-1, SH-3 and SH-10. status-lint ignores the key; it is for readers. |
@@ -784,7 +796,7 @@ Specific to this project:
 | M5 | Verus | Deferred (§7) |
 | M6 | Sandbox | Done, on one shard |
 | M7 | Deployment | Out of scope |
-| CI | `.github/workflows/shared-pool.yml` (§14) | Written; Kani jobs added with the layer |
+| CI | `.github/workflows/shared-pool.yml` (§14) | Written, not yet run on GitHub; Kani jobs added with the layer |
 
 **Next, in order.**
 1. Land the Kani layer: harnesses, covers (F-1 among them), canary,
@@ -799,18 +811,17 @@ Closed from this list: pointing C-6 at §5 instead of the brief (§5); a
 conformance trace of F-2's `Bounds` form on the `risk` fixture (trace
 209; traces 210 and 211 add F-4 and F-6), which TLA+, Lean, Prolog and the
 shell all replay; and the §5 properties and assumptions in `status.toml`
-(82 properties and 14 assumptions, §12).
+(83 properties and 14 assumptions, §12).
 
 ---
 
 ## 14. CI (`.github/workflows/shared-pool.yml`)
 
-The workflow is being written alongside this document and is
-authoritative. Jobs run on pull requests and pushes to `main` that touch
-the project. Changes only to documentation (`*.md`, `docs/`) do not
-trigger them, except `strategy.md`: C-6 reads its §5, so the path filters
-include it again. `sandbox` runs only on `workflow_dispatch` with
-`sandbox: true`.
+The workflow is authoritative. Jobs run on pull requests and pushes to
+`main` that touch the project. Changes only to documentation (`*.md`,
+`docs/`) do not trigger them, except `strategy.md`: C-6 reads its §5, so
+the path filters include it again. `sandbox` runs only on
+`workflow_dispatch` with `sandbox: true`.
 
 | Job | Runs | Fails on |
 |---|---|---|
@@ -838,6 +849,7 @@ include it again. `sandbox` runs only on `workflow_dispatch` with
 | TLC's 32-bit integers | Overflow aborts a run, so no run passes silently. Lean covers large values, and Kani will once it lands. |
 | One-shard sandbox | RT-RACE records what one shard cannot show. The models treat ack and settle as independent steps. |
 | The import surface cannot exclude code replacement (NT-F3). | Source review and dynamic absence. Deployment stays out of scope. |
+| TLC at `TLA_HEAP=5g` on a GitHub-hosted runner has never run, and no peak memory is recorded. | Measure `tla/run.sh safety` once under `/usr/bin/time -l` after the Kani run (`tla/RESULTS.md`, open items); lower `TLA_WORKERS` or use a larger runner if it does not fit. |
 
 ---
 
@@ -853,7 +865,7 @@ include it again. `sandbox` runs only on `workflow_dispatch` with
 | OQ-6 | F-3: a per-actor record cap, pruning on observe, or a documented limit? F-6: a refresh path that does not need every record terminal? |
 | OQ-7 | TLA-IND: rewrite the model for Apalache, or accept LEAN-IND as the every-size safety result? |
 | OQ-8 | L-1b: confirm with upstream that a reservation that cured a violation is meant to be uncancellable. |
-| OQ-9 | Docs: update spec:39 and api:26 for the no-op acknowledgment, and api:34 for non-string results (NT-F4). |
+| OQ-9 | Docs: update spec:39 and api:26 for the no-op acknowledgment, and api:34 for non-string results (NT-F4); state a minimum prepaid gas per method in api.md (none is given; §9.2). |
 | OQ-10 | Who reviews the specs? |
 
 ---
@@ -919,12 +931,14 @@ check names its fairness assumption:
   the generator as trace 208.
 - **REF-5:** 9,016 of 9,016 states (212 initial + 8,804 steps), in 8 s.
 - **Mutants:** 31 of 31 killed in 150 s (28 by the trace check, 2 by
-  liveness, 1 by `liveness-f2`). Mutants 10, 13, 23, 24, 25 and 26 survive
-  traces 0-205 alone; traces 206 and 207 kill them. One equivalent mutant
-  is not checked in: "`add` ignores the upper bound". The envelope check
-  after every `add` gives `Arithmetic` there.
+  liveness, 1 by `liveness-f2`), measured on the 209-trace set; only the
+  trace check was rerun on 212 traces. Mutants 10, 13, 23, 24, 25 and 26
+  survive traces 0-205 alone; traces 206 and 207 kill them. One equivalent
+  mutant is not checked in: "`add` ignores the upper bound". The envelope
+  check after every `add` gives `Arithmetic` there.
 - **Run times:** `run.sh` (default: safety, liveness, trace) takes 573 s,
-  and `run.sh mutants` 150 s.
+  and `run.sh mutants` 150 s, measured on the 209-trace set; only the trace
+  check was rerun on 212 traces (8 s).
 
 ### 17.5 Limits
 
