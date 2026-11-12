@@ -209,7 +209,7 @@
   "property": "RES-1",
   "result": "pass",
   "state": {
-    "build_seconds": 143,
+    "build_seconds": 144,
     "built_by": "real transactions only",
     "completed": 33,
     "get_pool_json_bytes": 53221,

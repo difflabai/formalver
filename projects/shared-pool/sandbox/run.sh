@@ -15,7 +15,7 @@
 #      (RES-1) on each variant. Results: results/<variant>/<ID>.json.
 #
 # Env: SANDBOX_VARIANTS (default "upstream cfg-near"), SANDBOX_TEST_THREADS
-# (default 3), SANDBOX_SKIP_RES=1 skips RES-1 (about 4 minutes per variant),
+# (default 3), SANDBOX_SKIP_RES=1 skips RES-1 (about 7 minutes per variant),
 # SANDBOX_SKIP_BUILD=1 reuses the built wasm (still checks the lock),
 # POOL_TOOLCHAIN overrides the channel read from
 # ../source-mirror/rust-toolchain.toml.

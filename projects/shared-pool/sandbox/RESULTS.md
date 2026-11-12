@@ -56,7 +56,7 @@ place. Both builds assert that the call fails and that storage is unchanged.
 | RT-REVERT | `rt_revert_core_errors_write_nothing` | pass | See [RT-REVERT](#rt-revert). |
 | RT-RACE | `rt_race_settle_before_callback`, `rt_race_executor_key_settles_while_callback_in_flight`, `rt_race_operator_finish_vs_callback` | pass (the operator-`finish` form cannot occur on one shard; see the [RT-RACE](#rt-race) section) | See [RT-RACE](#rt-race). |
 | RT-WEDGE | `rt_wedge_f1_end_to_end` | **finding F-1 reproduced** | See [RT-WEDGE](#rt-wedge). |
-| RES-1 | `res_1_gas_at_max_state` | pass | See [RES-1](#res-1). |
+| RES-1 | `res_1_gas_at_max_state`, `res_1_min_prepaid_gas_and_executor_cap` | pass | See [RES-1](#res-1). |
 | (SB-1 witness) | `sb1_upstream_build_loses_panic_messages` | **finding SB-1 reproduced** | Both builds side by side; see Findings below. |
 
 ### RT-PRED
@@ -193,7 +193,10 @@ The state is built with real transactions only:
 The resulting contract state is 45,613 bytes of Borsh (`STATE`). The account's
 storage_usage is 439,584 bytes, and `get_pool` returns 53,221 bytes of JSON.
 
-Gas burnt, upstream build (from `results/upstream/RES-1.json`):
+Gas burnt, upstream build. The rows marked (cap) come from the second test,
+`res_1_min_prepaid_gas_and_executor_cap` (`results/upstream/RES-1-gas.json`),
+with the executor at its 256-job cap. The other rows come from
+`results/upstream/RES-1.json`, with the executor at 31 to 35 jobs.
 
 | call | pool receipt(s) Tgas | tx total Tgas | margin to 300 Tgas | attached budget |
 |---|---|---|---|---|
@@ -208,6 +211,9 @@ Gas burnt, upstream build (from `results/upstream/RES-1.json`):
 | cancel (release) | 9.61 | 9.92 | 290.1 | (none) |
 | reconcile + on_result (+ status 1.32) | 4.17 + 7.62 | 13.86 | 286.1 | on_result 30, status 10 |
 | finish → notify settle(false) | 9.61 | 12.00 | 288.0 | 40 (30.4 spare) |
+| (cap) the dispatch that makes the executor's 256th job (+ execute 2.52: 255 jobs scanned, the 256th pushed) | 8.29 + 7.62 | 19.19 | 280.8 | on_result 30 (22.4 spare), execute 30 (27.5 spare) |
+| (cap) reconcile (+ status 1.77: 256 jobs scanned, the job is last) | 4.17 + 7.62 | 14.31 | 285.7 | on_result 30, status 10 (8.2 spare) |
+| (cap) finish of the last of 256 jobs (finish 2.87) → notify settle(true) | 7.61 | 11.01 | 289.0 | 40 (32.4 spare) |
 
 - The worst single receipt on the pool is 12.56 Tgas (submit #256), which leaves
   a margin of 287.4 Tgas to 300 Tgas.
@@ -220,6 +226,64 @@ Gas burnt, upstream build (from `results/upstream/RES-1.json`):
   12.56 Tgas.
 - `best_quantity` (up to 100 admissions) is not a contract method. It is
   offchain only, so it is not measured.
+
+#### Prepaid gas below 300 Tgas
+
+The second RES-1 test, `res_1_min_prepaid_gas_and_executor_cap`, builds the
+same 256-record state with the same transactions. It then sends `dispatch`,
+`reconcile` and the executor's `finish` with less prepaid gas, counting up one
+whole Tgas at a time from 40 Tgas until the call succeeds. The minimums are the
+same on both builds. The receipt gas below is the upstream build's; cfg-near's
+is within 0.01 Tgas:
+
+| call | state | fails at | smallest that succeeds | fixed gas it attaches | its own receipt |
+|---|---|---|---|---|---|
+| `dispatch` | 256 records, 225 Reserved; executor 31 jobs | every whole Tgas from 40 to 69 | 70 Tgas | execute 30 + on_result 30 | 8.29 Tgas |
+| `reconcile` | 256 records, the record Active; executor 34 jobs | 40 to 45 | 46 Tgas | status 10 + on_result 30 | 4.17 Tgas |
+| `finish` (executor) | 256 jobs, the last job; 256 records | 40 to 42 | 43 Tgas | notify 40 | 2.87 Tgas |
+
+- Each failing attempt (41 per build) fails in its first receipt with the
+  runtime's "Exceeded the prepaid gas.". For each one the test checks:
+  - no receipt runs on the other contract;
+  - no log and no event;
+  - the raw storage of both the pool and the executor is byte-identical;
+  - `get_pool` still equals the oracle, so the record keeps its status
+    (Reserved for `dispatch`, Active for `reconcile` and `finish`).
+- 40 Tgas fails for all three. For `dispatch`, 70 Tgas is the measured
+  minimum and succeeds.
+- The `dispatch` and `reconcile` sweeps ran before the executor was filled,
+  with 31 and 34 jobs (the test checks both counts). They were not repeated
+  at 256 jobs. Only `finish` was swept at the cap.
+- After failed attempts at 40 and 69 Tgas on a second record, a 300 Tgas
+  `dispatch` succeeds. A third record succeeds again at exactly 70 Tgas.
+- The `dispatch` receipt burns the same 8.29 Tgas with 70 or 300 Tgas prepaid.
+  The shell attaches fixed gas to its promises (near-sdk `function_call`, no
+  gas weight), so prepaid gas above the minimum is not passed on to
+  `execute` or `on_result`.
+- At this state, 70 Tgas leaves less than 1 Tgas spare for `dispatch`: 69 Tgas
+  fails. Most of a receipt's gas is loading and writing the state (see the
+  submit curve above), so smaller states should need less. That was not
+  swept. Upstream `docs/api.md` states no minimum prepaid gas (OQ-9).
+
+#### The executor at its cap
+
+The same test then dispatches every record the pool can hold, through the pool
+(`dispatch` → `execute` → `on_result`). The executor ends with 256 jobs, its
+cap.
+
+- Each job but the last is finished (`completed`) right after its dispatch. So
+  the 256th `execute` scans 255 completed jobs before it pushes the 256th.
+- `execute` #256 burns 2.52 Tgas of its 30 (1.50 at about 32 jobs).
+- `status` at 256 jobs, for the last job, burns 1.77 Tgas of its 10 (1.32 at
+  about 35 jobs).
+- `finish` of the last job at 256 jobs burns 2.87 Tgas. Its `settle` on the
+  pool burns 7.61 Tgas of 40. That is less than the 9.65 above: by then only
+  one record is open, and `settle`'s bounds check sums the effects of every
+  open record (core `envelope`).
+- The executor's `STATE` is 6,475 bytes of Borsh at 255 jobs and 6,500 bytes
+  at 256 completed jobs.
+- At the cap, `confirm_not_executed` for a new id fails "full" (a bare trap on
+  the upstream build) and the executor's storage is unchanged.
 
 ## Findings
 
@@ -294,19 +358,25 @@ decision. RD-PREVIEW already excludes `version = u32::MAX`. The state needs
   configuration. Other protocol versions price differently.
 - **Proof of the worst case.** RES-1's maximum state is a constructed worst case,
   not a proven one: all 256 records, the longest `requires` lists, and the
-  largest open envelope with those prerequisites.
+  largest open envelope with those prerequisites. The minimum prepaid gas is
+  measured at that state only, so a larger need at some other state is not
+  ruled out.
 - **Out of scope here (near-tests' mocked runtime covers them):**
   - attached deposits (SH-10)
   - expiry by block time (`Expired`, `SnapshotExpired`)
   - paging of `get_commitments` beyond one page
-- **Prepaid gas below the maximum.** Every transaction attaches 300 Tgas
-  (`max_gas`), so behaviour with less prepaid gas is not observed. Upstream
-  `docs/api.md` states no minimum prepaid gas.
-- **The executor at its cap.** RES-1 measures the executor's `execute` and
-  `finish` at about 32 jobs, not at its 256-job cap.
-- **Storage staking.** The 50 NEAR account held the max state. Storage staking
-  limits were not probed. The executor's `finish` grows its state by 3 bytes
-  per job (`active` to `completed` or `cancelled`).
+- **Minimum prepaid gas for the other methods.** Only `dispatch`, `reconcile`
+  and the executor's `finish` were swept, at one state (the constructed
+  maximum), in whole Tgas. Every other transaction attaches 300 Tgas. The
+  methods that create no promise (`submit`, `cancel`, `settle`, `observe`,
+  `set_paused`) were not run with less. `confirm_not_executed` attaches 40 Tgas,
+  like `finish`, but was not swept.
+- **Storage staking.** The 50 NEAR pool account and the executor account held
+  their largest states. Storage staking limits were not probed. The executor's
+  `finish` grows its state by 3 bytes per job (`active` to `completed` or
+  `cancelled`). The executor's state at 256 jobs is 6,500 bytes, with the
+  pool's 14-byte account id `pool.test.near` stored in it; a 64-byte pool id
+  would add 50 bytes.
 - **Live deployment.** Nothing here touches testnet or mainnet, deployment locks,
   or code replacement (ASM-DEPLOY).
 
@@ -325,8 +395,21 @@ steps took:
 - `tests/resources.rs` (RES-1):
   - upstream: 144.0 s.
   - cfg-near: 145.2 s.
-  - Each run builds the 256-record state with about 350 real transactions.
+  - Each run builds the 256-record state with about 320 real transactions.
 - Test compilation accounts for the rest.
+
+That run predates the second RES-1 test. On 2026-11-12 the RES-1 step alone
+(`cargo +1.98 test --locked --test resources`, with the built wasm reused) ran
+both RES-1 tests in parallel, each in its own sandbox:
+
+- upstream: 2 tests in 414.6 s (415 s wall).
+- cfg-near: 2 tests in 414.1 s (419 s wall, including a test rebuild).
+- `res_1_min_prepaid_gas_and_executor_cap` sets the pace. It sends about 820
+  transactions: the same state build (about 320), then 225 dispatches and
+  225 finishes that succeed (these fill the executor), 41 low-gas attempts
+  that fail, and a few others. The RES-1 step was 289 s for both
+  variants and is now about 834 s, so a full `run.sh` should take about 9
+  minutes longer than the 438 s above. A full `run.sh` was not timed again.
 
 A cold build of the two wasm variants plus the relay takes about 2 minutes on
 this machine.

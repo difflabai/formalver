@@ -391,7 +391,7 @@ Every row ran on both builds (§9.2).
 | RT-REVERT | A core error leaves storage byte-identical and emits nothing | sandbox | `rt_revert_core_errors_write_nothing` | tested |
 | RT-RACE | Settle before the execute callback; the late ack is ignored | sandbox | `rt_race_settle_before_callback`, `rt_race_executor_key_settles_while_callback_in_flight`, `rt_race_operator_finish_vs_callback` | tested on one shard; the operator's `finish` cannot overtake the callback there |
 | RT-WEDGE | F-1 end to end | sandbox | `rt_wedge_f1_end_to_end` | F-1 reproduced (witness) |
-| RES-1 | Gas at the maximum-size state stays under 300 Tgas | sandbox | `res_1_gas_at_max_state` | tested: worst pool receipt 12.56 Tgas |
+| RES-1 | Gas at the maximum-size state stays under 300 Tgas | sandbox | `res_1_gas_at_max_state`, `res_1_min_prepaid_gas_and_executor_cap` | tested: worst pool receipt 12.56 Tgas; least prepaid gas that succeeds: `dispatch` 70, `reconcile` 46, the executor's `finish` 43 Tgas; executor measured at its 256-job cap |
 
 ### 5.10 Requirement checks and Prolog model checks
 
@@ -446,7 +446,7 @@ The levels are those of `threat_model.pl`: high, med, low, or policy.
 | ASM-PRED | The predecessor cannot be forged | assumption | RT-PRED (relay attribution on near-sandbox), SH-1 | trusted (high); tested |
 | ASM-PRIVATE | `#[private]` ⇔ predecessor = current account | assumption | RT-PRIVATE, SH-2, SH-3 | trusted (high); tested |
 | ASM-CALLBACK | The callback sees the executor's return or `PromiseError` | assumption | RT-CALLBACK, SH-3 | trusted (high); tested |
-| ASM-ATOMIC | A panicking receipt writes nothing | assumption | RT-REVERT (storage byte-identical, no event) | trusted (high); tested |
+| ASM-ATOMIC | A panicking receipt writes nothing | assumption | RT-REVERT (storage byte-identical, no event); RES-1 (the same for receipts that run out of prepaid gas) | trusted (high); tested |
 | ASM-INTERLEAVE | Receipts can run between `dispatch` and `on_result`; ack and settle are independent model steps | assumption | RT-RACE (one shard) | trusted (med); tested in part |
 | ASM-TIME | The block timestamp is monotone | assumption | none; TLA+ and Lean allow any time per call (a superset); MC-1 assumes it | trusted (high); untested |
 | ASM-EXEC | The executor is honest: `settle(false)` only on definitive nonexecution | assumption | none; F-2: the honest report is the one that fails | policy |
@@ -637,12 +637,25 @@ wasm32-unknown-unknown --release --locked`; a rebuild gives the same hashes:
   45,613 bytes of Borsh, `storage_usage` 439,584 bytes, and `get_pool`
   53,221 bytes of JSON. The worst pool receipt is submit #256 at 12.56
   Tgas (margin 287.4); each record adds about 0.023 Tgas.
-- `run.sh` took 438 s with warm caches.
+- **RES-1, prepaid gas.** At that state, the least whole-Tgas prepaid gas
+  that succeeds is 70 Tgas for `dispatch` (executor at 31 jobs), 46 for
+  `reconcile` (34 jobs) and 43 for the executor's `finish` (at 256 jobs).
+  Every amount from 40 Tgas up to one below each minimum fails with
+  "Exceeded the prepaid gas." and changes nothing: both contracts' raw
+  storage byte-identical, no event,
+  the record's status kept. A 300 Tgas `dispatch` then succeeds. 70 Tgas
+  leaves under 1 Tgas spare.
+- **RES-1, executor cap.** All 256 records were dispatched through the
+  pool, so the executor holds 256 jobs. `execute` #256 burns 2.52 Tgas of
+  30, `status` 1.77 of 10, `finish` of the last job 2.87; at the cap a new
+  job fails "full".
+- `run.sh` took 438 s with warm caches, before the second RES-1 test. That
+  test adds about 4.5 minutes per variant (RESULTS.md, Run times).
 - **Not shown:** multiple shards and congestion; other protocol versions'
-  gas; that RES-1's state is the worst case; storage staking; any live
-  deployment. Every transaction attaches 300 Tgas, so behaviour with less
-  prepaid gas is not observed (`docs/api.md` states no minimum). The
-  executor is measured at about 32 jobs, not its 256-job cap.
+  gas; that RES-1's state is the worst case, for gas or for the minimum
+  prepaid gas; storage staking; any live deployment. Only `dispatch`,
+  `reconcile` and `finish` were run with less than 300 Tgas, in whole
+  Tgas.
 
 ### 9.3 Deployment
 
@@ -866,7 +879,7 @@ the path filters include it again. `sandbox` runs only on
 | OQ-6 | F-3: a per-actor record cap, pruning on observe, or a documented limit? F-6: a refresh path that does not need every record terminal? |
 | OQ-7 | TLA-IND: rewrite the model for Apalache, or accept LEAN-IND as the every-size safety result? |
 | OQ-8 | L-1b: confirm with upstream that a reservation that cured a violation is meant to be uncancellable. |
-| OQ-9 | Docs: update spec:39 and api:26 for the no-op acknowledgment, and api:34 for non-string results (NT-F4); state a minimum prepaid gas per method in api.md (none is given; §9.2). |
+| OQ-9 | Docs: update spec:39 and api:26 for the no-op acknowledgment, and api:34 for non-string results (NT-F4); state a minimum prepaid gas per method in api.md (none is given). Measured at the maximum-size state (§9.2, RES-1): `dispatch` needs at least 70 Tgas, `reconcile` 46 Tgas and the executor's `finish` 43 Tgas; 70 Tgas leaves under 1 Tgas spare for `dispatch`, so the documented figure needs headroom. |
 | OQ-10 | Who reviews the specs? |
 
 ---

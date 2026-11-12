@@ -129,7 +129,7 @@ assumption('ASM-COMPILE', "The release profile has overflow-checks = true.", hig
 assumption_checked_by('ASM-PRED', 'RT-PRED').      assumption_checked_by('ASM-PRED', 'SH-1').
 assumption_checked_by('ASM-PRIVATE', 'RT-PRIVATE'). assumption_checked_by('ASM-PRIVATE', 'SH-2').
 assumption_checked_by('ASM-CALLBACK', 'RT-CALLBACK').
-assumption_checked_by('ASM-ATOMIC', 'RT-REVERT').
+assumption_checked_by('ASM-ATOMIC', 'RT-REVERT'). assumption_checked_by('ASM-ATOMIC', 'RES-1').
 assumption_checked_by('ASM-INTERLEAVE', 'RT-RACE').
 assumption_checked_by('ASM-TOOLS', 'canaries and mutants in every runner').
 assumption_checked_by('ASM-SPEC', 'status.toml [review] spec_reviewer (empty)').

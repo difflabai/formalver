@@ -106,10 +106,10 @@ status = "in-progress"
 [assumptions.ASM-ATOMIC]
 statement = "A panicking receipt writes nothing"
 level = "high"
-checked_by = ["RT-REVERT"]
+checked_by = ["RT-REVERT", "RES-1"]
 source = ["https://nomicon.io/RuntimeSpec/Receipts.html", "https://nomicon.io/RuntimeSpec/Actions.html"]
-observed = "RT-REVERT: ten core errors through the wasm (Unauthorized, NotFound and InvalidState on dispatch and settle; Unauthorized and Pending on cancel; Unauthorized on set_paused; Pending on observe), Paused on dispatch, Bounds on observe (three inputs) and Arithmetic at version = u32::MAX (patched in) for set_paused and submit: each panics, the pool's raw storage is byte-identical and no event is emitted"
-observed_on = "near-sandbox 2.13.4 (near-workspaces 0.23.0), one shard; both builds of a4bb5c3 (upstream pool_contract sha256 8ddc9280...380f7c, cfg-near af617a8f...903c02), rustc 1.98.1, 2026-11-11"
+observed = "RT-REVERT: ten core errors through the wasm (Unauthorized, NotFound and InvalidState on dispatch and settle; Unauthorized and Pending on cancel; Unauthorized on set_paused; Pending on observe), Paused on dispatch, Bounds on observe (three inputs) and Arithmetic at version = u32::MAX (patched in) for set_paused and submit: each panics, the pool's raw storage is byte-identical and no event is emitted. RES-1 (res_1_min_prepaid_gas_and_executor_cap): the same for receipts that run out of prepaid gas (a host error, not a panic): 41 attempts at the maximum-size state (dispatch 40-69 Tgas, reconcile 40-45, the executor's finish 40-42) each fail 'Exceeded the prepaid gas.' in the first receipt, run no later receipt, log nothing, and leave the raw storage of the pool and the executor byte-identical"
+observed_on = "near-sandbox 2.13.4 (near-workspaces 0.23.0), one shard; both builds of a4bb5c3 (upstream pool_contract sha256 8ddc9280...380f7c, cfg-near af617a8f...903c02), rustc 1.98.1, 2026-11-11 (RES-1 low-gas runs 2026-11-12)"
 status = "in-progress"
 
 [assumptions.ASM-INTERLEAVE]
@@ -389,7 +389,7 @@ prolog_requirements = "prolog/requirements/threat_model.pl"
   # Finding witness: passes while F-1 reproduces on the wasm. When upstream
   # fixes F-1 it fails as stale; invert it, do not delete it (section 12).
   RT-WEDGE = { id = "RT-WEDGE", status = "in-progress", layer = "sandbox", evidence = "test", cross = ["unit"], harness = "sandbox/tests/runtime.rs::rt_wedge_f1_end_to_end; near-tests/tests/wedge.rs f1_wedge_end_to_end_with_the_executor (mocked runtime)", depends_on = ["crates/contract/src/lib.rs", "crates/executor/src/lib.rs", "crates/core/src/lib.rs", "Cargo.lock"], assumptions = [], finding = "F-1", description = "F-1 end to end: the executor commits 'completed', its settle(true) fails Bounds and the record stays Active; finish(cancelled), confirm_not_executed, both settles, cancel and observe all fail; after 200 more blocks observe and settle still fail" }
-  RES-1 = { id = "RES-1", status = "in-progress", layer = "sandbox", evidence = "test", cross = [], harness = "sandbox/tests/resources.rs::res_1_gas_at_max_state", depends_on = ["crates/contract/src/lib.rs", "crates/executor/src/lib.rs", "crates/core/src/lib.rs", "Cargo.lock"], assumptions = [], description = "Gas at the maximum-size state stays under 300 Tgas (worst pool receipt 12.56 Tgas: submit #256)" }
+  RES-1 = { id = "RES-1", status = "in-progress", layer = "sandbox", evidence = "test", cross = [], harness = "sandbox/tests/resources.rs::res_1_gas_at_max_state, res_1_min_prepaid_gas_and_executor_cap", depends_on = ["crates/contract/src/lib.rs", "crates/executor/src/lib.rs", "crates/core/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-ATOMIC"], description = "Gas at the maximum-size state stays under 300 Tgas (worst pool receipt 12.56 Tgas: submit #256). At that state the least whole-Tgas prepaid gas that succeeds is 70 for dispatch, 46 for reconcile and 43 for the executor's finish; every amount from 40 Tgas up to one below fails out of gas and changes nothing. With the executor at its 256-job cap (every record dispatched through the pool): execute #256 2.52 Tgas of 30, status 1.77 of 10, finish 2.87" }
 
 # ---------------------------------------------------------------------------
 # strategy.md section 5.10: requirement checks and Prolog model checks

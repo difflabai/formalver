@@ -129,6 +129,19 @@ pub async fn tx(a: &Account, receiver: &AccountId, method: &str, args: Value) ->
         .unwrap_or_else(|e| panic!("{method}: rpc error {e:?}"))
 }
 
+/// `tx` with `gas` prepaid instead of 300 Tgas (RES-1's low-gas runs).
+pub async fn tx_gas(a: &Account, receiver: &AccountId, method: &str, args: Value, gas: u64) -> ExecutionFinalResult {
+    a.call(receiver, method)
+        .args_json(args)
+        .gas(near_workspaces::types::Gas::from_gas(gas))
+        .transact()
+        .await
+        .unwrap_or_else(|e| panic!("{method} with {gas} gas: rpc error {e:?}"))
+}
+
+/// The runtime's error when a receipt needs more gas than it was given.
+pub const OUT_OF_GAS: &str = "Exceeded the prepaid gas.";
+
 /// `tx` that must succeed (every receipt, not only the final value).
 pub async fn ok(a: &Account, receiver: &AccountId, method: &str, args: Value) -> ExecutionFinalResult {
     let r = tx(a, receiver, method, args).await;

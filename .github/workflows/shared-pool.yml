@@ -351,8 +351,9 @@ jobs:
     # lockfile rule, both wasm variants (upstream and cfg-near), RT-PRED,
     # RT-PRIVATE, RT-CALLBACK, RT-REVERT, RT-RACE, RT-WEDGE (F-1), the SB-1
     # witness, and RES-1 at the 256-record state. Manual dispatch only, with
-    # the `sandbox` input. 438 s warm on a 10-core Mac; a cold build of
-    # near-workspaces and the wasm adds more.
+    # the `sandbox` input. 438 s warm on a 10-core Mac before the second
+    # RES-1 test, which adds about 9 minutes (sandbox/RESULTS.md, Run
+    # times); a cold build of near-workspaces and the wasm adds more.
     needs: pin
     if: github.event_name == 'workflow_dispatch' && inputs.sandbox
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
