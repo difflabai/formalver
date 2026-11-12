@@ -1,6 +1,8 @@
 ----------------------------- MODULE MC_Safety -----------------------------
 (***************************************************************************)
 (* TLA-SAFE: every reachable state and step of the MCCommon universe.      *)
+(* PROP: TLA-SAFE (with MC_Safety.cfg); TLA-WIT (the runner's witness      *)
+(* configs derived from MC_Safety.cfg)                                     *)
 (* Times {0, 1, 2}, chosen freely per call (a superset of monotone block   *)
 (* time, ASM-TIME); expiry offsets {0, 1, 2, 86400, 86401} reach both      *)
 (* Expired branches and the window boundary; AllObservations; MaxRecords   *)

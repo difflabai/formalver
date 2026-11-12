@@ -192,6 +192,7 @@ StepProps ==
 StepProperty == [][StepProps]_vars
 
 -----------------------------------------------------------------------------
+(* PROP: TLA-WIT                                                           *)
 (* Non-vacuity (TLA-WIT). Each must be reachable, so the runner checks     *)
 (* them as invariants or step properties that must be VIOLATED.            *)
 

@@ -1,0 +1,11 @@
+--- a/SharedPool.tla
++++ b/SharedPool.tla
+@@ -227,7 +227,7 @@
+     ELSE IF v # version THEN "Stale"
+     ELSE IF exp <= now \/ exp > now + Window THEN "Expired"
+     ELSE IF SnapExpired(now) THEN "SnapshotExpired"
+-    ELSE IF NR >= MaxRecords THEN "Full"
++    ELSE IF NR + 1 >= MaxRecords THEN "Full"
+     ELSE IF r >= NRcp THEN "InvalidRecipe"
+     ELSE IF c # Rcp(r).actor THEN "Unauthorized"
+     ELSE IF u = 0 \/ u > Rcp(r).maxUnits THEN "InvalidUnits"

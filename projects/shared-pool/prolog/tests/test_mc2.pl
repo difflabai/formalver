@@ -67,13 +67,14 @@ test('MC-2: all traces replay with exact agreement and no property violation', (
     note("results seen: ~q", [Hits]),
     (   ND > 0 -> forall(( nth1(K, Divs, D), K =< 10 ), note("DIVERGENCE ~q", [D])) ; true ),
     (   NV > 0 -> forall(( nth1(K, Viols, V), K =< 10 ), note("VIOLATION ~q", [V])) ; true ),
-    check(traces(NT), NT >= 208), check(calls(NC), NC >= 8000),
+    check(traces(NT), NT >= 209), check(calls(NC), NC >= 8000),
     check(divergences(ND), ND =:= 0), check(violations(NV), NV =:= 0) )).
 
 % Non-vacuity of the replay: every op kind succeeds somewhere and the traces
 % reach every error the code can return from an INV state. Full and
 % Arithmetic come from the generator's appended traces 206 (arith: add and
-% envelope at the 1e6 value bound) and 207 (full: 256 records).
+% envelope at the 1e6 value bound), 207 (full: 256 records) and 208
+% (release-arith: cancel and settle(false) Arithmetic, F-2's variant).
 test('MC-2 coverage: every op kind Ok and every reachable error', (
     trace_file(F),
     mc2_run(F, mc2(_, _, _, _, Hits)),

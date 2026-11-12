@@ -107,8 +107,9 @@ property('MC-2', [prolog], "trace replay").
 % TLA+
 property('TLA-SAFE', [tla], "TLC safety").
 property('TLA-IND', [tla], "inductive invariant (Apalache, optional)").
-property('TLA-LIVE-1', [tla], "LIVE-2 healthy").
+property('TLA-LIVE-1', [tla], "LIVE-2 on the completion path").
 property('TLA-LIVE-F1', [tla], "F-1 counterexample (must be violated)").
+property('TLA-LIVE-F2', [tla], "F-2 counterexample, healthy observations and a fair honest executor (must be violated)").
 property('TLA-WIT', [tla], "witnesses").
 property('REF-5', [tla], "TLA+ trace replay").
 % Lean
@@ -196,7 +197,7 @@ trace_row('S-LIFE-NONEXEC', ['TX-SETTLE', 'C-3', 'RT-CALLBACK']).
 trace_row('S-LIFE-IDEMPOTENT', ['TERM-1', 'TX-NOOP', 'C-3', 'EX-4']).
 trace_row('S-LIFE-LATEACK', ['TX-ACK', 'C-3', 'RT-RACE']).
 trace_row('S-INVERSE',     ['LIVE-2', 'MC-1', 'TLA-LIVE-F1', 'RT-WEDGE', 'LEAN-WIT']).
-trace_row('S-FIXTURE-RELIANCE', ['C-5', 'MC-1', 'LIVE-2']).
+trace_row('S-FIXTURE-RELIANCE', ['C-5', 'MC-1', 'LIVE-2', 'TLA-LIVE-F2']).
 trace_row('S-NOEXPIRY',    ['LIFE-1', 'SH-7', 'C-3']).
 trace_row('S-ADAPTER',     ['EX-1', 'EX-2', 'EX-3', 'EX-4', 'EX-5']).
 trace_row('S-PAUSE',       ['PAUSE-1', 'TX-PAUSE', 'C-1', 'C-2']).

@@ -21,6 +21,8 @@ checked below 2^31, so the outcome (Stale) is the same. Any other integer
 outside TLC's range is an error.
 
 No dependencies; run with python3 -I.
+
+PROP: REF-5
 """
 import re
 import sys

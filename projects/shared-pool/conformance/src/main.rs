@@ -333,6 +333,49 @@ fn full() -> (Config, Vec<Op>) {
     (c, ops)
 }
 
+/// Release `Arithmetic` (found by the TLA+ layer): a release undoes a
+/// reservation, which the envelope does not bound, so after a sibling's
+/// completion relied on that reservation, `values - reserve*units` leaves
+/// +-MAX_VALUE: cancel and settle(false) of A fail Arithmetic, observe is
+/// Pending, only settle(A, true) resolves it. F-2 with Arithmetic for Bounds.
+fn release_arith() -> (Config, Vec<Op>) {
+    let m = |name: &str, lim: i64| Metric { name: name.into(), unit: "u".into(), initial: 0, min: -lim, max: lim };
+    let r = |name: &str, reserve: Vec<i64>, complete: Vec<i64>, max_units| Recipe {
+        name: name.into(),
+        actor: "a1".into(),
+        executor: "x1".into(),
+        reserve,
+        complete,
+        max_units,
+        requires: vec![],
+    };
+    let c = Config {
+        name: "release-arith".into(),
+        owner: "o".into(),
+        metrics: vec![m("m0", MAX_VALUE), m("m1", 10)],
+        terms: vec![Term { metric: 1, target: 0, weight: 1, shape: Shape::Target }],
+        recipes: vec![r("a", vec![-MAX_VALUE, 0], vec![0, 0], 1), r("b", vec![0, 0], vec![15_000, 0], 100)],
+        max_age_seconds: 0,
+    };
+    let q = |recipe, units, version| Request { recipe, units, version, expires_at: 500 };
+    let ops = vec![
+        Op::Submit("a1".into(), q(0, 1, 0), 100),   // m0 = -1e6
+        Op::Submit("a1".into(), q(1, 100, 1), 100), // envelope high -1e6 + 1.5e6
+        Op::Dispatch("a1".into(), 1, 100),
+        Op::Ack(1, true),
+        Op::Settle("x1".into(), 1, true),           // m0 = 5e5
+        Op::Cancel("a1".into(), 0, 101),            // release: 1.5e6, Arithmetic
+        Op::Cancel("o".into(), 0, 101),
+        Op::Dispatch("a1".into(), 0, 101),
+        Op::Ack(0, true),
+        Op::Settle("x1".into(), 0, false),          // release again: Arithmetic
+        Op::Observe("o".into(), vec![500_000, 0], 102), // Pending
+        Op::Settle("x1".into(), 0, true),           // completion still works
+        Op::Observe("o".into(), vec![500_000, 0], 103),
+    ];
+    (c, ops)
+}
+
 #[derive(Clone, Debug)]
 enum Op {
     Submit(String, Request, u64),
@@ -525,7 +568,7 @@ fn generate(traces: usize, len: usize, seed: u64) -> (String, BTreeMap<String, u
     }
     // Appended so the wedge, fixture and random trace numbers stay stable
     // (the Prolog and shell layers address fixtures 1-5 by number).
-    for (c, ops) in [arith(), full()] {
+    for (c, ops) in [arith(), full(), release_arith()] {
         emit(&mut out, n, &c, ops, 100);
         n += 1;
     }
@@ -558,8 +601,8 @@ fn main() {
         "submit:invalid_recipe", "submit:unauthorized", "submit:invalid_units", "submit:prerequisite",
         "submit:bounds", "submit:energy", "dispatch:ok", "dispatch:not_found", "dispatch:unauthorized",
         "dispatch:paused", "dispatch:invalid_state", "dispatch:expired", "dispatch:snapshot_expired",
-        "ack:ok", "ack:not_found", "cancel:ok", "cancel:not_found", "cancel:unauthorized", "cancel:pending",
-        "cancel:bounds", "settle:ok", "settle:not_found", "settle:unauthorized", "settle:invalid_state",
+        "ack:ok", "ack:not_found", "cancel:ok", "cancel:arithmetic", "cancel:not_found", "cancel:unauthorized", "cancel:pending",
+        "cancel:bounds", "settle:ok", "settle:arithmetic", "settle:not_found", "settle:unauthorized", "settle:invalid_state",
         "settle:bounds", "pause:ok", "pause:unauthorized", "observe:ok", "observe:unauthorized",
         "observe:pending", "observe:bounds",
     ];

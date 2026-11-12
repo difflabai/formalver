@@ -82,9 +82,9 @@ Abs(x)  == IF x < 0 THEN -x ELSE x
 \* bounded(): -MAX_VALUE ..= MAX_VALUE.
 Bounded(v) == -MaxValue <= v /\ v <= MaxValue
 
-\* Sum of f[1] .. f[k].
-RECURSIVE SumTo(_, _)
-SumTo(f, k) == IF k = 0 THEN 0 ELSE f[k] + SumTo(f, k - 1)
+\* Sum of f[1] .. f[k], as a recursive function: TLC re-evaluates a RECURSIVE
+\* operator's lazy argument f (0.3 s a step at 256 records; 5 ms this way).
+SumTo(f, k) == LET S[j \in 0 .. k] == IF j = 0 THEN 0 ELSE f[j] + S[j - 1] IN S[k]
 
 RECURSIVE SetSum(_, _)
 \* Sum of g[x] over a finite set S.

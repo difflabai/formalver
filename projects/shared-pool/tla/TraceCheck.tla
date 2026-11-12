@@ -10,7 +10,9 @@
 (* which TLC reports as a deadlock, so CHECK_DEADLOCK is on and a finished *)
 (* trace stutters explicitly. Inv (all invariants but the subset-          *)
 (* enumerating INV-HEALTHY) and StepProperty are checked on every state    *)
-(* and step of the real core as well.                                     *)
+(* and step of the real core as well.                                      *)
+(*                                                                         *)
+(* PROP: REF-5                                                             *)
 (***************************************************************************)
 EXTENDS Props, TraceData, TLC
 
@@ -28,6 +30,10 @@ Post(s) ==
     /\ values' = s.values /\ version' = s.version /\ observedAt' = s.observedAt
     /\ paused' = s.paused /\ records' = s.records
 
+\* PROP: CFG-1
+\* Partial: every trace config was accepted by Pool::new; the model's
+\* ValidCfg must hold for it, the initial state must equal the core's, and
+\* Inv holds there. Rejection of invalid configs is not checked.
 TInit ==
     /\ tr \in 1 .. Len(Traces)
     /\ pos = 0
@@ -59,6 +65,10 @@ Agrees(err, e) ==
     THEN err \in {"Ok", "Noop"} /\ (e.op = "submit" => e.id = NR)
     ELSE err = e.res
 
+\* PROP: TX-0 TX-NOOP
+\* A call the core rejected (or answered with an
+\* idempotent Ok) is replayed as UNCHANGED vars, and the core's recorded
+\* post-state must equal it: version and every Pool field unchanged.
 Replay(e) ==
     LET err == ErrOf(e) IN
     /\ Agrees(err, e)

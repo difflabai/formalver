@@ -1,0 +1,15 @@
+# checks: liveness-f2
+# TLA-LIVE-F2 with weak fairness of settling EITHER way (F1Spec): the
+# executor can escape the F-2 wedge by attesting completion, so LIVE-2
+# holds and the required violation disappears.
+--- a/MC_Liveness_F2.cfg
++++ b/MC_Liveness_F2.cfg
+@@ -14,7 +14,7 @@
+     LCfg <- CreditHedgeConfig
+     Observations <- CreditHedgeObservations
+ 
+-SPECIFICATION F2Spec
++SPECIFICATION F1Spec
+ INVARIANT InvMC
+ PROPERTY Live2
+ CHECK_DEADLOCK FALSE

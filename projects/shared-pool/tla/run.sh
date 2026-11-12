@@ -2,19 +2,32 @@
 # TLA+ layer of shared-pool (pattern: near-approval strategy.md section 17,
 # tools/scripts/run-tla.sh). Exit 0 iff every check has its required outcome.
 #
+# PROP: TLA-SAFE TLA-WIT TLA-LIVE-1 TLA-LIVE-F1 TLA-LIVE-F2 REF-5
+#
 #   safety     TLC, MC_Safety: InvMC and StepProperty (TLA-SAFE); then every
 #              Witness_* invariant and WitStep_* step property must be
 #              VIOLATED (TLA-WIT, non-vacuity)
-#   liveness   TLC, MC_Liveness: LIVE-2 under weak fairness with observes in
-#              bounds (TLA-LIVE-1); without fairness it must FAIL; with a
-#              disturbing observe it must FAIL (TLA-LIVE-F1), and Live2F1
-#              (every counterexample is the F-1 wedge) must hold
+#   liveness   TLC, MC_Liveness (LIVE-2):
+#                liveness           completion path, MCConfig (TLA-LIVE-1)
+#                liveness-f2-done   completion path, CreditHedgeConfig (TLA-LIVE-1)
+#                liveness-unfair    without fairness LIVE-2 must FAIL
+#                liveness-f1        disturbing observe: must FAIL as F-1 (TLA-LIVE-F1)
+#                liveness-f1-shape  Live2F1 holds: every counterexample is F-1
+#                liveness-f2        healthy, executor fair to settle(false): must
+#                                   FAIL as F-2 (TLA-LIVE-F2)
+#                liveness-f2-shape  Live2F2 holds: every counterexample is F-2
 #   apalache   TLA-IND (Apalache): not implemented, prints "skip" (a gap)
 #   trace      REF-5: trace2tla.py converts conformance/traces/core.txt and
 #              TLC replays every trace through TraceCheck (Inv and
 #              StepProperty on every core state too); the state count must
 #              equal traces + calls
-#   mutants    every mutants/*.patch must make trace, safety or liveness fail
+#   mutants    every mutants/*.patch must make one of its checks fail. A
+#              patch may start with `# checks: <check>...` (names as in the
+#              liveness list, or trace / safety); otherwise the checks are
+#              trace, safety, liveness, liveness-f1-shape, liveness-f2-shape,
+#              tried in order until one fails. The report names the killing
+#              check and why (invariant, temporal, rejected trace call, or
+#              a required violation that disappeared).
 #
 # usage: projects/shared-pool/tla/run.sh [check...]  (default: safety liveness trace)
 # env:   TLA_WORKERS (default 4, keep <= 4), TLA_HEAP (default 6g), TLA_LOG_DIR,
@@ -49,13 +62,93 @@ tlc() {
 tlc_ok() { grep -q 'Model checking completed. No error has been found.' "$1"; }
 states() { grep -oE '[0-9,]+ distinct states found' "$1" | tail -1; }
 live_violated() { grep -q 'Temporal properties were violated' "$1"; }
+# Why a TLC run did not pass: the first violation it reports.
+why() {
+  local w t
+  w=$(grep -oE 'Invariant [A-Za-z0-9_]+ is violated|Action property [A-Za-z0-9_]+ is violated|Temporal properties were violated|Deadlock reached|Parsing or semantic analysis failed|Assumption .* is false' "$1" | head -1)
+  # TraceCheck: a deadlock is a rejected call. Name it: trace(N) of core.txt
+  # (tr is 1-based) and the call's 1-based position (pos calls replayed).
+  if [ "$w" = "Deadlock reached" ]; then
+    t=$(awk '/^\/\\ tr = /{tr=$4} /^\/\\ pos = /{pos=$4} END{if (tr != "") printf "trace(%d) call %d", tr-1, pos+1}' "$1")
+    w="rejected ${t:-a trace call}"
+  fi
+  echo "$w"
+}
+
+# The last state of a TLC counterexample that ends stuttering, its records
+# as JSON-ish lines "recipe status" (one per record), for shape checks.
+cex_records() {
+  python3 -I - "$1" <<'EOF'
+import re, sys
+s = open(sys.argv[1]).read()
+i = s.find("Stuttering")
+if "Temporal properties were violated" not in s or i < 0:
+    sys.exit(1)
+blocks = [b for b in re.split(r"\nState \d+: ", s[:i]) if b.strip()]
+last = blocks[-1]
+m = re.search(r"/\\ records = (.*?)(?:\n/\\ |\n\n|$)", last, re.S)
+if not m:
+    sys.exit(1)
+for rec in re.findall(r"\[([^\[\]]*)\]", m.group(1)):
+    f = dict(re.findall(r'(\w+) \|-> ("[^"]*"|-?\d+)', rec))
+    print(f.get("recipe"), f.get("status", "").strip('"'))
+b = re.search(r"/\\ base = <<([^>]*)>>", last)
+print("base", b.group(1).replace(" ", "") if b else "?")
+EOF
+}
+
+# Each run_<check> <spec dir> <log> returns 0 iff the check has its
+# required outcome (shared by the checks and the mutant runner).
+run_trace() {
+  tlc "$1" TraceCheck.tla TraceCheck.cfg "$2" -DTLA-Library="$1/build"
+  tlc_ok "$2"
+}
+run_safety() {
+  tlc "$1" MC_Safety.tla MC_Safety.cfg "$2"
+  tlc_ok "$2"
+}
+run_liveness() {
+  tlc "$1" MC_Liveness.tla MC_Liveness.cfg "$2"
+  tlc_ok "$2"
+}
+run_liveness-f2-done() {
+  tlc "$1" MC_Liveness.tla MC_Liveness_F2Done.cfg "$2"
+  tlc_ok "$2"
+}
+run_liveness-unfair() {
+  tlc "$1" MC_Liveness.tla MC_Liveness_Unfair.cfg "$2"
+  live_violated "$2"
+}
+# The counterexample must end stuttering with an in-flight record after a
+# disturbing observe (m0 = 3 > max 2): F-1.
+run_liveness-f1() {
+  tlc "$1" MC_Liveness.tla MC_Liveness_F1.cfg "$2"
+  live_violated "$2" && grep -q 'base = <<3, 2>>' "$2" && grep -q '^State [0-9]*: Stuttering' "$2"
+}
+run_liveness-f1-shape() {
+  tlc "$1" MC_Liveness.tla MC_Liveness_F1Shape.cfg "$2"
+  tlc_ok "$2"
+}
+# The counterexample must end stuttering with the credit (recipe 0) in
+# flight, the hedge (recipe 1) Completed, and an in-bounds base: F-2.
+run_liveness-f2() {
+  local r
+  tlc "$1" MC_Liveness.tla MC_Liveness_F2.cfg "$2"
+  r=$(cex_records "$2") || return 1
+  echo "$r" | grep -qE '^0 (Dispatched|Active|Unknown)$' &&
+    echo "$r" | grep -qE '^1 Completed$' && echo "$r" | grep -qE '^base [012]$'
+}
+run_liveness-f2-shape() {
+  tlc "$1" MC_Liveness.tla MC_Liveness_F2Shape.cfg "$2"
+  tlc_ok "$2"
+}
 
 fail=0
 report() { # name ok(0/1) detail log
   if [ "$2" = 0 ]; then
-    printf '%-32s ok    %s\n' "$1" "$3"
+    printf '%-36s ok    %s\n' "$1" "$3"
   else
-    printf '%-32s FAIL  %s (log %s)\n' "$1" "$3" "$4"
+    printf '%-36s FAIL  %s (log %s)\n' "$1" "$3" "$4"
     fail=1
   fi
 }
@@ -67,8 +160,7 @@ STEP_WITNESSES="WitStep_CancelledAfterDispatch WitStep_UnknownToActive WitStep_R
 check_safety() {
   local d=$1 log="$logs/safety.log" start
   start=$(date +%s)
-  tlc "$d" MC_Safety.tla MC_Safety.cfg "$log"
-  tlc_ok "$log"
+  run_safety "$d" "$log"
   report safety $? "InvMC + StepProperty, $(states "$log"), $(($(date +%s) - start))s" "$log"
   for w in $STATE_WITNESSES; do
     log="$logs/$w.log"
@@ -87,26 +179,25 @@ check_safety() {
 }
 
 check_liveness() {
-  local d=$1 log="$logs/liveness.log" start
-  start=$(date +%s)
-  tlc "$d" MC_Liveness.tla MC_Liveness.cfg "$log"
-  tlc_ok "$log"
-  report liveness $? "LIVE-2 healthy (TLA-LIVE-1), $(states "$log"), $(($(date +%s) - start))s" "$log"
-  log="$logs/liveness_unfair.log"
-  tlc "$d" MC_Liveness.tla MC_Liveness_Unfair.cfg "$log"
-  live_violated "$log"
-  report liveness-unfair $? "LIVE-2 must fail without fairness" "$log"
-  log="$logs/liveness_f1.log"
-  tlc "$d" MC_Liveness.tla MC_Liveness_F1.cfg "$log"
-  # The counterexample must end stuttering with an in-flight record after a
-  # disturbing observe (m0 = 3 > max 2): F-1.
-  live_violated "$log" && grep -q 'base = <<3, 2>>' "$log" && grep -q '^State [0-9]*: Stuttering' "$log"
-  report liveness-f1 $? "LIVE-2 must fail with a disturbing observe (TLA-LIVE-F1)" "$log"
-  log="$logs/liveness_f1shape.log"
-  start=$(date +%s)
-  tlc "$d" MC_Liveness.tla MC_Liveness_F1Shape.cfg "$log"
-  tlc_ok "$log"
-  report liveness-f1-shape $? "every LIVE-2 counterexample is F-1, $(states "$log"), $(($(date +%s) - start))s" "$log"
+  local d=$1 c log start
+  for c in liveness liveness-f2-done liveness-unfair liveness-f1 liveness-f1-shape \
+    liveness-f2 liveness-f2-shape; do
+    log="$logs/$c.log"
+    start=$(date +%s)
+    "run_$c" "$d" "$log"
+    report "$c" $? "$(desc "$c"), $(states "$log"), $(($(date +%s) - start))s" "$log"
+  done
+}
+desc() {
+  case $1 in
+    liveness) echo "LIVE-2, completion path, MCConfig (TLA-LIVE-1)" ;;
+    liveness-f2-done) echo "LIVE-2, completion path, CreditHedgeConfig (TLA-LIVE-1)" ;;
+    liveness-unfair) echo "LIVE-2 must fail without fairness" ;;
+    liveness-f1) echo "LIVE-2 must fail with a disturbing observe, F-1 (TLA-LIVE-F1)" ;;
+    liveness-f1-shape) echo "Live2F1: every counterexample is F-1" ;;
+    liveness-f2) echo "LIVE-2 must fail, healthy, fair settle(false): F-2 (TLA-LIVE-F2)" ;;
+    liveness-f2-shape) echo "Live2F2: every counterexample is F-2" ;;
+  esac
 }
 
 gen_traces() { # out dir
@@ -121,7 +212,7 @@ check_trace() {
   ncalls=$(grep -c '^call(' "$traces")
   want=$((ntr + ncalls))
   start=$(date +%s)
-  tlc "$d" TraceCheck.tla TraceCheck.cfg "$log" -DTLA-Library="$d/build"
+  run_trace "$d" "$log"
   got=$(grep -oE '^[0-9]+ states generated, [0-9]+ distinct states found, 0 states left' "$log" |
     sed -E 's/.* ([0-9]+) distinct.*/\1/')
   tlc_ok "$log" && [ "$got" = "$want" ]
@@ -132,12 +223,13 @@ check_trace() {
 # model's RECURSIVE sums and symbolic ranges (RESULTS.md, "Not covered").
 # Reported as skipped; it does not change the exit code.
 check_apalache() {
-  printf '%-32s skip  %s\n' apalache "TLA-IND not implemented (gap, see RESULTS.md)"
+  printf '%-36s skip  %s\n' apalache "TLA-IND not implemented (gap, see RESULTS.md)"
 }
 
 check_mutants() {
-  local p tmp killed rc
+  local p tmp killed checks c start r
   for p in "$dir"/mutants/*.patch; do
+    start=$(date +%s)
     tmp=$(mktemp -d)
     cp "$dir"/*.tla "$dir"/*.cfg "$dir"/trace2tla.py "$tmp/"
     mkdir -p "$tmp/build"
@@ -146,25 +238,28 @@ check_mutants() {
       rm -rf "$tmp"
       continue
     fi
-    killed=""
     cp "$dir/build/TraceData.tla" "$tmp/build/"
-    tlc "$tmp" TraceCheck.tla TraceCheck.cfg "$tmp/trace.log" -DTLA-Library="$tmp/build"
-    tlc_ok "$tmp/trace.log" || killed="trace"
-    if [ -z "$killed" ]; then
-      tlc "$tmp" MC_Safety.tla MC_Safety.cfg "$tmp/safety.log"
-      tlc_ok "$tmp/safety.log" || killed="safety"
-    fi
-    if [ -z "$killed" ]; then
-      tlc "$tmp" MC_Liveness.tla MC_Liveness.cfg "$tmp/live.log"
-      tlc_ok "$tmp/live.log" || killed="liveness"
-    fi
-    if [ -z "$killed" ]; then
-      tlc "$tmp" MC_Liveness.tla MC_Liveness_F1Shape.cfg "$tmp/f1.log"
-      tlc_ok "$tmp/f1.log" || killed="liveness-f1-shape"
-    fi
-    rc=1
-    [ -n "$killed" ] && rc=0
-    report "mutant $(basename "$p" .patch)" $rc "killed by ${killed:-nothing}" "$p"
+    checks=$(sed -n 's/^# checks: //p' "$p" | head -1)
+    [ -n "$checks" ] || checks="trace safety liveness liveness-f1-shape liveness-f2-shape"
+    killed=""
+    for c in $checks; do
+      if ! "run_$c" "$tmp" "$tmp/$c.log"; then
+        case $c in
+          liveness-unfair | liveness-f1 | liveness-f2)
+            if live_violated "$tmp/$c.log"; then
+              killed="$c (counterexample no longer has the required shape)"
+            else
+              r=$(why "$tmp/$c.log")
+              killed="$c (required LIVE-2 violation gone: ${r:-no error})"
+            fi
+            ;;
+          *) killed="$c ($(why "$tmp/$c.log"))" ;;
+        esac
+        break
+      fi
+    done
+    report "mutant $(basename "$p" .patch)" "$([ -n "$killed" ] && echo 0 || echo 1)" \
+      "killed by ${killed:-nothing (tried: $checks)}, $(($(date +%s) - start))s" "$p"
     rm -rf "$tmp"
   done
 }
@@ -173,7 +268,7 @@ for c in "$@"; do
   case $c in
     safety | liveness | apalache | trace) "check_$c" "$dir" ;;
     mutants)
-      [ -f "$dir/build/TraceData.tla" ] || gen_traces "$dir/build"
+      gen_traces "$dir/build" || { report trace2tla 1 "conversion failed" "$logs/trace2tla.log"; continue; }
       check_mutants
       ;;
     *) echo "unknown check $c" >&2; exit 2 ;;
