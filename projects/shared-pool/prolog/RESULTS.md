@@ -8,8 +8,9 @@ Pin: difflabai/shared-pool-controls `a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7`
 `-g "(catch(run_tests,E,(write(E),nl,halt(2))) -> halt(0) ; halt(1))" </dev/null`)
 and python3 for `extract.py` (run with `-I`, stdlib only). Conformance traces:
 `conformance/traces/core.txt`, sha256
-`1ed106947f6049d57f92d2092c8868c5082c0e06f2600e0c2f1138147a718b13` (206 traces,
-8,232 calls, generated from the real core). Run:
+`cb135f09b98c2b3a36cd9b063c7373684952cbb80bdf70361321186e48905d89` (208 traces,
+8,758 calls, generated from the real core; traces 206 and 207 reach
+`Arithmetic` and `Full`). Run:
 `projects/shared-pool/prolog/run.sh` (optional `PROLOG_LOGS=<dir>`). Final run on
 2026-11-11: exit 0 in 231.7 s, `=== ALL PROLOG CHECKS PASSED ===`.
 
@@ -57,7 +58,7 @@ properties checked on the real core's traces and the step/4 unit tests).
 | MC-1 `healthy` (2 recipes, a prerequisite, freshness) | MC-1, LIVE-2 | no violation; no dead or release-blocked record | 3,856 states, 98,056 edges, complete; 10 error kinds reached |
 | MC-1 `reliance` (F-2, scaled down) | MC-1, LIVE-2 | no violation; 150 release-blocked states with B = 0 | 630 states, 14,236 edges, complete |
 | MC-1 suite total | | | 33.9 s |
-| MC-2: every trace replayed through `step/4` from the code's pre-state; result and post-state compared exactly; invariants, step properties and LIVE-1 checked on the code's own states | MC-2, TX-*, INV-*, LIVE-1 | 0 divergences, 0 violations | 206 traces, 8,232 calls; every op kind Ok and 13 error kinds; 2.5 s |
+| MC-2: every trace replayed through `step/4` from the code's pre-state; result and post-state compared exactly; invariants, step properties and LIVE-1 checked on the code's own states | MC-2, TX-*, INV-*, LIVE-1 | 0 divergences, 0 violations | 208 traces, 8,758 calls; every op kind Ok and all 15 error kinds the code can return from an INV state (incl. `full`, `arithmetic`); 2.5 s |
 | step/4 unit tests (doc-cited), including the F-1..F-6 witnesses and the RD-PREVIEW/RD-BEST model checks | TX-*, RD-* | 29 pass | 0.5 s |
 | Requirements suite (C-1..C-6 and their non-vacuity tests) | C-* | 12 pass | 9.9 s |
 | Canaries | vacuity | each of the three suites exits 1 with only the canary failing | |

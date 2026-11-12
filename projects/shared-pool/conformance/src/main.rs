@@ -265,6 +265,74 @@ fn wedge() -> (Config, Vec<Op>) {
     (c, ops)
 }
 
+/// Arithmetic at the value bound (submit's add and the envelope), and the
+/// edges of the expiry window: dispatch at now = expires_at - 1 and = expires_at,
+/// submit with expires_at = now + 86400 (accepted) and + 86401 (Expired).
+fn arith() -> (Config, Vec<Op>) {
+    let m = Metric { name: "m".into(), unit: "u".into(), initial: 999_990, min: -MAX_VALUE, max: MAX_VALUE };
+    let r = |name: &str, reserve: i64, complete: i64| Recipe {
+        name: name.into(),
+        actor: "a1".into(),
+        executor: "x1".into(),
+        reserve: vec![reserve],
+        complete: vec![complete],
+        max_units: 3,
+        requires: vec![],
+    };
+    let c = Config {
+        name: "arith".into(),
+        owner: "o".into(),
+        metrics: vec![m],
+        // Target next to the bound keeps the residual (and w*r^2) small: TLC
+        // integers are 32-bit, the core computes energy in i128.
+        terms: vec![Term { metric: 0, target: 999_990, weight: 1, shape: Shape::Excess }],
+        recipes: vec![r("up", 5, 0), r("tail", 0, 5), r("down", -1, 0)],
+        max_age_seconds: 0,
+    };
+    let q = |recipe, units, version, expires_at| Request { recipe, units, version, expires_at };
+    let ops = vec![
+        Op::Submit("a1".into(), q(0, 3, 0, 150), 100),    // 999990 + 15 > 1e6: add Arithmetic
+        Op::Submit("a1".into(), q(0, 2, 0, 150), 100),    // = 1e6 exactly: energy rises, Energy
+        Op::Submit("a1".into(), q(1, 3, 0, 150), 100),    // envelope high 1000005: Arithmetic
+        Op::Submit("a1".into(), q(2, 1, 0, 100 + 86_400), 100), // horizon bound accepted
+        Op::Submit("a1".into(), q(2, 1, 1, 100 + 86_401), 100), // one past: Expired
+        Op::Submit("a1".into(), q(2, 1, 1, 105), 100),
+        Op::Dispatch("a1".into(), 1, 104),                // now = expires_at - 1: Ok
+        Op::Submit("a1".into(), q(2, 1, 3, 106), 100),
+        Op::Dispatch("a1".into(), 2, 106),                // now = expires_at: Expired
+        Op::Cancel("a1".into(), 2, 106),
+        Op::Observe("o".into(), vec![MAX_VALUE], 107),    // Pending (records 0, 1 open)
+    ];
+    (c, ops)
+}
+
+/// F-3: 256 lifetime records, then Full for everyone, and cancel/observe do not free a slot.
+fn full() -> (Config, Vec<Op>) {
+    let m = Metric { name: "m".into(), unit: "u".into(), initial: 0, min: -10, max: 10 };
+    let c = Config {
+        name: "full".into(),
+        owner: "o".into(),
+        metrics: vec![m],
+        terms: vec![Term { metric: 0, target: 0, weight: 1, shape: Shape::Target }],
+        recipes: vec![
+            Recipe { name: "nop".into(), actor: "a1".into(), executor: "x1".into(), reserve: vec![0], complete: vec![0], max_units: 1, requires: vec![] },
+            Recipe { name: "other".into(), actor: "a2".into(), executor: "x1".into(), reserve: vec![0], complete: vec![0], max_units: 1, requires: vec![] },
+        ],
+        max_age_seconds: 0,
+    };
+    let mut ops = vec![];
+    let mut v = 0;
+    for id in 0..MAX_RECORDS as u32 {
+        ops.push(Op::Submit("a1".into(), Request { recipe: 0, units: 1, version: v, expires_at: 500 }, 100));
+        ops.push(Op::Cancel("a1".into(), id, 100));
+        v += 2;
+    }
+    ops.push(Op::Submit("a2".into(), Request { recipe: 1, units: 1, version: v, expires_at: 500 }, 100));
+    ops.push(Op::Observe("o".into(), vec![0], 101));
+    ops.push(Op::Submit("a2".into(), Request { recipe: 1, units: 1, version: v + 1, expires_at: 500 }, 101));
+    (c, ops)
+}
+
 #[derive(Clone, Debug)]
 enum Op {
     Submit(String, Request, u64),
@@ -455,6 +523,12 @@ fn generate(traces: usize, len: usize, seed: u64) -> (String, BTreeMap<String, u
         emit(&mut out, n, &c, ops, 100);
         n += 1;
     }
+    // Appended so the wedge, fixture and random trace numbers stay stable
+    // (the Prolog and shell layers address fixtures 1-5 by number).
+    for (c, ops) in [arith(), full()] {
+        emit(&mut out, n, &c, ops, 100);
+        n += 1;
+    }
     let mut hits = BTreeMap::new();
     for line in out.lines().filter(|l| l.starts_with("call(")) {
         let op = line[5..].split('(').next().unwrap().to_string();
@@ -480,7 +554,7 @@ fn main() {
     let (out, hits) = generate(get("--traces", 200) as usize, get("--len", 40) as usize, get("--seed", 0x5eed));
     // Coverage the replayers rely on: every reachable error of every call.
     let required = [
-        "submit:ok", "submit:paused", "submit:stale", "submit:expired", "submit:snapshot_expired",
+        "submit:ok", "submit:arithmetic", "submit:full", "submit:paused", "submit:stale", "submit:expired", "submit:snapshot_expired",
         "submit:invalid_recipe", "submit:unauthorized", "submit:invalid_units", "submit:prerequisite",
         "submit:bounds", "submit:energy", "dispatch:ok", "dispatch:not_found", "dispatch:unauthorized",
         "dispatch:paused", "dispatch:invalid_state", "dispatch:expired", "dispatch:snapshot_expired",

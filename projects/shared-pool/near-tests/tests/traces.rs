@@ -370,7 +370,7 @@ fn replay(path: Path, traces: &[Trace]) -> usize {
 #[test]
 fn conformance_traces_through_the_shell() {
     let traces = load();
-    assert_eq!(traces.len(), 206, "traces/core.txt: 206 traces");
+    assert_eq!(traces.len(), 208, "traces/core.txt: 208 traces");
     assert_eq!(traces[0].config, wedge_config_as_trace(), "trace 0 is the F-1 wedge");
     let traces = std::sync::Arc::new(traces);
     let hs: Vec<_> = paths()

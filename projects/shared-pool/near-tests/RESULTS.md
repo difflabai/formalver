@@ -42,7 +42,7 @@ Run: `./run.sh test | surface | mutants` (or `./run.sh` for all three).
 |---|---|---|
 | `tests/shell.rs` (14) | SH-1..SH-7, SH-9, SH-10, NT-F1, NT-F2 | exact scenarios on host + both wasm builds |
 | `tests/store_diff.rs` (2) | SH-8 (+SH-4, SH-5, SH-9) | 2,000 x 40 random calls on the host path (fixtures, wedge, open, random configs), Borsh reload every call, results, panic messages, events, receipts, stored bytes and views (get_pool, get_commitments edges, preview) every call; 300 x 40 per wasm build with JSON views every 4 calls; coverage of 46 required outcomes |
-| `tests/traces.rs` (1) | SH-8, F-1 | all 206 conformance traces (8,232 calls) replayed through the shell on host + both wasm builds: every result and post-state equals the trace |
+| `tests/traces.rs` (1) | SH-8, F-1 | all 208 conformance traces (8,758 calls, incl. `Arithmetic` and `Full` in traces 206/207) replayed through the shell on host + both wasm builds: every result and post-state equals the trace |
 | `tests/executor.rs` (8) | EX-1..EX-5 | executor alone on host + both builds (state checked against a Borsh mirror), executor wrappers, end-to-end normal/reject/unknown/panic flows through the router, settle-before-callback race |
 | `tests/wedge.rs` (3) | F-1 | F-1 through the shell (host + both builds), control without the disturbing observe, F-1 end to end with the executor |
 | `tests/lockfile.rs` (1) | TCB | lockfile equality |
@@ -65,7 +65,7 @@ including `completed:Bounds` and `cancelled:Bounds` (F-1 shapes).
 | SH-5 | finding (NT-F1) | host path and `--cfg near` wasm: every core error of every method panics with exactly the error string and changes nothing (`sh5_core_errors_are_panics_with_the_error_string`, SH-8). The documented build (`scripts/build.sh`) reports no message at all: NT-F1 |
 | SH-6 | pass | `sh6_dispatch_promise_shape`: `execute{id,recipe,units}` to the recipe's executor, 30 Tgas, 0 deposit, then `on_result{id}` to the pool, 30 Tgas, depending on it; the callback promise is returned; no event; mutant m11 |
 | SH-7 | pass | `sh7_reconcile_guard_and_promise_shape`: NotFound / InvalidState for Reserved, Completed, Cancelled; `status{id}` 10 Tgas then `on_result` for Dispatched/Unknown/Active, by anyone, no state write; mutants m05, m15 |
-| SH-8 | pass | `sh8_store_diff_host` (80,000 calls), `sh8_store_diff_wasm` (12,000 calls per build), `conformance_traces_through_the_shell` (8,232 calls x 3 paths) |
+| SH-8 | pass | `sh8_store_diff_host` (80,000 calls), `sh8_store_diff_wasm` (12,000 calls per build), `conformance_traces_through_the_shell` (8,758 calls x 3 paths) |
 | SH-9 | pass | `sh9_views_and_paging_at_256_records`: 12 x 7 (from, limit) edge pairs at 256 records incl. u32::MAX, JSON views on wasm; views every call in SH-8; mutant m06 |
 | SH-10 | pass (NT-F2) | `sh10_mutating_methods_reject_attached_deposits`: `new`, `submit`, `dispatch`, `settle`, `cancel`, `set_paused`, `observe`, `on_result` reject 1 yocto and 1 NEAR (`Method X doesn't accept deposit`) before reading input; mutant m12. `reconcile` (a `&self` call method) accepts and keeps a deposit: NT-F2 |
 | EX-1 | pass | `ex1_only_the_lock_executes` (6 foreign predecessors incl. signer = lock), `ex1_executor_wrappers` (new private, init once, deposits); mutant m17 |

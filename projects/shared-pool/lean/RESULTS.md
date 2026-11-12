@@ -25,7 +25,7 @@ and `eff` (number of effective transitions).
 | INV-HEALTHY | `healthy` (Live.lean) | `Inv s` ∧ B = 0 ⇒ for every subset of the open records, values + their completions lie in [min, max] on every metric |
 | LEAN-GUARD | `Guard.guards_order`, `Guard.outcome_mem` (Guard.lean) | the outcome codes of every call's guard list are exactly `guardOrder` (written from lib.rs with line numbers; `pool-lean guards` prints it), and every outcome is one of them. Compared by hand with TLA+'s GuardOrder (`prolog/extracted/tla_facts.pl`): equal once the guards that cannot fire in an `Inv` state are dropped (`InvalidConfig` length checks, release's second `NotFound`, the `energy_terms` `Bounds` checks); that comparison is not mechanised here |
 | LEAN-WIT | Witness.lean | see below, all by `decide`/`rfl` in the kernel |
-| REF-5L | `pool-lean replay` (Main.lean) | all 206 traces of `conformance/traces/core.txt` (8232 calls, 1995 `Ok`), generated from the real core, replayed on the Lean machine: every result and every post-state (values, version, observed_at, paused, records) equal, initial state included |
+| REF-5L | `pool-lean replay` (Main.lean) | all 208 traces of `conformance/traces/core.txt` (8758 calls, 2497 `Ok`; traces 206/207 reach `Arithmetic` at the 1e6 value bound and `Full` at 256 records), generated from the real core, replayed on the Lean machine: every result and every post-state (values, version, observed_at, paused, records) equal, initial state included |
 
 ### LEAN-WIT (Witness.lean)
 
@@ -105,7 +105,7 @@ prerequisite unit, and cannot see a ghost), and 14 only by the traces.
 | `run.sh build` (incremental) + hygiene scan | 1 s |
 | `run.sh audit` (40 `#print axioms`) | < 1 s |
 | `run.sh canary` (3 files) | 2 s |
-| `run.sh replay` (206 traces, 8232 calls) | < 1 s |
+| `run.sh replay` (208 traces, 8758 calls) | < 1 s |
 | `run.sh mutants` (16 mutants, replay + full build each) | 224 s |
 | `run.sh` (everything) | 227 s |
 
@@ -113,7 +113,8 @@ prerequisite unit, and cannot see a ghost), and 14 only by the traces.
 
 * Transcription fidelity is not a proof: Machine.lean is a hand
   transcription of lib.rs (ASM-LEAN-TLA analogue). REF-5L checks it against
-  206 real-core traces (≤ 40 calls each, small configs plus 5 fixtures) and
+  208 real-core traces (≤ 40 calls each, small configs plus 5 fixtures,
+  plus the arith and 256-record full traces) and
   found no disagreement, which is evidence, not proof, of equivalence.
 * Numeric representation (stated in Machine.lean's header): the model
   computes exactly in `Int`/`Nat`; that the code's i64/u64/u128 arithmetic
@@ -147,5 +148,5 @@ prerequisite unit, and cannot see a ghost), and 14 only by the traces.
   Reproducer: trace 0 of `conformance/traces/core.txt` (replayed by
   `run.sh replay`); the theorem is checked by `run.sh build` and audited by
   `run.sh audit` (`Pool.Witness.f1_forever`, PoolLean/Witness.lean).
-* No other disagreement: the model agrees with the real core on all 206
+* No other disagreement: the model agrees with the real core on all 208
   traces, and every property above holds at every size.

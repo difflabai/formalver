@@ -5,7 +5,7 @@
 %%
 %% Each test cites the doc line it exercises. The F-1 test replays the brief's
 %% witness (conformance trace 0) call by call; F-2..F-6 have step/4 witnesses
-%% on the fixture configs (the model agrees with the real core on all 8,232
+%% on the fixture configs (the model agrees with the real core on all 8,758
 %% trace calls, MC-2; the core reproducers are in the brief's find phase).
 %%
 %% Run: scryer-prolog test_model.pl -g "(catch(run_tests,E,(write(E),nl,halt(2))) -> halt(0) ; halt(1))" </dev/null
