@@ -34,7 +34,8 @@ local chain.
 tests and the sandbox are built and pass locally. TLA+, Lean, Prolog and
 the shell tests replay the same 212 real-core traces (§10). The sandbox
 compares the chain with a host `pool-core` oracle. Kani is in progress;
-CI is written (not yet run on GitHub), Kani jobs pending. Two high
+CI passes on GitHub (PR #31) for every layer but Kani, whose jobs are
+pending. Two high
 findings, F-1 and F-2, show that the settlement liveness the docs rely on
 does not hold. Nothing is verified: there is no spec reviewer, and the pin
 is an unmerged PR head. Next: land Kani, report the findings on PR #1, and
@@ -796,7 +797,7 @@ Specific to this project:
 | M5 | Verus | Deferred (§7) |
 | M6 | Sandbox | Done, on one shard |
 | M7 | Deployment | Out of scope |
-| CI | `.github/workflows/shared-pool.yml` (§14) | Written, not yet run on GitHub; Kani jobs added with the layer |
+| CI | `.github/workflows/shared-pool.yml` (§14) | Green on PR #31 (run 43194245726); Kani jobs added with the layer |
 
 **Next, in order.**
 1. Land the Kani layer: harnesses, covers (F-1 among them), canary,
@@ -849,7 +850,7 @@ the path filters include it again. `sandbox` runs only on
 | TLC's 32-bit integers | Overflow aborts a run, so no run passes silently. Lean covers large values, and Kani will once it lands. |
 | One-shard sandbox | RT-RACE records what one shard cannot show. The models treat ack and settle as independent steps. |
 | The import surface cannot exclude code replacement (NT-F3). | Source review and dynamic absence. Deployment stays out of scope. |
-| TLC at `TLA_HEAP=5g` on a GitHub-hosted runner has never run, and no peak memory is recorded. | Measure `tla/run.sh safety` once under `/usr/bin/time -l` after the Kani run (`tla/RESULTS.md`, open items); lower `TLA_WORKERS` or use a larger runner if it does not fit. |
+| TLC memory on a GitHub-hosted runner. | Closed: at `TLA_HEAP=5g` the `tla` job passed safety (2,306,738 states, 1,300 s), liveness, trace and all 31 mutants on PR #31's first run. Peak RSS not recorded. |
 
 ---
 
@@ -930,15 +931,16 @@ check names its fairness assumption:
 - **F-2b** was found here, then checked on the pinned core and added to
   the generator as trace 208.
 - **REF-5:** 9,016 of 9,016 states (212 initial + 8,804 steps), in 8 s.
-- **Mutants:** 31 of 31 killed in 150 s (28 by the trace check, 2 by
-  liveness, 1 by `liveness-f2`), measured on the 209-trace set; only the
-  trace check was rerun on 212 traces. Mutants 10, 13, 23, 24, 25 and 26
+- **Mutants:** 31 of 31 killed (28 by the trace check, 2 by liveness, 1 by
+  `liveness-f2`): 150 s locally on the 209-trace set, and 4 min 10 s on
+  the 212 traces in CI (GitHub Actions run 43194245726 (PR #31, 2026-11-12, ubuntu-latest, `TLA_HEAP=5g`)). Mutants 10, 13, 23, 24, 25 and 26
   survive traces 0-205 alone; traces 206 and 207 kill them. One equivalent
   mutant is not checked in: "`add` ignores the upper bound". The envelope
   check after every `add` gives `Arithmetic` there.
-- **Run times:** `run.sh` (default: safety, liveness, trace) takes 573 s,
-  and `run.sh mutants` 150 s, measured on the 209-trace set; only the trace
-  check was rerun on 212 traces (8 s).
+- **Run times:** `run.sh` (default: safety, liveness, trace) takes 573 s
+  locally (10 cores, 209-trace set; trace check on 212 traces 8 s) and
+  23 min 7 s on a hosted runner (safety 1,300 s), the `run.sh mutants` 150 s
+  locally and 4 min 10 s in CI.
 
 ### 17.5 Limits
 

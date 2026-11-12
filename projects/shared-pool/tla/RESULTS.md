@@ -14,7 +14,11 @@ Run: `projects/shared-pool/tla/run.sh [safety|liveness|apalache|trace|mutants]`
 (default: safety liveness trace). Run date 2026-11-11 (final runs ending
 2026-11-12). Wall times of the final runs: `run.sh` (default) 573 s
 (safety 522 s), `run.sh mutants` 150 s, both on the 209-trace set. The
-trace check was rerun on 2026-11-12 on the 212 traces: 8 s.
+trace check was rerun on 2026-11-12 on the 212 traces: 8 s. On the 212
+traces, GitHub Actions run 43194245726 (PR #31, 2026-11-12, ubuntu-latest, `TLA_HEAP=5g`) ran
+`safety liveness trace` in 23 min 7 s (safety 1,300 s, 2,306,738 distinct
+states; trace 12 s) and `mutants` in 4 min 10 s: 31 of 31 killed, every
+kill reason as listed below.
 
 ## Model
 
@@ -341,15 +345,10 @@ recovery add is unreachable (above). The same holds in the core. A
   are independent steps" (ASM-INTERLEAVE).
 - **Refinement to the code.** The link from this model to the Rust is only
   REF-5 (traces); per-step Kani refinement (REF-1..3) is not done yet.
-- **CI memory (unmeasured).** The `tla` job runs `safety liveness trace`
-  and `mutants` with `TLA_HEAP=5g` on GitHub-hosted runners
-  (`.github/workflows/shared-pool.yml`). It has not run there, and the runs
-  recorded here give no heap size or peak RSS, so whether MC_Safety
-  (2,306,738 distinct states) fits a hosted runner is not known. To do once
-  the Kani run has freed memory on this machine: run
-  `TLA_HEAP=5g /usr/bin/time -l tla/run.sh safety` once, record the peak
-  RSS here, and lower `TLA_WORKERS` or use a larger runner if it does not
-  fit.
+- **CI memory.** The `tla` job (`.github/workflows/shared-pool.yml`) fits a
+  GitHub-hosted runner at `TLA_HEAP=5g`: GitHub Actions run 43194245726 (PR #31, 2026-11-12, ubuntu-latest, `TLA_HEAP=5g`)
+  passed `safety liveness trace` (MC_Safety 2,306,738 distinct states in
+  1,300 s) and `mutants`. Peak RSS was not recorded.
 
 ## PROP tags
 
