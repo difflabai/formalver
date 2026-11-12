@@ -1,0 +1,11 @@
+--- a/SharedPool.tla
++++ b/SharedPool.tla
+@@ -275,7 +275,7 @@
+ \* cancel(caller, id, now): now is unused by the core.
+ CancelErr(c, i, now) ==
+     IF i >= NR THEN "NotFound"
+-    ELSE IF c # RecRcp(i).actor /\ c # cfg.owner THEN "Unauthorized"
++    ELSE IF c # RecRcp(i).actor THEN "Unauthorized"
+     ELSE IF Rec(i).status = "Cancelled" THEN "Noop"
+     ELSE IF Rec(i).status # "Reserved" THEN "Pending"
+     ELSE ReleaseErr(i)

@@ -1,0 +1,11 @@
+--- a/SharedPool.tla
++++ b/SharedPool.tla
+@@ -388,7 +388,7 @@
+     /\ values' = vals
+     /\ observedAt' = now
+     /\ version' = version + 1
+-    /\ base' = vals
++    /\ base' = base
+     /\ k0' = NR
+     /\ UNCHANGED <<cfg, paused, records>>
+     /\ Step("observe", c, 0, 0, 0, 0, FALSE, now, 0)

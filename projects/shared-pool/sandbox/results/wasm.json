@@ -1,0 +1,45 @@
+{
+  "source_commit": "a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7",
+  "source_dirty": false,
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "profile": "mirror [profile.release]: codegen-units=1, opt-level=z, lto, panic=abort, overflow-checks=true",
+  "default_variant": "upstream",
+  "variants": {
+    "upstream": {
+      "RUSTFLAGS": "",
+      "command": "cargo +1.98 build -p pool-contract -p pool-executor --target wasm32-unknown-unknown --release --locked",
+      "wasm": {
+        "pool_contract": {
+          "path": "target/pool/wasm32-unknown-unknown/release/pool_contract.wasm",
+          "sha256": "8ddc9280c63157636fede6f201ebff30ef528307092ad21914730c00df380f7c",
+          "code_hash": "AYmZWwboWEHev1wWDWBVCbWpgwY4GYCnmiTdwy9ondVm",
+          "bytes": 393744
+        },
+        "pool_executor": {
+          "path": "target/pool/wasm32-unknown-unknown/release/pool_executor.wasm",
+          "sha256": "ca76c3caf0505ab7fdb43ab3ecaef6234472eec94bb4256679e69c5a4785b0e5",
+          "code_hash": "EdLPgqZ41fdxDnYkQVdhhgfs2Gu8nYYb2BEuRUcLTy64",
+          "bytes": 237589
+        }
+      }
+    },
+    "cfg-near": {
+      "RUSTFLAGS": "--cfg near",
+      "command": "cargo +1.98 build -p pool-contract -p pool-executor --target wasm32-unknown-unknown --release --locked",
+      "wasm": {
+        "pool_contract": {
+          "path": "target/pool-near/wasm32-unknown-unknown/release/pool_contract.wasm",
+          "sha256": "af617a8f00a10d0a049fb8092ae2f22463204faf71cf770a1b166d2c5b903c02",
+          "code_hash": "CocZMTGJbD5skeibZfbUBCXYvdUePbC6gDykNrGPbqVT",
+          "bytes": 389435
+        },
+        "pool_executor": {
+          "path": "target/pool-near/wasm32-unknown-unknown/release/pool_executor.wasm",
+          "sha256": "760618725144241959be7c0b7a432c413d16b156a0a4aec7c875940c65b74cc6",
+          "code_hash": "8wiVxPBwaZjKfeqZwRGr65QPSBEKGT3djJM2DmbhhThF",
+          "bytes": 233200
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "assumption": "ASM-PRIVATE",
+  "cases": [
+    {
+      "call": "pool.new",
+      "expected": "Method new is private",
+      "observed_panic": "Method new is private",
+      "predecessor": "owner.test.near"
+    },
+    {
+      "call": "pool.new",
+      "expected": "Method new is private",
+      "observed_panic": "Method new is private",
+      "predecessor": "actor.test.near"
+    },
+    {
+      "call": "pool.new",
+      "expected": "Method new is private",
+      "observed_panic": "Method new is private",
+      "predecessor": "mallory.test.near"
+    },
+    {
+      "call": "pool.new",
+      "expected": "Method new is private",
+      "observed_panic": "Method new is private",
+      "predecessor": "exec.test.near"
+    },
+    {
+      "call": "pool.new via relay, signed by the pool's key",
+      "expected": "Method new is private",
+      "observed_panic": "Method new is private",
+      "predecessor": "relay.test.near"
+    },
+    {
+      "call": "exec.new",
+      "expected": "Method new is private",
+      "observed_panic": "Method new is private",
+      "predecessor": "owner.test.near"
+    },
+    {
+      "call": "pool.new and exec.new again, by their own accounts",
+      "expected": "The contract has already been initialized",
+      "observed_panic": "The contract has already been initialized",
+      "storage_unchanged": true
+    },
+    {
+      "call": "pool.on_result",
+      "expected": "Method on_result is private",
+      "observed_panic": "Method on_result is private",
+      "predecessor": "owner.test.near",
+      "storage_unchanged": true
+    },
+    {
+      "call": "pool.on_result",
+      "expected": "Method on_result is private",
+      "observed_panic": "Method on_result is private",
+      "predecessor": "actor.test.near",
+      "storage_unchanged": true
+    },
+    {
+      "call": "pool.on_result",
+      "expected": "Method on_result is private",
+      "observed_panic": "Method on_result is private",
+      "predecessor": "mallory.test.near",
+      "storage_unchanged": true
+    },
+    {
+      "call": "pool.on_result",
+      "expected": "Method on_result is private",
+      "observed_panic": "Method on_result is private",
+      "predecessor": "exec.test.near",
+      "storage_unchanged": true
+    },
+    {
+      "call": "pool.on_result via relay",
+      "expected": "Method on_result is private",
+      "observed_panic": "Method on_result is private",
+      "predecessor": "relay.test.near",
+      "storage_unchanged": true
+    },
+    {
+      "call": "pool.on_result signed by the pool's own key (no promise result)",
+      "observed_failure": "host error: Accessed invalid promise result index: 0",
+      "predecessor": "pool.test.near",
+      "storage_unchanged": true
+    }
+  ],
+  "near_sandbox": "2.13.4 (near-workspaces 0.23.0 / near-sandbox 0.3.16 default)",
+  "pool_contract_sha256": "af617a8f00a10d0a049fb8092ae2f22463204faf71cf770a1b166d2c5b903c02",
+  "pool_executor_sha256": "760618725144241959be7c0b7a432c413d16b156a0a4aec7c875940c65b74cc6",
+  "property": "RT-PRIVATE",
+  "result": "pass",
+  "wasm_variant": "cfg-near"
+}

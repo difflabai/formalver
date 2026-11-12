@@ -1,0 +1,11 @@
+--- a/SharedPool.tla
++++ b/SharedPool.tla
+@@ -241,8 +241,6 @@
+          IN IF cb # "Ok" THEN cb
+             ELSE IF Energy(next) > e0 THEN "Energy"
+             ELSE IF Violating /\ AddFails(next, Rcp(r).complete, u) THEN "Arithmetic"
+-            ELSE IF Violating /\ Energy(AddVec(next, Rcp(r).complete, u)) >= e0
+-                 THEN "Energy"
+             ELSE VerErr
+ 
+ DispatchErr(c, i, now) ==

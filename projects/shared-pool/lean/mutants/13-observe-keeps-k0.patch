@@ -1,0 +1,11 @@
+--- a/PoolLean/Machine.lean
++++ b/PoolLean/Machine.lean
+@@ -470,7 +470,7 @@
+   | .pause _ b => { s with paused := b, version := s.version + 1 }
+   | .observe _ vals now =>
+     { s with values := vals, observedAt := now, version := s.version + 1,
+-             base := vals, k0 := s.records.length }
++             base := vals, k0 := s.k0 }
+ 
+ /-- A call's result. -/
+ inductive Res where

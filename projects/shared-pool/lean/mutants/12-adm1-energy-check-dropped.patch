@@ -1,0 +1,11 @@
+--- a/PoolLean/Machine.lean
++++ b/PoolLean/Machine.lean
+@@ -343,7 +343,7 @@
+   boundsGuards cfg s next (some (r, u)) none ++
+   [(.err .bounds, energyBad cfg s.values),
+    (.err .bounds, energyBad cfg next),
+-   (.err .energy, decide (energy cfg s.values < energy cfg next))] ++
++   (.err .energy, false)] ++
+   (addGuards next rc.complete u).map (fun g => (g.1, bad && g.2)) ++
+   [(.err .bounds, bad && energyBad cfg post),
+    (.err .energy, bad && decide (energy cfg s.values ≤ energy cfg post)),

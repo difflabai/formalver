@@ -1,0 +1,11 @@
+--- a/PoolLean/Machine.lean
++++ b/PoolLean/Machine.lean
+@@ -387,7 +387,7 @@
+ def cancelGuards (cfg : Cfg A) (s : State) (caller : A) (id : Nat) : List Guard :=
+   let c := s.record id
+   [foundGuard s id,
+-   (.err .unauthorized, decide (caller ≠ (cfg.recipe c.recipe).actor ∧ caller ≠ cfg.owner)),
++   (.err .unauthorized, false),
+    (.noop, decide (c.status = .cancelled)),
+    (.err .pending, decide (c.status ≠ .reserved))] ++
+   releaseGuards cfg s id

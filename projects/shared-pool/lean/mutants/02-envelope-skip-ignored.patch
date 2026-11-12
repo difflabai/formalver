@@ -1,0 +1,11 @@
+--- a/PoolLean/Machine.lean
++++ b/PoolLean/Machine.lean
+@@ -222,7 +222,7 @@
+ def dlt (cfg : Cfg A) (r u i : Nat) : Int := get (cfg.recipe r).complete i * (u : Int)
+ 
+ /-- `open(&c.status) && Some(c.id) != skip`. -/
+-def inEnv (skip : Option Nat) (c : Rec) : Bool := c.status.isOpen && (skip != some c.id)
++def inEnv (skip : Option Nat) (c : Rec) : Bool := c.status.isOpen
+ 
+ /-- `Σ f(complete_i·units)` over the records the envelope applies. -/
+ def envS (f : Int → Int) (cfg : Cfg A) (recs : List Rec) (skip : Option Nat) (i : Nat) : Int :=

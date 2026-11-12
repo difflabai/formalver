@@ -1,0 +1,11 @@
+--- a/SharedPool.tla
++++ b/SharedPool.tla
+@@ -282,7 +282,7 @@
+ 
+ SettleErr(c, i, done) ==
+     IF i >= NR THEN "NotFound"
+-    ELSE IF c # RecRcp(i).executor THEN "Unauthorized"
++    ELSE IF c # RecRcp(i).actor THEN "Unauthorized"
+     ELSE IF (done /\ Rec(i).status = "Completed") \/ (~done /\ Rec(i).status = "Cancelled")
+          THEN "Noop"
+     ELSE IF ~InFlight(Rec(i).status) THEN "InvalidState"

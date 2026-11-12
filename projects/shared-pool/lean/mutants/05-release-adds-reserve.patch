@@ -1,0 +1,11 @@
+--- a/PoolLean/Machine.lean
++++ b/PoolLean/Machine.lean
+@@ -373,7 +373,7 @@
+ 
+ /-- `release`'s new values. -/
+ def releaseNext (cfg : Cfg A) (s : State) (id : Nat) : List Int :=
+-  addv s.values (neg (cfg.recipe (s.record id).recipe).reserve) (s.record id).units
++  addv s.values (cfg.recipe (s.record id).recipe).reserve (s.record id).units
+ 
+ /-- `release` (lib.rs 408). -/
+ def releaseGuards (cfg : Cfg A) (s : State) (id : Nat) : List Guard :=

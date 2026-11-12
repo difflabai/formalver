@@ -1,0 +1,15 @@
+Mutant m14_on_result_panics_on_core_error: SH-3/SH-5: on_result panics on a core error instead of reporting it in the event.
+Applied with `patch -p1` from the source-mirror root by near-tests/run-mutants.sh;
+the near-tests suite must fail on it.
+
+--- a/crates/contract/src/lib.rs
++++ b/crates/contract/src/lib.rs
+@@ -125,7 +125,7 @@
+             .expect("NotFound");
+         let status = result.unwrap_or_else(|_| "unknown".into());
+         let update = match status.as_str() {
+-            "completed" => self.pool.settle(&executor, id, true),
++            "completed" => Ok(must(self.pool.settle(&executor, id, true))),
+             "cancelled" => self.pool.settle(&executor, id, false),
+             "active" => self.pool.acknowledge(id, true),
+             _ => self.pool.acknowledge(id, false),

@@ -1,0 +1,11 @@
+--- a/SharedPool.tla
++++ b/SharedPool.tla
+@@ -106,7 +106,7 @@
+ MaxU == LET us == {cfg.recipes[k].maxUnits : k \in 1 .. NRcp} IN CHOOSE u \in us : \A w \in us : w <= u
+ 
+ Open(s)     == s \notin {"Completed", "Cancelled"}
+-InFlight(s) == s \in {"Dispatched", "Active", "Unknown"}
++InFlight(s) == s \in {"Dispatched", "Active"}
+ 
+ \* Config::validate (CFG-2), names omitted. requires is a sequence of
+ \* <<prerequisite recipe, units>>.

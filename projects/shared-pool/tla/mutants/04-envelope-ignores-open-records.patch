@@ -1,0 +1,11 @@
+--- a/SharedPool.tla
++++ b/SharedPool.tla
+@@ -153,7 +153,7 @@
+     SumTo([k \in 1 .. NR |->
+               LET c == records[k]
+                   d == Rcp(c.recipe).complete[m] * c.units
+-              IN IF Open(c.status) /\ k - 1 # skip
++              IN IF FALSE /\ Open(c.status) /\ k - 1 # skip
+                  THEN (IF neg THEN Min0(d) ELSE Max0(d)) ELSE 0], NR)
+ \* The extra (recipe er, eu units) of candidate(); eu = 0 means None.
+ ExtraPart(er, eu, m, neg) ==

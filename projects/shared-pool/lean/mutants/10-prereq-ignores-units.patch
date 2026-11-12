@@ -1,0 +1,11 @@
+--- a/PoolLean/Machine.lean
++++ b/PoolLean/Machine.lean
+@@ -284,7 +284,7 @@
+ def doneUnits (recs : List Rec) (p : Nat) : Nat := sumN (doneF p) recs
+ 
+ def prereqFail (rc : Recipe A) (recs : List Rec) : Bool :=
+-  rc.requires.any fun pu => decide (doneUnits recs pu.1 < pu.2)
++  rc.requires.any fun pu => decide (doneUnits recs pu.1 < 1)
+ 
+ /-! ## Guards, in the code's order -/
+ 

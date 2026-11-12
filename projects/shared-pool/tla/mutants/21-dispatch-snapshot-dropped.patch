@@ -1,0 +1,10 @@
+--- a/SharedPool.tla
++++ b/SharedPool.tla
+@@ -251,7 +251,6 @@
+     ELSE IF paused THEN "Paused"
+     ELSE IF Rec(i).status # "Reserved" THEN "InvalidState"
+     ELSE IF now >= Rec(i).exp THEN "Expired"
+-    ELSE IF SnapExpired(now) THEN "SnapshotExpired"
+     ELSE VerErr
+ 
+ AckTo(acc) == IF acc THEN "Active" ELSE "Unknown"
