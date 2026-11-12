@@ -7,7 +7,12 @@
 //! shell's result must be the trace's result and its stored state the trace's
 //! state after every call. Trace 0 is the F-1 wedge.
 //!
-// PROP: SH-8 F-1
+//! F-1 is a finding, not a catalogue ID: it is the counterexample to LIVE-2
+//! (records become terminal only without disturbing observes), so trace 0
+//! is tagged LIVE-2. The replay also fixes the callback mapping of acks
+//! (SH-3), rejected submits (SH-4) and error panics (SH-5).
+//!
+// PROP: SH-8 SH-3 SH-4 SH-5 LIVE-2
 
 mod common;
 use common::*;
@@ -367,6 +372,7 @@ fn replay(path: Path, traces: &[Trace]) -> usize {
     calls
 }
 
+// PROP: SH-8 SH-3 SH-4 SH-5 LIVE-2
 #[test]
 fn conformance_traces_through_the_shell() {
     let traces = load();

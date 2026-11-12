@@ -15,6 +15,7 @@ Nothing here is Production Ready.
 | Project | Label | What it is |
 |---|---|---|
 | [near-approval](projects/near-approval/strategy.md) | Development Ready | Verification of [trust-framework](https://github.com/difflabai/trust-framework) `contracts/approval` |
+| [shared-pool](projects/shared-pool/strategy.md) | In-Progress | Verification of [shared-pool-controls](https://github.com/difflabai/shared-pool-controls) PR #1 (pool-core and its NEAR contract) |
 | [ironclaw](projects/ironclaw/strategy.md) safety modules | In-Progress | Scaffold of [nearai/ironclaw](https://github.com/nearai/ironclaw) `src/safety/` |
 | [strategy](strategy/README.md) | In-Progress | A plan for deriving a verification strategy from a codebase. No extractor yet. |
 | [near-proofs](near-proofs/README.md) | In-Progress | Submissions to [NEAR Proof Arena](https://github.com/ilblackdragon/near-proof-arena). None yet. |
@@ -117,6 +118,36 @@ python3 tools/scripts/tla-facts.py projects/near-approval --check
     scryer-prolog mc2.pl -g "(replay('$PWD/../../kani/target/mc2/core.txt') -> halt(0) ; halt(1))" </dev/null &&
     scryer-prolog mc2.pl -g "(generate('$PWD/../../kani/target/mc2/prolog.txt', 60) -> halt(0) ; halt(1))" </dev/null) &&
   cargo test --release --locked mc2_prolog_traces -- --nocapture)
+```
+
+## shared-pool
+
+In-Progress. Pin [`a4bb5c3`](https://github.com/difflabai/shared-pool-controls/commit/a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7), a head of shared-pool-controls PR #1. The PR is not merged. Its two later commits (to `4b68c4e`, checked 2026-11-12) change only `README.md` and `ui/`, none of the files [`status.toml`](projects/shared-pool/status.toml) hashes. Re-pin when the PR merges.
+
+The label is In-Progress because the pin is an unmerged PR head, the Kani layer is still being built, `status.toml` records no properties yet, and nobody has signed the spec. It does not mean the runs below are empty. TLA+, Lean, Prolog and near-tests carry vacuity guards and fail without them: TLC witnesses must be violated, Lean and Prolog canaries must fail, and every checked-in mutant must be killed.
+
+Every layer runs the pinned `pool-core` or replays traces of it. [`conformance/`](projects/shared-pool/conformance) generates 209 traces (8,771 calls) from the real core. TLA+, Lean, Prolog and the NEAR shell replay every one with equal results and post-states.
+
+- TLA+: no error in 2,306,738 distinct states (TLA-SAFE). Every witness is reachable. LIVE-2 holds on the completion path and fails as F-1 and F-2, as required. 31 of 31 spec mutants killed. No Apalache inductive check (TLA-IND is open).
+- Lean: `Inv`, the step properties and LIVE-1 proved for states of every size. F-1 proved permanent (`f1_forever`). 40 of 40 headline theorems use only `propext`, `Classical.choice` and `Quot.sound`. 16 of 16 mutants killed.
+- Prolog: C-1 to C-6 pass, with F-2 and F-4 reproduced by C-5. MC-1 explores three universes (3,740, 3,856 and 630 states). MC-2: 0 divergences. 26 of 26 mutants killed.
+- near-tests: all 29 tests pass, on the host path and on two wasm builds (plain cargo and `--cfg near`). SH-8 alone makes 80,000 random host calls. 21 of 21 shell mutants killed.
+- Sandbox: RT-PRED, RT-PRIVATE, RT-CALLBACK, RT-REVERT, RT-RACE and RES-1 pass on both wasm builds. The worst pool receipt is 12.56 Tgas at 256 records. RT-WEDGE reproduces F-1.
+- Kani: no result yet, and no CI job.
+
+Two findings are high. F-1: after an `observe` puts a metric out of bounds, a dispatched hedge can be neither settled (`Bounds` both ways) nor cancelled (`Pending`), and every later `observe` fails `Pending` (trace 0). F-2: in the supplied `risk` fixture, with every metric in bounds, once a hedge that relied on a position's reservation has completed, the executor's honest `settle(false)` for the unexecuted position fails `Bounds` and `cancel` and `observe` fail `Pending`, contrary to `docs/spec.md` (variant F-2b fails `Arithmetic` instead, trace 208). The other findings, F-3 to F-6 and the shell's NT-F1 to NT-F4 (NT-F1 is SB-1), are in [strategy §4](projects/shared-pool/strategy.md).
+
+[`shared-pool`](.github/workflows/shared-pool.yml) CI runs the pin check, status-lint, the trace `--check` and the runners of TLA+, Lean, Prolog, near-tests and the sandbox. The sandbox job runs only on manual dispatch. Kani is not in CI yet: its jobs are added, sized from its `RESULTS.md`, when the layer lands.
+
+```bash
+git submodule update --init projects/shared-pool/source-mirror
+./tools/scripts/check-pin.sh shared-pool
+(cd projects/shared-pool/conformance && cargo run --release --locked -- --check traces/core.txt)
+projects/shared-pool/tla/run.sh safety liveness trace mutants   # Java 17+
+projects/shared-pool/lean/run.sh                                # fetches Lean via get-lean.sh
+projects/shared-pool/prolog/run.sh                              # scryer-prolog 0.10.0
+projects/shared-pool/near-tests/run.sh all                      # Rust 1.98, wasm32 target
+projects/shared-pool/sandbox/run.sh                             # fetches near-sandbox 2.13.4
 ```
 
 ## ironclaw

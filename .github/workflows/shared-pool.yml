@@ -1,0 +1,400 @@
+# shared-pool CI: the layers of projects/shared-pool against the pinned
+# shared-pool-controls commit (status.toml pinned_commit, a head of PR #1).
+# Each layer has its own runner, projects/shared-pool/<layer>/run.sh (exit 0 =
+# every check passes, vacuity guards included); the jobs below call them.
+# Kani is not here yet: its layer is still being built (see the comment
+# after the conformance job).
+# shared-pool-controls is public; the jobs that read the source fetch its
+# submodule without a key. TLA+ and Lean read only the checked-in traces.
+# The pin is fetched by SHA and is not on any branch tip. If PR #1 is
+# force-pushed and GitHub drops it, every job that checks out the submodule
+# fails at the fetch: re-pin.
+name: shared-pool
+
+on:
+  pull_request:
+    paths:
+      - "projects/shared-pool/**"
+      - ".github/workflows/shared-pool.yml"
+      - "tools/scripts/check-pin.sh"
+      - "tools/scripts/check-status.sh"
+      - "tools/scripts/ci-submodule.sh"
+      - "tools/scripts/get-lean.sh"
+      - "tools/scripts/get-tla-tools.sh"
+      - "tools/versions.env"
+      - ".gitmodules"
+      - "!**/*.md"
+      - "!**/*.mdx"
+      - "!**/*.rst"
+      - "!**/*.adoc"
+      - "!**/docs/**"
+  push:
+    branches: [main]
+    paths:
+      - "projects/shared-pool/**"
+      - ".github/workflows/shared-pool.yml"
+      - "tools/scripts/check-pin.sh"
+      - "tools/scripts/check-status.sh"
+      - "tools/scripts/ci-submodule.sh"
+      - "tools/scripts/get-lean.sh"
+      - "tools/scripts/get-tla-tools.sh"
+      - "tools/versions.env"
+      - ".gitmodules"
+      - "!**/*.md"
+      - "!**/*.mdx"
+      - "!**/*.rst"
+      - "!**/*.adoc"
+      - "!**/docs/**"
+  workflow_dispatch:
+    inputs:
+      sandbox:
+        description: "Also run the sandbox job (real wasm on near-sandbox: RT-*, RES-1)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shared-pool-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+# Runner labels work as in near-approval.yml: each job takes CI_RUNNER and
+# falls back to ubuntu-latest; the clause that opens each runs-on sends
+# Dependabot and automated-agent runs to ubuntu-latest. Keep every copy
+# byte-identical with near-approval.yml's. A self-hosted runner keeps HOME
+# between jobs and has no sudo: no step runs `rustup default`, and caches are
+# for hosted runners only.
+#
+# Two toolchains. Crates of this repository (conformance, the Scryer install)
+# use RUST_TOOLCHAIN from tools/versions.env. The shell layers
+# (near-tests, sandbox) build the upstream contracts with the upstream
+# toolchain that source-mirror/rust-toolchain.toml names; those jobs must not
+# set RUSTUP_TOOLCHAIN, or it would override the toolchain files.
+jobs:
+  pin:
+    runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Check out shared-pool-controls at the pin
+        run: tools/scripts/ci-submodule.sh projects/shared-pool/source-mirror
+      - name: Python >= 3.11 (tomllib)
+        if: runner.os == 'macOS'
+        run: |
+          # macOS's /usr/bin/python3 is 3.9; Homebrew's newer ones exist
+          # under versioned names only.
+          python3 -c 'import tomllib' 2>/dev/null && exit 0
+          for py in python3.13 python3.12 python3.11; do
+            if p=$(command -v "$py"); then
+              mkdir -p "$RUNNER_TEMP/python-bin"
+              ln -sf "$p" "$RUNNER_TEMP/python-bin/python3"
+              echo "$RUNNER_TEMP/python-bin" >> "$GITHUB_PATH"
+              exit 0
+            fi
+          done
+          echo "::error::no python3 >= 3.11 on PATH"; exit 1
+      - name: Gitlink and source hashes match status.toml
+        # Also ASM-COMPILE: upstream [profile.release] keeps overflow-checks.
+        run: tools/scripts/check-pin.sh shared-pool
+
+  status-lint:
+    # status.toml claims nothing the repository doesn't back (near-approval
+    # strategy.md sections 12 and 14). It records no properties yet.
+    runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Python >= 3.11 (tomllib)
+        if: runner.os == 'macOS'
+        run: |
+          python3 -c 'import tomllib' 2>/dev/null && exit 0
+          for py in python3.13 python3.12 python3.11; do
+            if p=$(command -v "$py"); then
+              mkdir -p "$RUNNER_TEMP/python-bin"
+              ln -sf "$p" "$RUNNER_TEMP/python-bin/python3"
+              echo "$RUNNER_TEMP/python-bin" >> "$GITHUB_PATH"
+              exit 0
+            fi
+          done
+          echo "::error::no python3 >= 3.11 on PATH"; exit 1
+      - name: status-lint
+        run: tools/scripts/check-status.sh shared-pool
+
+  conformance:
+    # The shared link between the layers: traces/core.txt (209 traces, 8,771
+    # calls) must regenerate byte for byte from the pinned pool-core. TLA+,
+    # Lean, Prolog and the shell replay this file, so a stale one would make
+    # their replays evidence about other code. Seconds of work; pool-core has
+    # no dependencies.
+    needs: pin
+    runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Check out shared-pool-controls at the pin
+        run: tools/scripts/ci-submodule.sh projects/shared-pool/source-mirror
+      - name: Toolchain from versions.env
+        run: |
+          . tools/versions.env
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          # For this job only: `rustup default` would outlive it on a
+          # self-hosted runner.
+          echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
+      - name: traces/core.txt is current
+        working-directory: projects/shared-pool/conformance
+        run: cargo run --release --locked -- --check traces/core.txt
+
+  # No Kani jobs yet. projects/shared-pool/kani/ is still being built and has
+  # no RESULTS.md. When it lands, add plain and kani jobs sized from that file
+  # (harness matrix, KANI_TIMEOUT and KANI_MAX_GB per entry), as
+  # near-approval.yml does.
+
+  tla:
+    # TLA-SAFE and the TLA-WIT witnesses (MC_Safety), LIVE-2 on the completion
+    # path and its required failures (TLA-LIVE-1, TLA-LIVE-F1, TLA-LIVE-F2),
+    # REF-5 (TraceCheck replays every conformance trace), then the 31 spec
+    # mutants. TLA-IND (Apalache) is not implemented; run.sh would print skip.
+    # On a 10-core Mac: 573 s for safety liveness trace, 150 s for mutants.
+    needs: pin
+    runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        # Hosted runners only; a self-hosted runner keeps the TLA+ tools in
+        # its tool cache (TLA_CACHE below).
+        if: runner.environment == 'github-hosted'
+        with:
+          path: tools/.cache
+          key: sp-tla-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/versions.env') }}
+      - name: TLC safety, liveness and trace replay
+        env:
+          TLA_HEAP: ${{ runner.environment == 'github-hosted' && '5g' || '12g' }}
+          TLA_LOG_DIR: ${{ runner.temp }}/tla-logs
+          TLA_CACHE: ${{ runner.environment != 'github-hosted' && format('{0}/formalver-tla', runner.tool_cache) || '' }}
+        run: projects/shared-pool/tla/run.sh safety liveness trace
+      - name: Spec mutants
+        env:
+          TLA_HEAP: ${{ runner.environment == 'github-hosted' && '5g' || '12g' }}
+          TLA_LOG_DIR: ${{ runner.temp }}/tla-logs
+          TLA_CACHE: ${{ runner.environment != 'github-hosted' && format('{0}/formalver-tla', runner.tool_cache) || '' }}
+        run: projects/shared-pool/tla/run.sh mutants
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tla-logs
+          path: ${{ runner.temp }}/tla-logs
+          retention-days: 14
+
+  lean:
+    # LEAN-IND, LEAN-STEP, LEAN-LIVE1 and LEAN-GUARD for states of every size,
+    # LEAN-WIT (F-1 proved permanent), the axiom audit, the canaries, REF-5L
+    # (every conformance trace on the Lean machine) and the 16 mutants.
+    # 227 s on a 10-core Mac, most of it the mutants.
+    needs: pin
+    runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        # Hosted runners only; a self-hosted runner keeps Lean in its tool
+        # cache (LEAN_CACHE below).
+        if: runner.environment == 'github-hosted'
+        with:
+          path: tools/.cache
+          key: sp-lean-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/versions.env') }}
+      - name: Lean toolchain from versions.env
+        env:
+          LEAN_CACHE: ${{ runner.environment != 'github-hosted' && format('{0}/formalver-lean', runner.tool_cache) || '' }}
+        run: tools/scripts/get-lean.sh >> "$GITHUB_PATH"
+      - name: Build, hygiene, audit, canaries, REF-5L, mutants
+        env:
+          LEAN_LOG_DIR: ${{ runner.temp }}/lean-logs
+        run: projects/shared-pool/lean/run.sh
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lean-logs
+          path: ${{ runner.temp }}/lean-logs
+          retention-days: 14
+
+  prolog:
+    # Requirement checks C-1..C-6, MC-1 (three small universes), MC-2 (every
+    # conformance trace through step/4), the canaries, the PROP tags and the
+    # 26 mutants. extract.py reads the pinned sources, so this job needs the
+    # submodule. The brief (.context/, not in git) is absent here: C-6 then
+    # checks the transcribed catalogue in traceability.pl only.
+    # 232 s on a 10-core Mac.
+    needs: pin
+    runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Scryer install root
+        # The runner context is not available in job-level env.
+        run: echo "SCRYER_ROOT=$RUNNER_TOOL_CACHE/formalver-scryer" >> "$GITHUB_ENV"
+      - name: Check out shared-pool-controls at the pin
+        run: tools/scripts/ci-submodule.sh projects/shared-pool/source-mirror
+      - name: Toolchain from versions.env
+        run: |
+          . tools/versions.env
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          # For this job only: `rustup default` would outlive it on a
+          # self-hosted runner.
+          echo "RUSTUP_TOOLCHAIN=$RUST_TOOLCHAIN" >> "$GITHUB_ENV"
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        if: runner.environment == 'github-hosted'
+        with:
+          path: ${{ env.SCRYER_ROOT }}
+          key: scryer-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/versions.env') }}
+      - name: Scryer Prolog from versions.env
+        # Installed under the tool cache, not the shared CARGO_HOME, so a
+        # self-hosted runner keeps one copy per version for this repository.
+        run: |
+          . tools/versions.env
+          root="$SCRYER_ROOT/$SCRYER"
+          if ! "$root/bin/scryer-prolog" --version 2>/dev/null | grep -q "$SCRYER"; then
+            cargo install --locked scryer-prolog --version "$SCRYER" --root "$root"
+          fi
+          echo "$root/bin" >> "$GITHUB_PATH"
+      - name: Extraction, suites, canaries, PROP tags, mutants (run.sh)
+        env:
+          PROLOG_LOGS: ${{ runner.temp }}/prolog-logs
+        run: projects/shared-pool/prolog/run.sh
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: prolog-logs
+          path: ${{ runner.temp }}/prolog-logs
+          retention-days: 14
+
+  near-unit:
+    # The near-sdk shell on near-sdk's mocked runtime (near-tests/run.sh all):
+    # 29 tests on the host path and on two wasm builds run by wasmi (plain
+    # cargo, exactly upstream scripts/build.sh, and --cfg near), every
+    # conformance trace through the shell included; the wasm surface (SURF-1;
+    # SURF-2 is the known finding NT-F3, reported expected-fail); the 21 shell
+    # mutants. Both wasm builds are plain cargo builds: no cargo-near.
+    # On a 10-core Mac: about 1 min of tests and 9 min of mutants, warm.
+    needs: pin
+    runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Check out shared-pool-controls at the pin
+        run: tools/scripts/ci-submodule.sh projects/shared-pool/source-mirror
+      - name: Upstream toolchain, with the wasm target
+        # The channel of source-mirror/rust-toolchain.toml (near-tests' own
+        # file names the same), with that file's components, so rustup has
+        # nothing left to fetch when cargo runs inside the mirror.
+        run: |
+          ch=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' projects/shared-pool/source-mirror/rust-toolchain.toml)
+          rustup toolchain install "$ch" --profile minimal --component rustfmt,clippy --target wasm32-unknown-unknown
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        if: runner.environment == 'github-hosted'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            projects/shared-pool/near-tests/target
+          key: sp-near-unit-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('projects/shared-pool/near-tests/rust-toolchain.toml', 'projects/shared-pool/near-tests/Cargo.lock') }}
+      - name: Shell tests, wasm surface, shell mutants (run.sh all)
+        env:
+          KEEP_LOGS: ${{ runner.temp }}/near-tests-mutants
+        run: |
+          # run-mutants.sh copies each mutant's log into KEEP_LOGS but does
+          # not create it.
+          mkdir -p "$KEEP_LOGS"
+          projects/shared-pool/near-tests/run.sh all
+      - name: Upload mutant logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: near-tests-mutants
+          path: ${{ runner.temp }}/near-tests-mutants
+          retention-days: 14
+
+  sandbox:
+    # The real wasm on a local near-sandbox 2.13.4 (sandbox/run.sh): the
+    # lockfile rule, both wasm variants (upstream and cfg-near), RT-PRED,
+    # RT-PRIVATE, RT-CALLBACK, RT-REVERT, RT-RACE, RT-WEDGE (F-1), the SB-1
+    # witness, and RES-1 at the 256-record state. Manual dispatch only, with
+    # the `sandbox` input. 438 s warm on a 10-core Mac; a cold build of
+    # near-workspaces and the wasm adds more.
+    needs: pin
+    if: github.event_name == 'workflow_dispatch' && inputs.sandbox
+    runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Python >= 3.11 (tomllib)
+        if: runner.os == 'macOS'
+        run: |
+          python3 -c 'import tomllib' 2>/dev/null && exit 0
+          for py in python3.13 python3.12 python3.11; do
+            if p=$(command -v "$py"); then
+              mkdir -p "$RUNNER_TEMP/python-bin"
+              ln -sf "$p" "$RUNNER_TEMP/python-bin/python3"
+              echo "$RUNNER_TEMP/python-bin" >> "$GITHUB_PATH"
+              exit 0
+            fi
+          done
+          echo "::error::no python3 >= 3.11 on PATH"; exit 1
+      - name: Check out shared-pool-controls at the pin
+        run: tools/scripts/ci-submodule.sh projects/shared-pool/source-mirror
+      - name: Upstream toolchain, with the wasm target
+        # As in near-unit; the sandbox scripts call `cargo +<channel>`.
+        run: |
+          ch=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' projects/shared-pool/source-mirror/rust-toolchain.toml)
+          rustup toolchain install "$ch" --profile minimal --component rustfmt,clippy --target wasm32-unknown-unknown
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        # Hosted runners only. The near-sandbox binary (sha256-checked by
+        # scripts/sandbox-bin.sh) is cached with the crates.
+        if: runner.environment == 'github-hosted'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/formalver/near-sandbox
+            projects/shared-pool/sandbox/target
+          key: sp-sandbox-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('projects/shared-pool/sandbox/rust-toolchain.toml', 'projects/shared-pool/sandbox/Cargo.lock') }}
+      - name: Lockfile, wasm builds, runtime tests, RES-1 (run.sh)
+        env:
+          # One sandbox at a time on a 2-CPU hosted runner: RT-RACE times
+          # its calls (0 to 400 ms), and parallel sandboxes would shift them.
+          SANDBOX_TEST_THREADS: ${{ runner.environment == 'github-hosted' && '1' || '3' }}
+        run: projects/shared-pool/sandbox/run.sh
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sandbox-results
+          path: projects/shared-pool/sandbox/results/
+          retention-days: 14

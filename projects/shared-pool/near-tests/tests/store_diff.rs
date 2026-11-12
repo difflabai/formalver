@@ -17,7 +17,13 @@
 //! Coverage: every error the generator can reach is required to occur, so a
 //! generator that stopped exercising a guard fails the test.
 //!
-// PROP: SH-8 SH-4 SH-5 SH-9
+//! The reference (`core_step`) fixes, on every call, the caller as the
+//! predecessor with 15% relayed calls (SH-1), the on_result mapping (SH-3),
+//! the submit decision (SH-4), errors as panics that change nothing (SH-5),
+//! and the dispatch and reconcile receipts (SH-6, SH-7). The views include
+//! `preview`, compared with the core's (shell half of RD-PREVIEW).
+//!
+// PROP: SH-8 SH-1 SH-3 SH-4 SH-5 SH-6 SH-7 SH-9 RD-PREVIEW
 
 mod common;
 use common::*;
@@ -140,6 +146,7 @@ fn print_coverage(title: &str, cov: &Coverage) {
     }
 }
 
+// PROP: SH-8 SH-1 SH-3 SH-4 SH-5 SH-6 SH-7 SH-9 RD-PREVIEW
 #[test]
 fn sh8_store_diff_host() {
     let seqs = env_u64("STORE_DIFF_SEQS", 2_000);
@@ -224,6 +231,7 @@ fn run_wasm(b: Build, seq: u64, steps: u64, seed: u64, cov: &mut Coverage) {
     }
 }
 
+// PROP: SH-8 SH-1 SH-3 SH-4 SH-5 SH-6 SH-7 SH-9 RD-PREVIEW
 #[test]
 fn sh8_store_diff_wasm() {
     let seqs = env_u64("WASM_DIFF_SEQS", 300);

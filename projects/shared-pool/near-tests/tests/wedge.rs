@@ -8,7 +8,12 @@
 //! Pending. These tests assert the wedge exists (they are reproducers of a
 //! finding, not of a desired property): if upstream fixes F-1 they fail.
 //!
-// PROP: F-1 SH-5
+//! F-1 has no catalogue ID. It is the counterexample to LIVE-2, so the
+//! wedge tests carry LIVE-2, the control carries LIVE-1, and the end-to-end
+//! test also carries RT-WEDGE (the sandbox property it mirrors in the mocked
+//! runtime).
+//!
+// PROP: LIVE-2 LIVE-1 RT-WEDGE SH-3 SH-5 EX-4 EX-5
 
 mod common;
 use common::*;
@@ -52,6 +57,7 @@ fn assert_wedged(s: &mut Sim, at: Status) {
     assert_eq!(s.pool.version, v, "nothing moved");
 }
 
+// PROP: LIVE-2 SH-3 SH-5
 #[test]
 fn f1_wedge_through_the_shell() {
     big_stack(|| {
@@ -71,6 +77,7 @@ fn f1_wedge_through_the_shell() {
 
 /// Control: the same recipe from an undisturbed baseline settles normally
 /// (LIVE-1 holds when the base violation is 0).
+// PROP: LIVE-1
 #[test]
 fn f1_control_without_the_disturbing_observe() {
     big_stack(|| {
@@ -91,6 +98,7 @@ fn f1_control_without_the_disturbing_observe() {
 /// settle receipt then fails Bounds at the pool: the executor's job is
 /// "completed" while the pool's record stays Active forever, and the
 /// operator cannot switch to the other outcome.
+// PROP: LIVE-2 RT-WEDGE EX-4 EX-5
 #[test]
 fn f1_wedge_end_to_end_with_the_executor() {
     big_stack(|| {

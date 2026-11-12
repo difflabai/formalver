@@ -11,6 +11,11 @@
 # the patched tree are built here, before the tests, so a build failure is
 # ERROR and never counts as a kill.
 #
+# Each patch names the property it breaks on its first line: m01-m15
+# (crates/contract) SH-1..SH-10, m16-m21 (crates/executor) EX-1..EX-5. No
+# mutant targets RD-PREVIEW.
+# PROP: SH-1 SH-2 SH-3 SH-4 SH-5 SH-6 SH-7 SH-8 SH-9 SH-10 EX-1 EX-2 EX-3 EX-4 EX-5
+#
 # usage: projects/shared-pool/near-tests/run-mutants.sh [patch-glob]
 #   MUTANT_STORE_DIFF_SEQS  host store_diff sequences per mutant (default 300 x 40)
 #   MUTANT_WASM_DIFF_SEQS   wasm store_diff sequences per build (default 40 x 40)

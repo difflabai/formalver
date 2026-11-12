@@ -10,6 +10,13 @@
 //!    that runs the pinned wasm in `tests/common`), and is listed.
 //!
 //! `cargo test --locked --test lockfile`.
+//!
+//! No catalogue ID names the lockfile rule. The test is a precondition of
+//! every property this layer checks, not a check of what they say: it makes
+//! the host path run the same near-sdk, borsh, serde_json and pool crates
+//! the wasm is built from. The tags below record that scope.
+//!
+// PROP: RD-PREVIEW SH-1 SH-2 SH-3 SH-4 SH-5 SH-6 SH-7 SH-8 SH-9 SH-10 EX-1 EX-2 EX-3 EX-4 EX-5
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -77,6 +84,7 @@ fn closure(pkgs: &[Pkg], roots: &[&str]) -> BTreeSet<(String, String)> {
     seen
 }
 
+// PROP: RD-PREVIEW SH-1 SH-2 SH-3 SH-4 SH-5 SH-6 SH-7 SH-8 SH-9 SH-10 EX-1 EX-2 EX-3 EX-4 EX-5
 #[test]
 fn code_under_test_resolves_exactly_as_in_the_mirror_lockfile() {
     let here = Path::new(env!("CARGO_MANIFEST_DIR"));

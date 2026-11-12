@@ -15,11 +15,14 @@ result in one layer means something in the next.
 | Does the deployed code do the right thing at every size? | Deductive verification of Rust | Verus (SMT) |
 | Does the code behave the same on the real runtime? | Tests on the built artifact | near-workspaces sandbox |
 
-Two projects use different subsets:
+Three projects use different subsets:
 - **ironclaw** uses Prolog and Verus, with Verus proving *models* of the code
   (see [ironclaw](#ironclaw-two-layers)).
 - **near-approval** uses Prolog, Kani, TLA+ and Lean today, and plans Verus on
   the real code as an optional upgrade.
+- **shared-pool** uses Prolog, TLA+, Lean, shell tests and the sandbox, with
+  Kani still being built. One trace file from the real core links them (see
+  [shared-pool](#shared-pool-one-trace-file-links-the-layers)).
 
 ## near-approval: how the layers fit
 
@@ -89,6 +92,64 @@ near-sandbox by M6, with the observed outcomes recorded on each assumption).
 `status.toml` honest: every claimed property has its artifact or `PROP` tag,
 evidence matches the layer, and no Kani property reaches `verified*` without a
 named spec reviewer.
+
+## shared-pool: one trace file links the layers
+
+shared-pool-controls has the same split as the approval contract: a
+dependency-free core (`pool-core`, every guard and state transition) and a
+thin near-sdk shell. The layers are the same kinds of tool. The links between
+them are not.
+
+```text
+  real pool-core ──► traces/core.txt ──┬── REF-5 ───► TLA+ TraceCheck (TLC)
+  (pinned Rust)      209 traces,       ├── REF-5L ──► Lean machine
+        │            8,771 calls       ├── MC-2 ────► Prolog step/4 (from the docs)
+        │                              └── SH-8 ────► shell: host and two wasm builds
+        │ Kani (being built)
+        ▼
+  near-sdk shell ──► wasm ──► near-sandbox: RT-*, RES-1,
+                              a host pool-core as the oracle
+```
+
+**One trace file.** `conformance/` is a standalone crate that calls the real
+`pool-core` in the submodule and writes `traces/core.txt`: the F-1 wedge, the
+five upstream fixtures, 200 random configs, and three edge traces (values at
+±10^6 and the expiry horizon, all 256 records, the release `Arithmetic` of
+F-2b). The file is checked in. TLA+ (REF-5), Lean (REF-5L), Prolog (MC-2) and
+the shell (`near-tests/tests/traces.rs`, on the host and on both wasm builds)
+each replay all of it and must match every result and post-state. CI's
+`conformance` job regenerates the file and fails on any difference, so no layer
+replays traces of other code.
+
+**One runner per layer.** Each layer directory has a `run.sh`. Exit 0 means
+every check passed, vacuity guards included: TLC witnesses violated, Lean
+canaries rejected and a clean axiom audit, Prolog canary suites failing, and
+every checked-in mutant killed. [`shared-pool.yml`](../.github/workflows/shared-pool.yml)
+calls these scripts directly. near-approval runs most layers through shared
+scripts instead (`tools/scripts/run-{kani,tla,lean,prolog}.sh near-approval`).
+Kani has no job yet. Its jobs are added, sized from its `RESULTS.md`, when the
+layer lands.
+
+**What near-approval has and shared-pool does not, yet.**
+- Kani refinement (REF-1..3): no per-step proof yet that the real core
+  refines the TLA+ model. The only code-to-model link is the trace replay,
+  which is evidence, not proof.
+- Graph equality (MC-3, MC-4): the Prolog, TLC and Lean models are compared
+  on the traces only, not on their reachable graphs.
+- Apalache: TLA-IND is open. Lean carries the every-size results.
+- Traces both ways: near-approval also replays Prolog-generated traces on the
+  core (`mc2_prolog_traces`). Here traces go one way, core to models.
+- An independent Prolog layer: near-approval's was written from the
+  requirements alone. This one's author had read the code, so `ASM-SPEC`
+  rests on a human review that has not happened.
+
+**Runtime.** near-approval's sandbox replays traces on the reproducible wasm
+(RT-TRACE). Here the traces run through the shell on near-sdk's mocked
+runtime, on the host and on the wasm under wasmi (near-tests). The sandbox
+instead keeps a host-side `pool-core` in step with the chain as its oracle.
+Both wasm variants are built: upstream's plain `cargo build` and the
+`--cfg near` build cargo-near makes. They differ only in failure messages
+(SB-1).
 
 ## Kani vs Verus
 
@@ -160,6 +221,12 @@ tracked:
 - **near-approval:** the `[assumptions.ASM-*]` table in `status.toml`
   (strategy §3.3). Each has a confidence level and the check that covers it.
   NEAR-facing assumptions also cite the Nomicon pages they rely on.
+- **shared-pool:** 14 `ASM-*` assumptions, listed with level and check in
+  [strategy §3.3](../projects/shared-pool/strategy.md). They are
+  `assumption/3` facts in `prolog/requirements/threat_model.pl` and catalogue
+  entries in `traceability.pl`, not yet a `status.toml` table. Three are
+  policy, with no check: ASM-EXEC (the executor is honest; F-2 is the case
+  where the honest report fails), ASM-OWNER and ASM-DEPLOY.
 
 ## Verification status
 
@@ -176,3 +243,8 @@ near-approval also records each property's `evidence`
 (`proof | model-proof | bounded-proof | model-check | test | review | check`)
 and its `layer`, so a Kani result can never be reported as more than a
 bounded proof, and a Lean result never as a proof of the code (strategy §12).
+
+shared-pool's `status.toml` records no properties yet: only `[project]`,
+`[review]`, `[tools]` and `[source_hashes]`. Its strategy §12 adopts
+near-approval's conventions. While the pin is an unmerged PR head, no property
+goes past `in-progress`.

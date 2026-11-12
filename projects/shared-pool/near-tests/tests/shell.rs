@@ -8,7 +8,12 @@
 //! `step` / `wasm_diff_step`: result, panic, events, receipts, Borsh state),
 //! and the tests below add explicit expectations on top.
 //!
-// PROP: SH-1 SH-2 SH-3 SH-4 SH-5 SH-6 SH-7 SH-9 SH-10
+//! Each test carries its own tag line. The findings sit under the property
+//! they break: NT-F1 under SH-5, NT-F2 under SH-10, NT-F4 under SH-3.
+//! RD-PREVIEW here is the shell half only: the `preview` view equals the
+//! core's `preview`.
+//!
+// PROP: SH-1 SH-2 SH-3 SH-4 SH-5 SH-6 SH-7 SH-9 SH-10 RD-PREVIEW
 
 mod common;
 use common::*;
@@ -35,6 +40,7 @@ fn dispatched(path: Path) -> Sim {
 // SH-1: caller() is the predecessor; now() is the block timestamp in seconds
 // ---------------------------------------------------------------------------
 
+// PROP: SH-1
 #[test]
 fn sh1_caller_is_the_predecessor_not_the_signer() {
     big_stack(|| {
@@ -79,6 +85,7 @@ fn sh1_caller_is_the_predecessor_not_the_signer() {
     });
 }
 
+// PROP: SH-1
 #[test]
 fn sh1_now_is_the_block_timestamp_in_whole_seconds() {
     big_stack(|| {
@@ -109,6 +116,7 @@ fn sh1_now_is_the_block_timestamp_in_whole_seconds() {
 // SH-2: `new` is private and runs once (wasm wrappers)
 // ---------------------------------------------------------------------------
 
+// PROP: SH-2
 #[test]
 fn sh2_new_is_private_and_initialises_once() {
     big_stack(|| {
@@ -193,6 +201,7 @@ fn sh2_new_is_private_and_initialises_once() {
 // SH-3: on_result is private, and maps the executor's status string
 // ---------------------------------------------------------------------------
 
+// PROP: SH-3
 #[test]
 fn sh3_on_result_is_private() {
     big_stack(|| {
@@ -234,6 +243,7 @@ fn sh3_on_result_is_private() {
     });
 }
 
+// PROP: SH-3
 #[test]
 fn sh3_on_result_maps_the_status_string() {
     big_stack(|| {
@@ -308,6 +318,7 @@ fn sh3_on_result_maps_the_status_string() {
 
 /// A promise result that is not a JSON string fails the callback (the
 /// wrapper cannot deserialize it): the record stays as it was.
+// PROP: SH-3
 #[test]
 fn sh3_non_string_promise_results_fail_the_callback() {
     big_stack(|| {
@@ -408,6 +419,7 @@ fn rejection_cases() -> Vec<Case> {
     ]
 }
 
+// PROP: SH-4
 #[test]
 fn sh4_rejected_submit_returns_the_decision_and_writes_nothing() {
     big_stack(|| {
@@ -462,6 +474,7 @@ fn dependent_config() -> Config {
     )
 }
 
+// PROP: SH-5
 #[test]
 fn sh5_core_errors_are_panics_with_the_error_string() {
     big_stack(|| {
@@ -529,6 +542,7 @@ fn sh5_core_errors_are_panics_with_the_error_string() {
 // then on_result{id} to itself
 // ---------------------------------------------------------------------------
 
+// PROP: SH-6
 #[test]
 fn sh6_dispatch_promise_shape() {
     big_stack(|| {
@@ -565,6 +579,7 @@ fn sh6_dispatch_promise_shape() {
 // SH-7: reconcile: anyone, only for in-flight records, status then on_result
 // ---------------------------------------------------------------------------
 
+// PROP: SH-7
 #[test]
 fn sh7_reconcile_guard_and_promise_shape() {
     big_stack(|| {
@@ -613,6 +628,7 @@ fn sh7_reconcile_guard_and_promise_shape() {
 // SH-9: views
 // ---------------------------------------------------------------------------
 
+// PROP: SH-9 RD-PREVIEW
 #[test]
 fn sh9_views_and_paging_at_256_records() {
     big_stack(|| {
@@ -674,6 +690,7 @@ fn sh9_views_and_paging_at_256_records() {
 // SH-10: nonpayable methods reject an attached deposit (wasm wrappers)
 // ---------------------------------------------------------------------------
 
+// PROP: SH-10
 #[test]
 fn sh10_mutating_methods_reject_attached_deposits() {
     big_stack(|| {
@@ -729,6 +746,7 @@ fn sh10_mutating_methods_reject_attached_deposits() {
 /// methods are nonpayable"; reconcile is the one call-only method that
 /// creates receipts, and it keeps any attached NEAR (the outgoing calls
 /// carry 0). This test asserts the observed behaviour (a reproducer).
+// PROP: SH-10
 #[test]
 fn nt_f2_reconcile_accepts_and_keeps_an_attached_deposit() {
     big_stack(|| {
@@ -764,6 +782,7 @@ fn nt_f2_reconcile_accepts_and_keeps_an_attached_deposit() {
 /// argument errors) is a bare `unreachable` trap with no message, and the
 /// wasm does not even import `panic_utf8`. The `--cfg near` build reports the
 /// error string. This test asserts the observed behaviour (a reproducer).
+// PROP: SH-5
 #[test]
 fn nt_f1_upstream_build_drops_every_panic_message() {
     big_stack(|| {

@@ -17,9 +17,19 @@
 #              global-contract host functions (an escape hatch if reachable)
 #   -          everything else
 #
-# Checks:
-#   SURF-1  the surface (exports, imports, classes) == wasm-surface.expected
-#   SURF-2  no import is `forbidden`
+# Checks (SURF-1 and SURF-2 are local names; each tag line names the
+# catalogue IDs the check bears on):
+#   SURF-1  the surface (exports, imports, classes) == wasm-surface.expected.
+#           Pins the exports to the documented methods plus
+#           contract_source_metadata (no upgrade or migrate export:
+#           ASM-DEPLOY), and records that the plain build does not import
+#           panic_utf8, so its panics carry no message (SH-5, finding NT-F1).
+#           PROP: SH-5 ASM-DEPLOY
+#   SURF-2  no import is `forbidden`. If it held, the contracts could not
+#           deploy code, delete the account or add keys (the in-contract
+#           half of ASM-DEPLOY). It fails on the pin (NT-F3), so ASM-DEPLOY
+#           stays an assumption.
+#           PROP: ASM-DEPLOY
 # Exit: 0 both hold; 1 SURF-1 fails (the surface changed: review, --update);
 #       3 SURF-1 holds and SURF-2 fails with exactly the recorded imports
 #       (the known finding NT-F3; run.sh reports it as expected-fail).

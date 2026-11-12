@@ -9,7 +9,11 @@
 //! `finish/confirm_not_executed -> settle` run as the runtime would chain
 //! them.
 //!
-// PROP: EX-1 EX-2 EX-3 EX-4 EX-5
+//! The end-to-end flows also check the pool's side of the chain (SH-3,
+//! SH-6, SH-7). `ex5_settle_before_callback_is_absorbed` is pool-only: the
+//! late-callback half of RT-RACE in the mocked runtime.
+//!
+// PROP: EX-1 EX-2 EX-3 EX-4 EX-5 SH-3 SH-6 SH-7 RT-RACE
 
 mod common;
 use common::*;
@@ -186,6 +190,7 @@ fn exec_args(id: u32, recipe: u32, units: u32) -> Value {
 // EX-1: only the lock executes
 // ---------------------------------------------------------------------------
 
+// PROP: EX-1
 #[test]
 fn ex1_only_the_lock_executes() {
     big_stack(|| {
@@ -215,6 +220,7 @@ fn ex1_only_the_lock_executes() {
 
 /// The executor's `new` is private and runs once; its mutating methods
 /// reject deposits (near-sdk wrappers, wasm only).
+// PROP: EX-1
 #[test]
 fn ex1_executor_wrappers() {
     big_stack(|| {
@@ -252,6 +258,7 @@ fn ex1_executor_wrappers() {
 // EX-2: a job is bound to its payload; execute is idempotent per id
 // ---------------------------------------------------------------------------
 
+// PROP: EX-2
 #[test]
 fn ex2_payload_binding_and_dedupe() {
     big_stack(|| {
@@ -316,6 +323,7 @@ fn ex2_payload_binding_and_dedupe() {
 // EX-3: only the operator finishes, confirms non-execution, or sets the mode
 // ---------------------------------------------------------------------------
 
+// PROP: EX-3
 #[test]
 fn ex3_only_the_operator_attests() {
     big_stack(|| {
@@ -353,6 +361,7 @@ fn ex3_only_the_operator_attests() {
 // EX-4: a terminal outcome is never replaced by the other one
 // ---------------------------------------------------------------------------
 
+// PROP: EX-4
 #[test]
 fn ex4_terminal_conflict_rejected() {
     big_stack(|| {
@@ -400,6 +409,7 @@ fn ex4_terminal_conflict_rejected() {
 // EX-5: notify calls lock.settle({id, completed})
 // ---------------------------------------------------------------------------
 
+// PROP: EX-5
 #[test]
 fn ex5_notify_calls_lock_settle() {
     big_stack(|| {
@@ -452,6 +462,7 @@ fn submit_args(net: &Net, recipe: u32, units: u32) -> Value {
     json!({ "request": { "recipe": recipe, "units": units, "version": net.pool_state().version, "expires_at": net.now + 50 } })
 }
 
+// PROP: EX-5 SH-3 SH-6 SH-7
 #[test]
 fn ex5_end_to_end_normal_reject_unknown_panic() {
     big_stack(|| {
@@ -547,6 +558,7 @@ fn ex5_end_to_end_normal_reject_unknown_panic() {
 
 /// The operator's settle may reach the pool before the dispatch callback
 /// (different receipts): the late callback is then absorbed.
+// PROP: SH-3 RT-RACE
 #[test]
 fn ex5_settle_before_callback_is_absorbed() {
     big_stack(|| {
