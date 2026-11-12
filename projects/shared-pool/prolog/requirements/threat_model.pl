@@ -2,11 +2,11 @@
 %%
 %% PROP: C-6
 %%
-%% There is no shared-pool strategy.md yet, so the threats are transcribed from
-%% the upstream docs (spec.md, api.md, verification-handoff.md at pin a4bb5c3;
-%% each cites its line) and the assumptions from the shared brief's ASM-* list.
-%% mitigated_by/2 names the property IDs (brief catalogue) that address a
-%% threat; C-6 checks that every one of them is a known property and that
+%% The threats are transcribed from the upstream docs (spec.md, api.md,
+%% verification-handoff.md at pin a4bb5c3; each cites its line), and the
+%% assumptions are the ASM-* rows of strategy.md section 5.14.
+%% mitigated_by/2 names the property IDs (strategy.md section 5) that address
+%% a threat; C-6 checks that every one of them is a known property and that
 %% every threat has a mitigation or a recorded residual.
 %%
 %%   adversary(Id, Capabilities)
@@ -108,7 +108,7 @@ accepted_risk('T-SLOTS', "Not stated upstream beyond handoff:34 ('256 lifetime r
 accepted_risk('T-FRESHNESS', "Not stated upstream; reported as F-6.").
 
 %%% ========================================================
-%%% Assumptions (brief ASM-*)
+%%% Assumptions (strategy.md section 5.14, ASM-*)
 %%% ========================================================
 
 assumption('ASM-PRED', "The predecessor account id is unforgeable.", high).

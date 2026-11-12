@@ -8,11 +8,15 @@ Pin: difflabai/shared-pool-controls `a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7`
 `-g "(catch(run_tests,E,(write(E),nl,halt(2))) -> halt(0) ; halt(1))" </dev/null`)
 and python3 for `extract.py` (run with `-I`, stdlib only). Conformance traces:
 `conformance/traces/core.txt`, sha256
-`988d9a6fa83740532138f460ab89fd3ef54ca809ab530ca6f90cfbd41c1250dd` (209 traces,
-8,771 calls, generated from the real core; traces 206-208 reach
-`Arithmetic` (submit, and the release `Arithmetic` of F-2) and `Full`). Run:
+`05c0deb4c69e339ccdcb564ec8f35dbd545e2a94ef8ff1f367e413e1f9377818` (212 traces,
+8,804 calls, generated from the real core; traces 206-208 reach `Arithmetic`
+(submit, and F-2b's release `Arithmetic`) and `Full`, and traces 209-211
+reproduce F-2's `Bounds` form, F-4 and F-6). Property catalogue:
+`projects/shared-pool/strategy.md` §5 (96 IDs), which C-6 reads. Run:
 `projects/shared-pool/prolog/run.sh` (optional `PROLOG_LOGS=<dir>`). Final run on
-2026-11-11: exit 0 in 231.7 s, `=== ALL PROLOG CHECKS PASSED ===`.
+2026-11-12: exit 0 in 332.4 s, `=== ALL PROLOG CHECKS PASSED ===` (suites,
+canaries, PROP tags `catalogue 96, prolog layer 39, tagged 39`, and
+`mutants: 28 killed, 0 survived`).
 
 Evidence vocabulary (near-approval strategy §12): this layer gives `check`
 (C-1..C-6), `model-check` (MC-1, LIVE-2) and `test` (the MC-2 replay, the step
@@ -23,17 +27,17 @@ properties checked on the real core's traces and the step/4 unit tests).
 | File | Contents |
 |---|---|
 | `requirements/pool_req.pl` | 65 `requirement/3` facts (one per doc statement used); the api.md method table and authority (`method/4`, `method_core/2`); the guard tables in the order the docs list them (`guard/5`, 56 rows; each row is `doc`, `doc_condition` (the docs state the condition but not its name or position) or `code_only`); the lifecycle table (`life/5`); constants; the five fixtures with 23 claims (`fixture_claim/4`); `known_finding/2`; `finding/4` (F-1..F-6); 4 `divergence/4` and 8 `ambiguity/4` facts. |
-| `requirements/threat_model.pl` | 6 adversaries, 22 threats with mitigating properties and residuals (every finding is named in a residual, which C-6 checks), and the brief's 14 ASM-* assumptions. |
-| `requirements/traceability.pl` | The brief's 95-ID catalogue with layers, `prolog_evidence/2` for the 39 IDs this layer carries, and requirement → property rows. |
+| `requirements/threat_model.pl` | 6 adversaries, 22 threats with mitigating properties and residuals (every finding is named in a residual, which C-6 checks), and the 14 ASM-* assumptions of strategy.md §5.14. |
+| `requirements/traceability.pl` | The 96-ID catalogue of strategy.md §5 with each ID's layer list, `prolog_evidence/2` for the 39 IDs this layer carries, and requirement → property rows. |
 | `model/pool_machine.pl` | `step/4`, written from the docs. `step` walks the guard table of `pool_req.pl` in order, so the model's behaviour *is* the requirement table. 16 places are tagged `CODE-ONLY` where the docs are silent (NotFound, saturating u64 time sums, the observe length check, ack from Reserved/Active, the MAX_* bounds, actor = executor accepted, ...). Where docs and code disagree, the place carries a divergence id. Reads: `admissible/3`, `preview_allowed/3`, `best_quantity/4`. |
 | `extract.py` → `extracted/code_facts.pl` | Generated from `crates/core/src/lib.rs`: constants, enums, field widths, per-function error sites, fallible calls, early `Ok` returns, caller checks, status guards and writes, and role comparisons in `Config::validate`. Also from `crates/contract/src/lib.rs` (`#[near]` methods, attributes, receivers, core calls and each one's caller source) and `crates/core/src/fixtures.rs` (fixture order, account names). The parser is narrow and fails loudly on constructs it does not know. |
 | `extract.py` → `extracted/tla_facts.pl` | `GuardOrder` from `tla/SharedPool.tla` and the LIFE-1 `Edges` from `tla/Props.tla`. |
-| `verification/consistency.pl` | C-1..C-6. Every problem is collected, and each check reports non-vacuity counts. |
+| `verification/consistency.pl` | C-1..C-6. Every problem is collected, and each check reports non-vacuity counts. C-6 reads strategy.md §5 itself: the first cell of every table row between `## 5.` and the next `## ` heading, and the `Layer(s)` column. |
 | `verification/model_check.pl` | MC-1: breadth-first exploration of three universes through `step/4`; dead records; release-blocked states. |
 | `verification/props.pl` | Invariants (INV-WF, INV-LEDGER, INV-HARD, INV-HEALTHY, INV-DEP, INV-VER), step properties (TX-0, TX-NOOP, TX-VER, AUTH-1, STALE-1, ADM-1, ADM-2, HARD-STEP, DEP-1, LIFE-1, ASYNC-1, TERM-1, OBS-1, PAUSE-1) and LIVE-1. MC-1 and MC-2 both use them. |
 | `verification/{mc2,traces,util}.pl` | The MC-2 replay and the trace reader. |
 | `tests/test_{requirements,model,mc1,mc2}.pl` | The suites (`run_tests`), via `tests/support/harness.pl`. |
-| `mutants/{model,code}/*.patch` | 17 model mutants and 9 code mutants, each with `# expect: <suite> <test prefix>` lines. |
+| `mutants/{model,requirements,code}/*.patch` | 17 model mutants, 2 requirements mutants and 9 code mutants, each with `# expect: <suite> <test prefix>` lines. |
 | `run.sh` | The runner. |
 
 `run.sh` steps:
@@ -41,7 +45,7 @@ properties checked on the real core's traces and the step/4 unit tests).
 2. Each suite must exit 0 with no loader `Warning:` in its log. A discontiguous predicate silently drops clauses, so a warning fails the step.
 3. Canaries: `test_requirements`, `test_model` and `test_mc2` each run with `SHARED_POOL_PROLOG_CANARY=1` and must exit 1 with only the canary test failing.
 4. PROP tags: every catalogue ID with the prolog layer is tagged in a `.pl/.py/.sh` file here, and no tag is unknown.
-5. Mutants: each patch is applied to a scratch copy (code mutants patch a copy of the source mirror and re-extract). Every `# expect:` suite must exit non-zero and print `FAIL <prefix>`.
+5. Mutants: each patch is applied to a scratch copy of `prolog/` and `strategy.md` (code mutants patch a copy of the source mirror and re-extract; requirements mutants patch `traceability.pl`). Every `# expect:` suite must exit non-zero and print `FAIL <prefix>`.
 
 ## Results
 
@@ -52,19 +56,19 @@ properties checked on the real core's traces and the step/4 unit tests).
 | Guard order: `guard/5` (docs order) = each entry point's code path (calls expanded in place) = TLA+ `GuardOrder`. api:28's reason list = the errors reachable in `candidate`. Every `Error` variant is accounted for. | C-2 | pass | 8 op kinds, 56 guards (31 doc, 19 doc_condition, 6 code_only); 5 unreachable-site rules used; TLA leg compared; a swapped pair is detected for every kind |
 | Lifecycle: `life/5` = the code's status guards = TLA+ `Edges` = the props LIFE-1 graph, and = the status changes seen in the real traces | C-3 | pass, with one recorded divergence (`div-ack-noop-version`) | 36 (op, flag, status) rows, 11 edges; all 36 rows observed in the traces, 2 trace calls on the divergent row |
 | Constants: docs = code (MAX_VALUE, MAX_TERMS, MAX_WEIGHT, MAX_RECORDS, 86,400 s, page 50, u32 version, u64 times); spec:13's derived bounds; the model's code-only bounds = code | C-4 | pass | 8 compared, 4 derived; MAX_METRICS 32, MAX_RECIPES 32 and MAX_UNITS 100 are code-only |
-| Fixture claims on trace configs 1-5 (STOCK, CASH, RISK, GPU/Friday, self-authorization, spec:46 release) | C-5 | pass, with 2 known findings reproduced (F-2, F-4) | 23 claims. STOCK-SUM over 41 calls; CASH-SUM over 40 (until the first observe). RISK-HEADROOM on 46 states, 474 admissible requests. Release search: 1,308 / 1,308 / 36 / 28 / 86 admitted pairs (gpu / friday / inventory / hiring / risk) and 22,128 releases tried, plus 448 releases on 179 trace states. |
-| Traceability: the catalogue = the brief (95 IDs); every requirement traced; every threat mitigated; every finding named in a threat; prolog evidence for each prolog property | C-6 | pass | 95 properties, 65 requirements, 22 threats, 6 findings, 14 assumptions |
+| Fixture claims on trace configs 1-5 (STOCK, CASH, RISK, GPU/Friday, self-authorization, spec:46 release) | C-5 | pass, with 2 known findings reproduced (F-2, F-4); the real core shows both in conformance traces 209 (F-2) and 210 (F-4), which MC-2 replays | 23 claims. STOCK-SUM over 41 calls; CASH-SUM over 40 (until the first observe). RISK-HEADROOM on 46 states, 474 admissible requests. Release search: 1,308 / 1,308 / 36 / 28 / 86 admitted pairs (gpu / friday / inventory / hiring / risk) and 22,128 releases tried, plus 448 releases on 179 trace states. |
+| Traceability: `property/3` = strategy.md §5, read from the committed file (the IDs: none missing, extra or repeated; each row's `Layer(s)` cell = the property's layer list, in order; a missing file, missing §5 or empty ID set fails C-6); every requirement traced; every threat mitigated; every finding named in a threat; prolog evidence for each prolog property | C-6 | pass | 96 properties, 96 §5 rows, 96 equal layer lists; 65 requirements, 22 threats, 6 findings, 14 assumptions |
 | MC-1 `wedge` (trace 0's config) | MC-1, LIVE-2 | no violation; F-1 dead in-flight records found | 3,740 states, 113,172 edges, complete; 228 states with a dead in-flight record |
 | MC-1 `healthy` (2 recipes, a prerequisite, freshness) | MC-1, LIVE-2 | no violation; no dead or release-blocked record | 3,856 states, 98,056 edges, complete; 10 error kinds reached |
 | MC-1 `reliance` (F-2, scaled down) | MC-1, LIVE-2 | no violation; 150 release-blocked states with B = 0 | 630 states, 14,236 edges, complete |
-| MC-1 suite total | | | 33.9 s |
-| MC-2: every trace replayed through `step/4` from the code's pre-state; result and post-state compared exactly; invariants, step properties and LIVE-1 checked on the code's own states | MC-2, TX-*, INV-*, LIVE-1 | 0 divergences, 0 violations | 209 traces, 8,771 calls; every op kind Ok and all 15 error kinds the code can return from an INV state (incl. `full`, `arithmetic`); 2.5 s |
+| MC-1 suite total | | | 34.8 s |
+| MC-2: every trace replayed through `step/4` from the code's pre-state; result and post-state compared exactly; invariants, step properties and LIVE-1 checked on the code's own states | MC-2, TX-*, INV-*, LIVE-1 | 0 divergences, 0 violations | 212 traces, 8,804 calls (2,547 Ok, 494 of them no-ops); every op kind Ok and all 15 error kinds the code can return from an INV state (incl. `full`, `arithmetic`); traces 0 and 209-211 also checked for their findings' shapes; suite (19 tests) 6.3 s |
 | step/4 unit tests (doc-cited), including the F-1..F-6 witnesses and the RD-PREVIEW/RD-BEST model checks | TX-*, RD-* | 29 pass | 0.5 s |
-| Requirements suite (C-1..C-6 and their non-vacuity tests) | C-* | 12 pass | 9.9 s |
+| Requirements suite (C-1..C-6 and their non-vacuity tests, including C-6's comparison on a dropped, added, repeated and relabelled ID and its strategy.md reader on small documents) | C-* | 15 pass | 11.0 s |
 | Canaries | vacuity | each of the three suites exits 1 with only the canary failing | |
 | Planted faults (in `test_mc2`): each step-property checker fires on a corrupted real call and stays silent on the real one (TX-0, TX-NOOP, TX-VER, AUTH-1, STALE-1, ADM-1, ADM-2, HARD-STEP, DEP-1, LIFE-1, ASYNC-1, TERM-1, OBS-1, PAUSE-1); a corrupted trace shows as a divergence with its trace id and index. In `test_model`: the INV-* and LIVE-1 checkers fire on corrupted states. | vacuity | pass | |
-| PROP tags | | every prolog-layer catalogue ID is tagged; no unknown tag | 39 of 95 |
-| Mutants | | 26 of 26 killed | 168.8 s |
+| PROP tags | | every prolog-layer catalogue ID is tagged; no unknown tag | 39 of 96 |
+| Mutants | | 28 of 28 killed | 258.3 s summed |
 
 MC-1 bounds. The exploration state is pool + clock + ghost. Time is monotone
 (ASM-TIME) over each universe's time set: wedge {100, 200}, healthy {100, 150,
@@ -82,7 +86,10 @@ violation.
 
 ## Findings
 
-This layer reproduces all six of the brief's findings.
+This layer reproduces all six findings of strategy.md §4. MC-2 replays the
+real core's reproducers exactly: trace 0 (F-1), 207 (F-3), 208 (F-2b), 209
+(F-2), 210 (F-4) and 211 (F-6). `test_mc2` checks the shapes of traces 0 and
+209-211.
 
 **F-1 (wedge; high).** MC-1 `wedge` certifies dead in-flight records in 228
 states (records 0-2). The shortest witness is `observe(o, [12,5])`,
@@ -116,25 +123,40 @@ the same blocked liability to the new record. Divergence
 `div-F2-fixture-release` (spec:46; spec:66; handoff:23). C-5 lists F-2 under
 `findings` and fails if it ever stops reproducing; mutant m17 shows this.
 
-Reproducer: `test_model` "F-2 witness", or C-5's `findings` line in
+On the real core, conformance trace 209 (`f2-risk`, 13 calls) shows the same
+block. It uses the supplied risk fixture (trace 5's config), starts healthy and
+has no observe before the block: a position (recipe 0 × 1) and a hedge
+(recipe 3 × 8) are admitted and dispatched, and the hedge completes. The
+executor's honest `settle(x1, 0, false)` then fails `Bounds` with every metric
+in bounds, `cancel` by the owner and by the actor fails `Pending`, and
+`observe` fails `Pending`. Only `settle(x1, 0, true)` ends the record, after
+which `observe` is Ok. MC-2 replays it exactly and `test_mc2` checks this
+shape. F-2b (the release fails `Arithmetic` instead) is trace 208.
+
+Reproducers: trace 209; `test_model` "F-2 witness"; C-5's `findings` line in
 `test_requirements` (first counterexample `rel(p(0,1,3,7), release(0),
-other(reserved), via(cancel)) - err(bounds)`). The core reproducer is
+other(reserved), via(cancel)) - err(bounds)`). The standalone core reproducer,
+outside the repository, is
 `.context/shared-pool/repro/spec-divergence/src/bin/f_risk_fixture_wedge.rs`.
 
 **F-3 (slot exhaustion; low).** step/4 witness: one actor runs 256 submit +
 cancel cycles at no cost, leaving every record Cancelled. After that, `submit`
-fails `Full`, `observe` is Ok, and `submit` still fails `Full`. The traces never
-reach `Full` (it needs 256 records), so this is a model witness only. C-2 checks
-the guard's position against the code.
+fails `Full`, `observe` is Ok, and `submit` still fails `Full`. Conformance
+trace 207 (`full`, 515 calls) is the same sequence on the real core (another
+actor's submit fails `Full` before and after the observe), and MC-2 replays it
+exactly. C-2 checks the guard's position against the code.
 
 **F-4 (self-authorization; low).** `extract.py` records the role comparisons
 in `Config::validate` as `code_role_checks(validate, [])`. C-5 claim
 CASH-SELF-ENFORCED (spec:64 read as a property of the wrapper) is the known
 finding. CASH-SELF, which checks the hiring fixture's own account names from
 `fixtures.rs`, holds. step/4 witness: a config with actor = executor validates,
-and that account settles its own work. Ambiguity `amb-self-executor`. Mutant c09
-(validate rejects actor = executor) makes C-5 fail with
-`known_finding_not_reproduced`.
+and that account settles its own work. On the real core, conformance trace 210
+(`f4-self`, 8 calls) has recipe 0 with actor = executor = a1 and recipe 1 with
+actor = executor = the owner o; each account submits, dispatches and settles
+its own record as completed. MC-2 replays it exactly and `test_mc2` checks this
+shape. Ambiguity `amb-self-executor`. Mutant c09 (validate rejects actor =
+executor) makes C-5 fail with `known_finding_not_reproduced`.
 
 **F-5 (version saturation; low).** step/4 witness: at version = u32::MAX,
 `settle` both ways, `acknowledge` and `set_paused(false)` all fail
@@ -144,7 +166,12 @@ blocks `observe` (`Pending`).
 **F-6 (stale snapshot; low).** step/4 witness on the risk fixture (max_age 300,
 observed at 100). With one record in flight, at now = 401 `dispatch` and
 `submit` fail `SnapshotExpired` and `observe` fails `Pending`. Only the
-executor's settle unblocks the pool.
+executor's settle unblocks the pool. On the real core, conformance trace 211
+(`f6-stale`, 12 calls, max_age 50, observed at 100) shows the same: with
+record 0 Active, at now = 151 `submit` and `dispatch` fail `SnapshotExpired`,
+and `observe` fails `Pending`, also after record 1 is cancelled. Once the
+executor settles record 0, `observe` and then `submit` are Ok. MC-2 replays it
+exactly and `test_mc2` checks this shape.
 
 ### Docs vs code
 
@@ -172,7 +199,7 @@ and the model tags it `CODE-ONLY`:
 
 ## Mutants
 
-All 26 are killed. "Killed" means every `# expect:` suite exits non-zero and
+All 28 are killed. "Killed" means every `# expect:` suite exits non-zero and
 prints `FAIL <prefix>`.
 
 | Mutant | What it changes | Killed by |
@@ -194,6 +221,8 @@ prints `FAIL <prefix>`.
 | m15-release-adds | TERM-1: cancellation adds the reservation instead of subtracting it | test_model, test_mc2, test_mc1 (healthy) |
 | m16-guard-order-paused-stale | C-2: the specified submit order checks Stale before Paused | test_requirements (C-2), test_model, test_mc2 |
 | m17-release-no-bounds | F-2 hidden: cancel and settle(false) skip the bounds check | test_requirements (C-5), test_mc2, test_mc1 (reliance) |
+| r01-property-dropped | C-6: `traceability.pl` loses the TLA-IND row (nothing else names it) | test_requirements (C-6: `strategy_id_not_in_catalogue('TLA-IND', _)`; the ID and layer counts) |
+| r02-layer-changed | C-6: NUM-2's layer list gains `tla` | test_requirements (C-6: `layers_differ('NUM-2', _, strategy([kani,lean]), catalogue([kani,lean,tla]))`; the layer count) |
 | c01-submit-stale-before-paused | core checks Stale before Paused | test_requirements (C-2) |
 | c02-dispatch-caller-executor | dispatch authorizes the executor | test_requirements (C-1) |
 | c03-settle-unknown-dropped | settle no longer accepts Unknown | test_requirements (C-3) |
@@ -217,12 +246,13 @@ prints `FAIL <prefix>`.
   observe. It does not search reliances that need three or more records or that
   arise after an observe. "No counterexample" for gpu, friday, inventory and
   hiring is bounded evidence, not a proof.
-- **MC-2 coverage.** The traces reach every op kind's Ok and 13 error kinds.
-  They never reach `Full` or `Arithmetic` (those need 256 records or values near
-  ±1e6), and never a version near u32::MAX. Those guards are checked only by C-2
-  (order) and the step/4 unit tests. No trace config has actor = executor. F-3,
-  F-4 and F-5 therefore have model witnesses only (plus, for F-4, the extracted
-  fact).
+- **MC-2 coverage.** The 8,804 trace calls reach every op kind's Ok (2,547 Ok
+  calls, 494 of them no-ops) and all 15 error kinds the code can return from an
+  INV state, including `full` (2 calls, trace 207) and `arithmetic` (5 calls: 2
+  submits in trace 206; 2 cancels and 1 `settle(false)` in trace 208). They
+  never reach a version near u32::MAX, so F-5 has a step/4 witness only, and
+  the version guard is checked only by C-2 (order) and the step/4 unit tests.
+  Trace 210 is the only trace config with actor = executor.
 - **Reads.** RD-PREVIEW and RD-BEST are checked on the model only: preview
   allowed ⇔ submit Ok over a request grid, and best_quantity against brute
   force. They are not compared with the code's `preview` or `best_quantity`;
@@ -246,7 +276,7 @@ prints `FAIL <prefix>`.
   predecessor. Runtime behaviour belongs to near-tests and sandbox.
 - **Strings.** Name, unit and owner length validation (1..128) is not modelled;
   trace configs carry no names.
-- **MC-1 canary.** `test_mc1` (about 34 s) has no canary run. Its non-vacuity
+- **MC-1 canary.** `test_mc1` (about 35 s) has no canary run. Its non-vacuity
   comes from the counts it asserts (F-1 dead records in wedge, F-2
   release-blocked states in reliance, zero of both in healthy) and from
   mutants m12, m15 and m17.

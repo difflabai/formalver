@@ -25,7 +25,7 @@ and `eff` (number of effective transitions).
 | INV-HEALTHY | `healthy` (Live.lean) | `Inv s` ∧ B = 0 ⇒ for every subset of the open records, values + their completions lie in [min, max] on every metric |
 | LEAN-GUARD | `Guard.guards_order`, `Guard.outcome_mem` (Guard.lean) | the outcome codes of every call's guard list are exactly `guardOrder` (written from lib.rs with line numbers; `pool-lean guards` prints it), and every outcome is one of them. Compared by hand with TLA+'s GuardOrder (`prolog/extracted/tla_facts.pl`): equal once the guards that cannot fire in an `Inv` state are dropped (`InvalidConfig` length checks, release's second `NotFound`, the `energy_terms` `Bounds` checks); that comparison is not mechanised here |
 | LEAN-WIT | Witness.lean | see below, all by `decide`/`rfl` in the kernel |
-| REF-5L | `pool-lean replay` (Main.lean) | all 209 traces of `conformance/traces/core.txt` (8771 calls, 2522 `Ok`; traces 206-208 reach `Arithmetic` at the 1e6 value bound, `Full` at 256 records, and the release `Arithmetic` of F-2), generated from the real core, replayed on the Lean machine: every result and every post-state (values, version, observed_at, paused, records) equal, initial state included |
+| REF-5L | `pool-lean replay` (Main.lean) | all 212 traces of `conformance/traces/core.txt` (8804 calls, 2547 `Ok`; traces 206-208 reach `Arithmetic` at the 1e6 value bound, `Full` at 256 records, and the release `Arithmetic` of F-2b; traces 209-211 reproduce F-2's `Bounds` form in the `risk` fixture, F-4's actor = executor and owner = executor, and F-6's `SnapshotExpired` while `observe` is `Pending`), generated from the real core, replayed on the Lean machine: every result and every post-state (values, version, observed_at, paused, records) equal, initial state included |
 
 ### LEAN-WIT (Witness.lean)
 
@@ -105,7 +105,7 @@ prerequisite unit, and cannot see a ghost), and 14 only by the traces.
 | `run.sh build` (incremental) + hygiene scan | 1 s |
 | `run.sh audit` (40 `#print axioms`) | < 1 s |
 | `run.sh canary` (3 files) | 2 s |
-| `run.sh replay` (209 traces, 8771 calls) | < 1 s |
+| `run.sh replay` (212 traces, 8804 calls; rerun 2026-11-12) | 1 s |
 | `run.sh mutants` (16 mutants, replay + full build each) | 224 s |
 | `run.sh` (everything) | 227 s |
 
@@ -113,11 +113,12 @@ prerequisite unit, and cannot see a ghost), and 14 only by the traces.
 
 * Transcription fidelity is not a proof: Machine.lean is a hand
   transcription of lib.rs (ASM-LEAN-TLA analogue). REF-5L checks it against
-  209 real-core traces (≤ 40 calls each, small configs plus 5 fixtures,
-  plus the arith, 256-record full and release-arith traces) and
+  212 real-core traces (the F-1 wedge, 5 fixtures of 43-46 calls, 200
+  small random configs of 40 calls each, and six edge traces: arith, the
+  256-record full, release-arith, f2-risk, f4-self and f6-stale) and
   found no disagreement, which is evidence, not proof, of equivalence.
 * Numeric representation (stated in Machine.lean's header): the model
-  computes exactly in `Int`/`Nat`; that the code's i64/u64/u128 arithmetic
+  computes exactly in `Int`/`Nat`; that the code's i64/u64 arithmetic
   never overflows on these paths is NUM-1/NUM-2 (Kani's job), not proved
   here. `energy` is the exact Σ w·r²; the code's `energy` Arithmetic error
   is not modelled (claimed unreachable). The envelope's fail-on-first
@@ -148,5 +149,7 @@ prerequisite unit, and cannot see a ghost), and 14 only by the traces.
   Reproducer: trace 0 of `conformance/traces/core.txt` (replayed by
   `run.sh replay`); the theorem is checked by `run.sh build` and audited by
   `run.sh audit` (`Pool.Witness.f1_forever`, PoolLean/Witness.lean).
-* No other disagreement: the model agrees with the real core on all 209
+* F-2's `Bounds` form, F-4 and F-6 replay on the Lean machine with the
+  core's results and states (traces 209, 210 and 211; `run.sh replay`).
+* No other disagreement: the model agrees with the real core on all 212
   traces, and every property above holds at every size.

@@ -32,7 +32,7 @@ local chain.
 
 **Status (2026-11-12, pin `a4bb5c3`).** TLA+, Lean, Prolog, the shell
 tests and the sandbox are built and pass locally. TLA+, Lean, Prolog and
-the shell tests replay the same 209 real-core traces (§10). The sandbox
+the shell tests replay the same 212 real-core traces (§10). The sandbox
 compares the chain with a host `pool-core` oracle. Kani and CI are in
 progress. Two high findings, F-1 and F-2, show that the settlement
 liveness the docs rely on does not hold. Nothing is verified: there is no
@@ -55,7 +55,7 @@ it (`--cfg near`, see NT-F1), under the assumptions of §5.14:
 
 **What "establish" means today.** (a), (c), LIVE-1 and the core half of
 (b) (TX-0, AUTH-1) are proved at every size for a Lean transcription of
-the core, and checked on the real core's states over 209 traces. All but
+the core, and checked on the real core's states over 212 traces. All but
 TX-0 are also model-checked in TLA+ within small bounds. The shell and
 runtime half of (b) (SH-*, RT-*) is tested, not proved, on the host, two
 wasm builds and a local chain. SH-5 holds only on the `--cfg near` build
@@ -176,24 +176,27 @@ has not been named.
 
 ## 4. Findings
 
-F-1, F-2b and F-3 are reproduced on the pinned core by traces 0, 208 and
-207, which the shell also runs on both wasm builds. F-1 and F-3 also run
-on a local chain (RT-WEDGE, RES-1), and part of F-5 on the wasm
-(RT-REVERT). The §4.2 findings are tests on the pinned builds. In this
-repository, F-2's `Bounds` form, F-4 and F-6 have model witnesses only;
-§13 step 3 adds an F-2 trace. Severity rates the harm to the property the
-docs promise.
+Every core finding but F-5 has a conformance trace of the pinned core:
+F-1 trace 0, F-2 trace 209 (the `Bounds` form) and trace 208 (F-2b), F-3
+trace 207, F-4 trace 210 and F-6 trace 211 (§10.1). TLA+, Lean, Prolog
+and the shell (host and both wasm builds) replay each with equal results
+and post-states. F-5 needs version u32::MAX, 2³² − 1 effective
+transitions, out of reach of a trace (the highest trace version is 513);
+its evidence is a Prolog witness, a Lean mutant and the sandbox. F-1 and
+F-3 also run on a local chain (RT-WEDGE, RES-1), and part of F-5 on the
+wasm (RT-REVERT). The §4.2 findings are tests on the pinned builds.
+Severity rates the harm to the property the docs promise.
 
 ### 4.1 Open: core
 
 | ID | Finding | Reproducer and layers | Contradicts |
 |---|---|---|---|
 | F-1 (high) | **Disturbed-state hedge wedge.** An `observe` puts a metric outside [min, max]. The recovery rule (spec:23) then admits a hedge whose reservation brings the point inside, but whose completion moves it back out. From then on `settle(true)` and `settle(false)` both fail `Bounds`, and `cancel` and `observe` fail `Pending`, forever. The record never becomes terminal, and the pool can never be observed again. | **Trace 0.** Metrics m(0,10,5), m(−100,100,5); term t(1,0,1,target); recipe r(a1,x1,[−2,0],[2,−5],1,[]). `observe [12,5]`; submit 1 → `ok(0)`, values [10,5]; dispatch; `ack(true)` → Active; `settle` true and false → `Bounds`; the owner's `cancel` → `Pending`; `observe` → `Pending`. <br>**TLA+:** `Witness_Wedge` (4 states); TLA-LIVE-F1; `MC_Liveness_F1Shape` shows that, in the small universe, every LIVE-2 counterexample is this wedge. <br>**Lean:** `f1_forever` (for every later call sequence, the record stays Active and every observe fails). <br>**Prolog:** MC-1 `wedge` has 228 dead states. <br>**near-tests:** `wedge.rs` (from Dispatched, Unknown and Active; host and both builds). <br>**Sandbox:** RT-WEDGE. The executor commits "completed", its `settle(true)` fails `Bounds`, and the record stays Active. The executor then refuses `finish(cancelled)` ("terminal outcome conflict") and `confirm_not_executed` ("job exists"). The two contracts disagree permanently. | spec:46: a checked inverse "can fail if another commitment depends on its contribution". handoff:31 makes liveness conditional on resolving dependencies. Here no other commitment is open, so there is nothing to resolve (`div-F1-inverse`). |
-| F-2 (high) | **Healthy-state release wedge in the supplied `risk` fixture.** No observe; every metric in bounds. A credit position is reserved (recipe 0, +20 on selloff loss). A selloff hedge (recipe 3, −10 per unit on completion) is admitted only because the position's +20 is counted: 60 + 20 − 70 ≥ 0 at 7 units. The hedge completes, and selloff loss is 10. The position's job never ran, so the executor honestly calls `settle(false)`. Releasing the +20 gives 10 − 20 < 0, so it fails `Bounds`. `cancel` and `observe` fail `Pending`. Only `settle(true)`, an attestation of work that did not happen, ends the record. The same check blocks `cancel` of a Reserved position. LIVE-1 is unaffected. <br>**F-2b** (found by the TLA+ layer): a release is not bounded by the envelope. After a sibling relied on the reservation, `values − reserve·units` can leave ±1,000,000. Then `cancel` (actor and owner) and the honest `settle(false)` fail `Arithmetic`. | **Prolog:** `test_model` "F-2 witness" (position × 1, hedge × 7, hedge completed). C-5's release search finds 20 counterexamples in `risk` and none in `gpu`, `friday`, `inventory` or `hiring`. The first is `rel(p(0,1,3,7), release(0), other(reserved), via(cancel)) - err(bounds)`. MC-1 `reliance`: 150 release-blocked states with B = 0. <br>**TLA+:** TLA-LIVE-F2 (weak fairness of the honest `settle(false)` and of `cancel`); `MC_Liveness_F2Shape` shows that, in its small universe (`CreditHedgeConfig`), every LIVE-2 counterexample is this wedge. <br>**F-2b:** trace 208 (`release-arith`, 13 calls), equal under TLC, Lean, Prolog and the shell. <br>No conformance trace of the `Bounds` form yet (§13). | spec:46: "In the supplied fixtures, physical availability and risk-credit timing prevent ordinary unsafe reliance on unexecuted work." spec:46 also says "resolve dependent work first", yet the dependent hedge is resolved and the release still fails. handoff:23 (RISK). `div-F2-fixture-release`. |
+| F-2 (high) | **Healthy-state release wedge in the supplied `risk` fixture.** No observe; every metric in bounds. A credit position is reserved (recipe 0, +20 on selloff loss). A selloff hedge (recipe 3, −10 per unit on completion) is admitted only because the position's +20 is counted: 60 + 20 − 70 ≥ 0 at 7 units. The hedge completes, and selloff loss is 10. The position's job never ran, so the executor honestly calls `settle(false)`. Releasing the +20 gives 10 − 20 < 0, so it fails `Bounds`. `cancel` and `observe` fail `Pending`. Only `settle(true)`, an attestation of work that did not happen, ends the record. The same check blocks `cancel` of a Reserved position. LIVE-1 is unaffected. <br>**F-2b** (found by the TLA+ layer): a release is not bounded by the envelope. After a sibling relied on the reservation, `values − reserve·units` can leave ±1,000,000. Then `cancel` (actor and owner) and the honest `settle(false)` fail `Arithmetic`. | **Trace 209** (`f2-risk`, 13 calls, the supplied `risk` config of trace 5, no observe): position × 1 (recipe 0, selloff loss 60 → 80), hedge × 8 (recipe 3, admitted with the position counted: 80 − 80 = 0), both dispatched and Active; the hedge settles completed (selloff loss 0). Then the executor's `settle(false)` for the position → `Bounds`, `cancel` by the owner and by the actor → `Pending`, `observe` → `Pending`; `settle(true)` → Ok, then `observe` → Ok. Equal under TLC, Lean, Prolog (MC-2) and the shell. <br>**Prolog:** `test_model` "F-2 witness" (position × 1, hedge × 7, hedge completed). C-5's release search finds 20 counterexamples in `risk` and none in `gpu`, `friday`, `inventory` or `hiring`. The first is `rel(p(0,1,3,7), release(0), other(reserved), via(cancel)) - err(bounds)`. MC-1 `reliance`: 150 release-blocked states with B = 0. <br>**TLA+:** TLA-LIVE-F2 (weak fairness of the honest `settle(false)` and of `cancel`); `MC_Liveness_F2Shape` shows that, in its small universe (`CreditHedgeConfig`), every LIVE-2 counterexample is this wedge. <br>**F-2b: trace 208** (`release-arith`, 13 calls), equal under TLC, Lean, Prolog and the shell. | spec:46: "In the supplied fixtures, physical availability and risk-credit timing prevent ordinary unsafe reliance on unexecuted work." spec:46 also says "resolve dependent work first", yet the dependent hedge is resolved and the release still fails. handoff:23 (RISK). `div-F2-fixture-release`. |
 | F-3 (low/medium) | **Lifetime slot exhaustion.** One actor fills all 256 lifetime records with free submit-and-cancel cycles. After that, `Full` is permanent for every actor. `observe` does not prune (spec:54), and nothing else does. | **Trace 207** (`full`, 515 calls): submit `ok` 256, cancel `ok` 256, then submit `full` 2 (another actor, also after an observe). TLC TraceCheck (it also kills TLA+ mutants 13 and 25), REF-5L, MC-2, near-tests `traces.rs` and `sh4`. Sandbox RES-1: submit #257 is rejected `Full`. | Not explicit. handoff:34: "256 lifetime records bound ordinary growth". |
-| F-4 (low) | **A principal can attest its own work.** `Config::validate` accepts a recipe whose actor is its executor, or the owner. That account can then submit, dispatch and settle its own work as completed. | A Prolog step/4 witness. `extract.py` records `code_role_checks(validate, [])`. Code mutant c09 (validate rejects actor = executor) makes C-5 fail. No trace config has actor = executor. | spec:64: "No worker can authorize its own acceptance through the wrapper". spec:50: "the independent operator". `amb-self-executor`. |
-| F-5 (low) | **Version saturation freezes every transition.** At version = u32::MAX, every transition fails `Arithmetic`, including settling in-flight records and `set_paused(false)`. Reaching it takes 2³² − 1 effective transitions. | A Prolog step/4 witness. Sandbox RT-REVERT patches version = u32::MAX into the state: `set_paused` and `submit` fail, and storage is unchanged. Lean mutant 04 is killed by the proofs. TLA+ cannot reach it (§17.5). | None. handoff:34 documents "Version overflow is an explicit rejection". The effect on in-flight records is not documented. |
-| F-6 (low) | **An open record blocks the only snapshot refresh.** With `max_age > 0`, one record open longer than `max_age` freezes the pool. `observe` needs every record terminal, so it fails `Pending`. `submit` and `dispatch` fail `SnapshotExpired` until the executor settles. | A Prolog step/4 witness on the risk fixture: max_age 300, observed at 100, one record in flight. At now = 401, `dispatch` and `submit` fail `SnapshotExpired`, and `observe` fails `Pending`. | Not explicit. spec:19, 37 and 54 state the two rules separately. |
+| F-4 (low) | **A principal can attest its own work.** `Config::validate` accepts a recipe whose actor is its executor, or the owner. That account can then submit, dispatch and settle its own work as completed. | **Trace 210** (`f4-self`, 8 calls): `validate` accepts recipe 0 with actor = executor = a1 and recipe 1 with actor = executor = the owner o. a1 submits, dispatches and settles record 0 completed, and o does the same with record 1; every call is Ok. Equal under TLC, Lean, Prolog and the shell. <br>**Prolog:** `test_model` "F-4 witness" (step/4). `extract.py` records `code_role_checks(validate, [])`. Code mutant c09 (validate rejects actor = executor) makes C-5 fail. | spec:64: "No worker can authorize its own acceptance through the wrapper". spec:50: "the independent operator". `amb-self-executor`. |
+| F-5 (low) | **Version saturation freezes every transition.** At version = u32::MAX, every transition fails `Arithmetic`, including settling in-flight records and `set_paused(false)`. Reaching it takes 2³² − 1 effective transitions. | **No trace:** reaching version u32::MAX takes 2³² − 1 effective transitions; the highest version in the traces is 513. <br>**Prolog:** `test_model` "F-5 witness" (step/4 from a paused state at version u32::MAX with record 0 Dispatched: `settle` both ways, `ack` and `set_paused(false)` fail `Arithmetic`, `observe` fails `Pending`). <br>**Lean:** mutant 04 (version overflow one too late) is killed by the proofs. <br>**TLA+:** no witness; `VerErr` transcribes the bump, but `MaxVersion` is 2³¹ − 1 and no run gets near it (§17.5). <br>**Sandbox:** RT-REVERT patches version = u32::MAX into the state: `set_paused` and `submit` fail, and storage is unchanged. | None. handoff:34 documents "Version overflow is an explicit rejection". The effect on in-flight records is not documented. |
+| F-6 (low) | **An open record blocks the only snapshot refresh.** With `max_age > 0`, one record open longer than `max_age` freezes the pool. `observe` needs every record terminal, so it fails `Pending`. `submit` and `dispatch` fail `SnapshotExpired` until the executor settles. | **Trace 211** (`f6-stale`, 12 calls): max_age 50, observed at 100; record 0 dispatched and Active. At now = 151, `submit` and `dispatch` fail `SnapshotExpired` and `observe` fails `Pending`; with the other record cancelled, `observe` still fails `Pending` while record 0 is open. Once the executor settles record 0, `observe` and then `submit` are Ok. Equal under TLC, Lean, Prolog and the shell. <br>**Prolog:** `test_model` "F-6 witness" on the risk fixture: max_age 300, observed at 100, one record in flight. At now = 401, `dispatch` and `submit` fail `SnapshotExpired`, and `observe` fails `Pending`. | Not explicit. spec:19, 37 and 54 state the two rules separately. |
 
 ### 4.2 Open: shell, build and runtime
 
@@ -239,12 +242,15 @@ record's version at most twice.
 ## 5. Property catalogue
 
 The IDs below are exactly the 96 `property/3` IDs of
-`prolog/requirements/traceability.pl`. A script compared the sets on
-2026-11-12: none missing, extra or repeated. No CI check does this yet.
-C-6 compares `traceability.pl` with the brief, which is not in the
-repository, so in CI it checks `traceability.pl` alone. It will be pointed
-here (§13 step 2). Every table row in this section starts with a bare ID,
-and the section has no other tables.
+`prolog/requirements/traceability.pl`. C-6
+(`prolog/verification/consistency.pl`) now compares `traceability.pl`
+with this section, not with the brief: the IDs are the first cell of every
+table row between this heading and the next `## ` heading, and each row's
+*Layer(s)* must equal `property/3`'s layer list, in order. None may be
+missing, extra or repeated on either side. A missing file, a missing
+section or an empty ID set fails C-6. The `prolog` CI job runs it. Every
+table row in this section starts with a bare ID, and the section has no
+other tables.
 
 **Notation.**
 - **Point violation:** `PV_i(v) = max(0, min_i − v_i) + max(0, v_i − max_i)`.
@@ -283,14 +289,14 @@ code's order), the exact post-state, and the frame.
 
 | ID | Statement | Layer(s) | Evidence | Status |
 |---|---|---|---|---|
-| TX-0 | Every `Err` leaves the Pool unchanged | kani, tla, lean, prolog | Lean `stepProps` (every call, every state); TLC TraceCheck; MC-2 | proved (model); tested on 209 traces; Kani pending |
-| TX-SUBMIT | `submit`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | REF-5, REF-5L, MC-2 on every replayed submit; TLC `StepProperty` (time, capacity and unit guards, effect); C-2 guard order | tested on 209 traces; model-checked in part; Kani pending |
-| TX-DISPATCH | `dispatch`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | REF-5, REF-5L, MC-2; TLC `StepProperty`; C-2 | tested on 209 traces; model-checked in part; Kani pending |
-| TX-ACK | `acknowledge`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | REF-5, REF-5L, MC-2; C-2, C-3 | tested on 209 traces; Kani pending |
-| TX-CANCEL | `cancel`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | REF-5, REF-5L, MC-2; C-2 | tested on 209 traces; Kani pending |
-| TX-SETTLE | `settle`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | REF-5, REF-5L, MC-2; C-2 | tested on 209 traces; Kani pending |
-| TX-PAUSE | `set_paused`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | REF-5, REF-5L, MC-2; C-2 | tested on 209 traces; Kani pending |
-| TX-OBSERVE | `observe`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | REF-5, REF-5L, MC-2; C-2 | tested on 209 traces; Kani pending |
+| TX-0 | Every `Err` leaves the Pool unchanged | kani, tla, lean, prolog | Lean `stepProps` (every call, every state); TLC TraceCheck; MC-2 | proved (model); tested on 212 traces; Kani pending |
+| TX-SUBMIT | `submit`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | REF-5, REF-5L, MC-2 on every replayed submit; TLC `StepProperty` (time, capacity and unit guards, effect); C-2 guard order | tested on 212 traces; model-checked in part; Kani pending |
+| TX-DISPATCH | `dispatch`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | REF-5, REF-5L, MC-2; TLC `StepProperty`; C-2 | tested on 212 traces; model-checked in part; Kani pending |
+| TX-ACK | `acknowledge`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | REF-5, REF-5L, MC-2; C-2, C-3 | tested on 212 traces; Kani pending |
+| TX-CANCEL | `cancel`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | REF-5, REF-5L, MC-2; C-2 | tested on 212 traces; Kani pending |
+| TX-SETTLE | `settle`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | REF-5, REF-5L, MC-2; C-2 | tested on 212 traces; Kani pending |
+| TX-PAUSE | `set_paused`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | REF-5, REF-5L, MC-2; C-2 | tested on 212 traces; Kani pending |
+| TX-OBSERVE | `observe`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | REF-5, REF-5L, MC-2; C-2 | tested on 212 traces; Kani pending |
 | TX-NOOP | Idempotent Ok paths change nothing, version included | kani, tla, lean, prolog | Lean `stepProps`; TLC TraceCheck; MC-2 | proved (model); tested; Kani pending |
 | TX-VER | Every other Ok increments the version by exactly 1 | kani, tla, lean, prolog | Lean `stepProps`; TLC `StepProperty`; MC-2 | proved (model); model-checked; tested; Kani pending |
 
@@ -336,7 +342,7 @@ with `inv_init`, `inv_step` and `reach_inv`.
 | ID | Statement | Layer(s) | Evidence | Status |
 |---|---|---|---|---|
 | LIVE-1 | INV, B = 0 and version < u32::MAX ⇒ `settle(executor, id, true)` is Ok for every Dispatched, Active or Unknown record | lean, tla, prolog | Lean `live1` at every size; canary `Live1NoPremise.lean` fails to compile; TLC invariant in MC_Safety; Prolog on every trace state | proved (model); model-checked; tested |
-| LIVE-2 | Every dispatched record eventually becomes terminal under executor fairness | tla, prolog | TLA-LIVE-F1 and TLA-LIVE-F2 violated; TLA-LIVE-1 holds on the completion path; MC-1 (dead records in `wedge`, release-blocked in `reliance`, none in `healthy`); RT-WEDGE | fails: F-1, F-2 |
+| LIVE-2 | Every dispatched record eventually becomes terminal under executor fairness | tla, prolog | TLA-LIVE-F1 and TLA-LIVE-F2 violated; TLA-LIVE-1 holds on the completion path; MC-1 (dead records in `wedge`, release-blocked in `reliance`, none in `healthy`); traces 0 (F-1) and 209 (F-2) on the real core; RT-WEDGE | fails: F-1, F-2 |
 
 ### 5.7 Contract shell
 
@@ -351,7 +357,7 @@ Mocked runtime (`near-tests/`), on the host and on two wasm builds.
 | SH-5 | A core `Err` panics with exactly the error string and changes nothing | near-tests | `sh5_core_errors_are_panics_with_the_error_string`; SH-8 | fails on the documented build: NT-F1; tested on `--cfg near` |
 | SH-6 | `dispatch` promise shape: `execute{id,recipe,units}` to the executor, 30 Tgas, then `on_result` | near-tests | `sh6_dispatch_promise_shape`; mutant m11 | tested |
 | SH-7 | `reconcile` guard and promise shape: `status{id}` 10 Tgas, then `on_result`, by anyone, no state write | near-tests | `sh7_reconcile_guard_and_promise_shape`; mutants m05, m15 | tested |
-| SH-8 | Borsh state round trip: the shell equals the core, with a reload before every call | near-tests | `sh8_store_diff_host` (80,000 calls), `sh8_store_diff_wasm` (12,000 calls per build), `conformance_traces_through_the_shell` (8,771 calls × 3 paths) | tested |
+| SH-8 | Borsh state round trip: the shell equals the core, with a reload before every call | near-tests | `sh8_store_diff_host` (80,000 calls), `sh8_store_diff_wasm` (12,000 calls per build), `conformance_traces_through_the_shell` (8,804 calls × 3 paths) | tested |
 | SH-9 | Views: `get_pool`, `get_commitments` pages of at most 50 | near-tests | `sh9_views_and_paging_at_256_records`; mutant m06 | tested |
 | SH-10 | Nonpayable methods reject deposits | near-tests | `sh10_mutating_methods_reject_attached_deposits`; mutant m12 | tested; NT-F2 (`reconcile` keeps deposits) |
 
@@ -388,9 +394,9 @@ Every row ran on both builds (§9.2).
 | C-3 | Lifecycle: docs = code = TLA+ `Edges` = the traces | prolog | 36 rows, 11 edges, all 36 rows observed in the traces | checked; one divergence (`div-ack-noop-version`) |
 | C-4 | Constants: docs = code | prolog | 8 compared, 4 derived | checked |
 | C-5 | Fixture conservation (STOCK, CASH, RISK, self-authorization) | prolog | 23 claims on trace configs 1-5; a two-record release search per fixture | checked; F-2 and F-4 reproduced |
-| C-6 | Traceability: `traceability.pl` = the brief's catalogue (later: this section); requirements, threats and findings traced | prolog | `verification/consistency.pl`. `prolog/RESULTS.md` records a pass at 95 IDs, from before TLA-LIVE-F2 was added; the requirements suite, rerun on 2026-11-12, passes at 96 | checked against the brief, not this section |
+| C-6 | Traceability: `traceability.pl` = this section (IDs and layer lists); requirements, threats and findings traced | prolog | `verification/consistency.pl` reads the first cell and the *Layer(s)* cell of every table row of §5 from this file. Requirements suite, 2026-11-12: 96 IDs, 96 rows, 96 equal layer lists | checked |
 | MC-1 | Small model check of `step/4` | prolog | `wedge` 3,740 states, `healthy` 3,856, `reliance` 630; all complete | model-checked |
-| MC-2 | Replay of every trace through `step/4` | prolog | 209 traces, 8,771 calls, 0 divergences | tested |
+| MC-2 | Replay of every trace through `step/4` | prolog | 212 traces, 8,804 calls, 0 divergences | tested |
 
 ### 5.11 TLA+
 
@@ -402,7 +408,7 @@ Every row ran on both builds (§9.2).
 | TLA-LIVE-F1 | F-1 as a LIVE-2 counterexample (must be violated) | tla | `MC_Liveness_F1` violated; `MC_Liveness_F1Shape` holds (18,284 states) | violated, as required (F-1) |
 | TLA-LIVE-F2 | F-2 as a LIVE-2 counterexample: healthy observations, a fair honest executor (must be violated) | tla | `MC_Liveness_F2` violated; `MC_Liveness_F2Shape` holds (17,553 states) | violated, as required (F-2) |
 | TLA-WIT | Completed, prerequisite, disturbed and wedge states, and seven step shapes, are reachable | tla | 4 state and 7 step witnesses | each violated, as required |
-| REF-5 | The TLA+ model accepts every real-core trace | tla | TraceCheck, 8,980 of 8,980 states | tested |
+| REF-5 | The TLA+ model accepts every real-core trace | tla | TraceCheck, 9,016 of 9,016 states | tested |
 
 ### 5.12 Lean
 
@@ -412,7 +418,7 @@ Every row ran on both builds (§9.2).
 | LEAN-STEP | Every call from every state satisfies the step properties | lean | `stepProps`, `stepProps_step`, `exec_auth`, `term1`, `term1_cancel`, `stale1_no_replay`, `version_mono_run` | proved (model) |
 | LEAN-LIVE1 | LIVE-1 at every size | lean | `live1`, `live1_exec`, `live1_reach` | proved (model) |
 | LEAN-WIT | F-1 witness, permanent for every continuation, and healthy-side non-vacuity | lean | `Witness.lean`, `f1_forever` | proved (model) |
-| REF-5L | The Lean machine agrees with the real core on every trace | lean | `pool-lean replay`: 209 traces, 8,771 calls (2,522 Ok), every result and post-state equal | tested |
+| REF-5L | The Lean machine agrees with the real core on every trace | lean | `pool-lean replay`: 212 traces, 8,804 calls (2,547 Ok), every result and post-state equal | tested |
 | LEAN-GUARD | Each call's guard list is the code's order | lean | `Guard.guards_order`, `Guard.outcome_mem`; compared with TLA+ `GuardOrder` by hand | proved (model) |
 
 ### 5.13 Kani refinement links
@@ -441,7 +447,7 @@ The levels are those of `threat_model.pl`: high, med, low, or policy.
 | ASM-TOOLS | Scryer, TLC, Lean, Kani and the extractors are sound for what is used | assumption | canaries, witnesses and mutants in every runner; the Lean axiom audit | trusted (med) |
 | ASM-SPEC | The specs, and the Prolog transcription of the docs, mean what we intend | assumption | `[review] spec_reviewer` (empty); the Prolog author had read the code (§8) | open: no reviewer (low) |
 | ASM-MODEL | The small scopes are representative: Kani's bounds, TLC's universes and 32-bit integers, MC-1's universes | assumption | Lean at every size (model); traces at 256 records and ±1,000,000 | trusted (med) |
-| ASM-LEAN-TLA | The Lean and TLA+ models transcribe the code | assumption | REF-5, REF-5L, MC-2, C-2; REF-1..3 pending | trusted (med); tested on 209 traces |
+| ASM-LEAN-TLA | The Lean and TLA+ models transcribe the code | assumption | REF-5, REF-5L, MC-2, C-2; REF-1..3 pending | trusted (med); tested on 212 traces |
 | ASM-COMPILE | `overflow-checks = true` in the release profile | assumption | `tools/scripts/check-pin.sh` (`release_overflow_checks = true`) | trusted (high); checked |
 
 ---
@@ -509,7 +515,7 @@ rather than the model.
 ## 8. Prolog
 
 Results: `prolog/RESULTS.md`. Scryer Prolog 0.10.0. The final run
-(2026-11-11) exits 0 in 231.7 s.
+(2026-11-12, 212 traces) exits 0 in 332.4 s.
 
 | File | Contents |
 |---|---|
@@ -518,24 +524,28 @@ Results: `prolog/RESULTS.md`. Scryer Prolog 0.10.0. The final run
 | `requirements/traceability.pl` | `property/3`, which is §5; `trace_row/2`, which maps requirements to properties |
 | `model/pool_machine.pl` | `step/4`, written from the docs. It walks the guard table in order, so the model's behaviour is the requirement table. 16 places are tagged `CODE-ONLY`. Reads: `admissible/3`, `preview_allowed/3`, `best_quantity/4`. |
 | `extract.py` → `extracted/` | Facts from the core and contract `lib.rs`, `fixtures.rs`, `SharedPool.tla` and `Props.tla`. A narrow parser that fails loudly on unknown constructs. `run.sh` fails on a regeneration diff. |
-| `verification/`, `tests/`, `mutants/` | C-1..C-6, MC-1, MC-2 and the property checkers; four suites; 17 model and 9 code mutants |
+| `verification/`, `tests/`, `mutants/` | C-1..C-6, MC-1, MC-2 and the property checkers; four suites; 17 model, 2 requirements (r01, r02) and 9 code mutants |
 
 **Results.**
 - **C-1..C-6 pass** (§5.10). C-5 reproduces F-2 and F-4, and fails if
-  either stops reproducing (mutants m17, c09).
+  either stops reproducing (mutants m17, c09). C-6 compares
+  `traceability.pl` with §5: requirements mutant r01 drops the TLA-IND
+  row, r02 adds `tla` to NUM-2's layers, and only that comparison kills
+  them. The requirements suite (15 tests) takes 11.0 s.
 - **MC-1** uses monotone time and record caps of 3 (`wedge`) and 2
-  (`healthy`, `reliance`), in 33.9 s. `wedge`: 3,740 states, 113,172
+  (`healthy`, `reliance`), in 34.8 s. `wedge`: 3,740 states, 113,172
   edges, 228 dead states (F-1). `healthy`: 3,856 states, 98,056 edges,
   nothing dead or blocked, 10 error kinds reached. `reliance`: 630 states,
   14,236 edges, 150 release-blocked states with B = 0 (F-2).
-- **MC-2** replays 209 traces (8,771 calls) from the code's pre-states in
-  2.5 s, with 0 divergences. Every op kind returns Ok, and all 15 error
-  kinds the code can return from an INV state occur. The invariants, step
-  properties and LIVE-1 hold on every core state.
-- **Unit tests:** 29 `step/4` tests pass, including the F-1..F-6
+- **MC-2** replays 212 traces (8,804 calls) from the code's pre-states,
+  with 0 divergences; the whole `test_mc2` suite (19 tests) takes 6.3 s.
+  Every op kind returns Ok, and all 15 error kinds the code can return
+  from an INV state occur. The invariants, step properties and LIVE-1 hold
+  on every core state.
+- **Unit tests:** 29 `step/4` tests pass (0.5 s), including the F-1..F-6
   witnesses and the RD checks on the model.
 - **Canaries and mutants.** Each of three suites exits 1 with only its
-  canary failing. 26 of 26 mutants are killed (168.8 s).
+  canary failing. 28 of 28 mutants are killed (258.3 s summed).
 
 **What it does not show.**
 - **Independence (ASM-SPEC).** Unlike near-approval's M4, this layer's
@@ -573,14 +583,17 @@ Results: `near-tests/RESULTS.md` (2026-11-11). Toolchain 1.98, near-sdk
 |---|---|---|
 | `tests/shell.rs` | 14 | SH-1..SH-7, SH-9, SH-10, NT-F1, NT-F2, NT-F4 |
 | `tests/store_diff.rs` | 2 | SH-8: 2,000 × 40 host calls, 300 × 40 per wasm build, 46 required outcomes |
-| `tests/traces.rs` | 1 | all 209 traces (8,771 calls) on the host and both builds |
+| `tests/traces.rs` | 1 | all 212 traces (8,804 calls) on the host and both builds |
 | `tests/executor.rs` | 8 | EX-1..EX-5, end to end through the router |
 | `tests/wedge.rs` | 3 | F-1 through the shell; a control without the observe; F-1 with the executor |
 | `tests/lockfile.rs` | 1 | 280 packages resolve exactly as in the mirror |
 
-All 29 tests pass in about 30 s. Each of the 21 mutants (15 contract, 6
-executor) is applied to a copy of the source, and both builds are rebuilt.
-All 21 are killed (9 min).
+All 29 tests pass in about 30 s. `run.sh test` and `run.sh all` first
+run `check-tags.py` (stdlib Python, under a second), which fails the run
+unless every test has its own PROP tag line, every tag is a `property/3`
+ID, and each near-tests property is tagged on a test that checks it. Each
+of the 21 mutants (15 contract, 6 executor) is applied to a copy of the
+source, and both builds are rebuilt. All 21 are killed (9 min).
 
 **Wasm surface.** `near-tests/wasm-surface.sh` compares both builds with
 `wasm-surface.expected`. SURF-1 (exports, and each import classed as
@@ -639,8 +652,8 @@ rule out code replacement (NT-F3).
 The format is Prolog terms, documented at the top of `src/main.rs`, with
 accounts `o`, `a1`, `a2`, `x1`, `x2` and `z`.
 
-`traces/core.txt` (sha256 `988d9a6f…1250dd`) holds 209 traces of 8,771
-calls, 2,522 of them Ok:
+`traces/core.txt` (sha256 `05c0deb4…377818`) holds 212 traces of 8,804
+calls, 2,547 of them Ok (no-ops included):
 
 | Traces | Content |
 |---|---|
@@ -650,6 +663,9 @@ calls, 2,522 of them Ok:
 | 206 | `arith`: `Arithmetic` at the 10^6 bound; the expiry horizon edges |
 | 207 | `full`: 256 records, then `Full` (F-3) |
 | 208 | `release-arith`: the release `Arithmetic` of F-2b |
+| 209 | `f2-risk`: F-2's `Bounds` form in the supplied `risk` fixture |
+| 210 | `f4-self`: F-4, actor = executor and owner = executor |
+| 211 | `f6-stale`: F-6, `SnapshotExpired` while `observe` is `Pending` |
 
 The traces come from the real core, so a disagreement is either a model
 bug or a finding in the code. Every replay compares each result and the
@@ -657,35 +673,35 @@ whole post-state.
 
 | Replayer | ID | Result |
 |---|---|---|
-| TLA+ `TraceCheck` (`trace2tla.py`) | REF-5 | 8,980 of 8,980 states; `Inv` and `StepProperty` on every core state and step |
-| Lean `pool-lean replay` | REF-5L | 209 traces equal |
+| TLA+ `TraceCheck` (`trace2tla.py`) | REF-5 | 9,016 of 9,016 states; `Inv` and `StepProperty` on every core state and step |
+| Lean `pool-lean replay` | REF-5L | 212 traces equal |
 | Prolog `step/4` | MC-2 | 0 divergences |
 | Shell: host and both wasm builds | SH-8 (`traces.rs`) | every result and post-state equal |
 
-**Coverage.** The `op:result` counts over all 8,771 calls, from
+**Coverage.** The `op:result` counts over all 8,804 calls, from
 `tla/RESULTS.md` (`noop` means Ok with the state unchanged):
 
 | Op | Results |
 |---|---|
-| submit | ok 581, bounds 823, paused 377, unauthorized 218, prerequisite 149, stale 142, expired 117, energy 110, invalid_recipe 99, invalid_units 87, snapshot_expired 59, arithmetic 2, full 2 |
-| dispatch | not_found 896, invalid_state 231, ok 146, paused 74, unauthorized 65, expired 44, snapshot_expired 4 |
-| ack | not_found 572, noop 338, ok 67 |
-| cancel | not_found 346, ok 337, pending 81, noop 48, unauthorized 43, bounds 3, arithmetic 2 |
-| settle | not_found 994, invalid_state 373, ok 110, noop 108, unauthorized 75, bounds 2, arithmetic 1 |
+| submit | ok 588, bounds 823, paused 377, unauthorized 218, prerequisite 149, stale 142, expired 117, energy 110, invalid_recipe 99, invalid_units 87, snapshot_expired 60, arithmetic 2, full 2 |
+| dispatch | not_found 896, invalid_state 231, ok 151, paused 74, unauthorized 65, expired 44, snapshot_expired 5 |
+| ack | not_found 572, noop 338, ok 72 |
+| cancel | not_found 346, ok 338, pending 83, noop 48, unauthorized 43, bounds 3, arithmetic 2 |
+| settle | not_found 994, invalid_state 373, ok 115, noop 108, unauthorized 75, bounds 3, arithmetic 1 |
 | pause | ok 398, unauthorized 51 |
-| observe | ok 389, pending 132, bounds 24, unauthorized 51 |
+| observe | ok 391, pending 135, bounds 24, unauthorized 51 |
 
 ### 10.2 What the traces do not establish
 
-- **Equivalence.** 8,771 equal calls are evidence that the models
+- **Equivalence.** 8,804 equal calls are evidence that the models
   transcribe the code, not a proof (ASM-LEAN-TLA). REF-1..3 add a bounded
   proof per step.
 - **Exits no trace reaches:** the version-overflow bump (the highest state
   version is 513); `settle(true)`'s add and envelope `Arithmetic`;
   submit's recovery add; release's envelope `Arithmetic`.
-- **Not traced:** exits of one kind are not told apart (submit's two
-  `Energy` exits); no config has actor = executor (F-4), or a release
-  blocked with `Bounds` by a completed sibling (F-2).
+- **Not told apart:** exits of one kind (submit's two `Energy` exits).
+  Of the core findings only F-5 has no trace (the version-overflow bump
+  above).
 - **Small random configs:** bounds within [−5, 10] and effects within ±3.
 
 ### 10.3 The chain and staleness
@@ -726,7 +742,7 @@ formalver/
     ├── tla/                             # §17; *.tla, *.cfg, mutants/, run.sh, trace2tla.py
     ├── lean/{PoolLean,canary,mutants}/  # §18; run.sh
     ├── prolog/{requirements,model,verification,extracted,tests,mutants}/  # §8
-    ├── near-tests/{src,tests,mutants}/  # §9.1; run.sh, run-mutants.sh, wasm-surface.sh
+    ├── near-tests/{src,tests,mutants}/  # §9.1; run.sh, run-mutants.sh, wasm-surface.sh, check-tags.py
     └── sandbox/                         # §9.2; run.sh
 ```
 
@@ -771,15 +787,17 @@ Specific to this project:
 **Next, in order.**
 1. Land the Kani layer: harnesses, covers (F-1 among them), canary,
    mutants, REF-1..3.
-2. Add the §5 properties to `status.toml`, and point C-6 at §5 instead of
-   the brief.
-3. Add a conformance trace of F-2's `Bounds` form on the `risk` fixture,
-   so TLA+, Lean, Prolog and the shell replay it.
-4. Report F-1..F-6, NT-F1..NT-F4 and the two doc divergences on PR #1.
-5. When PR #1 merges, re-pin to the merge commit: regenerate the traces,
+2. Add the §5 properties to `status.toml`.
+3. Report F-1..F-6, NT-F1..NT-F4 and the two doc divergences on PR #1.
+4. When PR #1 merges, re-pin to the merge commit: regenerate the traces,
    recompute the hashes, rerun every layer, and update the findings.
-6. A named reviewer who wrote neither `pool-core` nor the models signs off
+5. A named reviewer who wrote neither `pool-core` nor the models signs off
    the specs (`[review] spec_reviewer`).
+
+Closed from this list: pointing C-6 at §5 instead of the brief (§5), and
+a conformance trace of F-2's `Bounds` form on the `risk` fixture (trace
+209; traces 210 and 211 add F-4 and F-6). TLA+, Lean, Prolog and the
+shell replay all three.
 
 ---
 
@@ -787,7 +805,10 @@ Specific to this project:
 
 The workflow is being written alongside this document and is
 authoritative. Jobs run on pull requests and pushes to `main` that touch
-the project. `sandbox` runs only on `workflow_dispatch` with `sandbox: true`.
+the project. Changes only to documentation (`*.md`, `docs/`) do not
+trigger them, except `strategy.md`: C-6 reads its §5, so the path filters
+include it again. `sandbox` runs only on `workflow_dispatch` with
+`sandbox: true`.
 
 | Job | Runs | Fails on |
 |---|---|---|
@@ -796,8 +817,8 @@ the project. `sandbox` runs only on `workflow_dispatch` with `sandbox: true`.
 | `conformance` | `cargo run --release --locked -- --check traces/core.txt` | the checked-in traces differ from the generator's output |
 | `tla` | `tla/run.sh safety liveness trace` (about 10 min), then `run.sh mutants` | a check failing; a witness or required violation passing; a mutant surviving |
 | `lean` | `lean/run.sh` (about 4 min) | a `sorry` or forbidden construct; an extra axiom; a canary compiling; a REF-5L difference; a mutant surviving |
-| `prolog` | `prolog/run.sh` (about 4 min) | a suite failing; a loader warning; extraction drift; a canary passing; a mutant surviving |
-| `near-unit` | `near-tests/run.sh all`: tests, surface, and the 21 mutants (about 9 min) | a test failing; lockfile drift; a surface diff (SURF-2 stays expected-fail); a mutant surviving |
+| `prolog` | `prolog/run.sh` (about 5.5 min) | a suite failing; a loader warning; extraction drift; a canary passing; a mutant surviving |
+| `near-unit` | `near-tests/run.sh all`: the PROP-tag check, tests, surface, and the 21 mutants (about 9 min) | a tag problem (`check-tags.py`); a test failing; lockfile drift; a surface diff (SURF-2 stays expected-fail); a mutant surviving |
 | `sandbox` | `sandbox/run.sh` (about 7 min warm) | any failure; lockfile drift |
 | `plain`, `kani` | Not in the workflow yet; added when the Kani layer lands. The harness bodies in random mode, and the Kani harnesses (§6). | any failure; an unsatisfied cover; `h_canary` passing |
 
@@ -853,7 +874,7 @@ final runs ended 2026-11-12.
 | `MCCommon.tla` | Two universes. `MCConfig` is the F-1 wedge scaled down (m0 ∈ [0,2], m1 ∈ [−2,2], a hedge and a dependent recipe, max_age 1). `CreditHedgeConfig` is the `risk` fixture's credit and hedge scaled down (F-2). Accounts o, a1, x1, z. |
 | `MC_Safety.{tla,cfg}` | TLA-SAFE and TLA-WIT on `MCConfig`. Times {0,1,2}, expiry offsets {0,1,2,86400,86401}, 14 observation vectors, MaxRecords = 3. A `VIEW` drops `version`, `steps` and `last` (a bisimulation quotient). |
 | `MC_Liveness.tla` + 7 cfgs | LIVE-2 under named fairness. MaxRecords = 2. Submit, pause and observe are allowed only while version < 4. |
-| `TraceCheck.{tla,cfg}`, `trace2tla.py` | REF-5: all 209 traces in one run. |
+| `TraceCheck.{tla,cfg}`, `trace2tla.py` | REF-5: all 212 traces in one run. |
 | `mutants/*.patch` | 31 spec mutants |
 
 ### 17.2 The refinement link
@@ -894,7 +915,7 @@ check names its fairness assumption:
   the hedge Completed, the base in bounds, then stuttering.
 - **F-2b** was found here, then checked on the pinned core and added to
   the generator as trace 208.
-- **REF-5:** 8,980 of 8,980 states, in 7 s.
+- **REF-5:** 9,016 of 9,016 states (212 initial + 8,804 steps), in 8 s.
 - **Mutants:** 31 of 31 killed in 150 s (28 by the trace check, 2 by
   liveness, 1 by `liveness-f2`). Mutants 10, 13, 23, 24, 25 and 26 survive
   traces 0-205 alone; traces 206 and 207 kill them. One equivalent mutant
@@ -958,7 +979,7 @@ the `pool-lean` executable.
 | LEAN-LIVE1 | `live1`, `live1_exec`, `live1_reach` | `Valid cfg`, `Inv s`, B = 0 and version < u32::MAX ⇒ `settle(executor, id, true)` passes every guard and completes each in-flight record |
 | LEAN-GUARD | `Guard.guards_order`, `Guard.outcome_mem` | Every call's outcome codes are exactly `guardOrder`, written from `lib.rs` with line numbers |
 | LEAN-WIT | `Witness.lean` | F-1 and healthy-side witnesses, by `decide` and `rfl` in the kernel |
-| REF-5L | `pool-lean replay` | 209 traces, 8,771 calls (2,522 Ok); every result and post-state equal, the initial state included |
+| REF-5L | `pool-lean replay` | 212 traces, 8,804 calls (2,547 Ok); every result and post-state equal, the initial state included |
 
 **LEAN-WIT, on trace 0's config.** `wcfg_valid` shows the config is
 `Valid`. `wedge_eq`, `f1_results`, `wedge_reach` and `wedge_inv` reach
@@ -992,7 +1013,7 @@ vacuous.
 ### 18.4 Gaps
 
 - **Transcription.** `Machine.lean` is transcribed by hand. REF-5L found
-  no disagreement on 209 traces. That is evidence, not proof.
+  no disagreement on 212 traces. That is evidence, not proof.
 - **Numbers.** The model computes exactly in `Int` and `Nat`; fixed-width
   overflow in the code is NUM-1 and NUM-2 (Kani). The code's `energy`
   `Arithmetic` error is not modelled (claimed unreachable). The envelope's

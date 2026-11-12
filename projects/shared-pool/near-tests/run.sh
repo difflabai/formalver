@@ -2,7 +2,9 @@
 # Runner of the shared-pool shell layer (near-tests).
 #
 # usage: projects/shared-pool/near-tests/run.sh [test|mutants|surface|all] [args]
-#   test     cargo test --locked --no-fail-fast (lockfile, shell, executor,
+#   test     check-tags.py first (PROP-tag traceability, stdlib python3 -I,
+#            under a second; any problem fails the run), then
+#            cargo test --locked --no-fail-fast (lockfile, shell, executor,
 #            wedge, store_diff at the default 2,000 x 40 host and 300 x 40
 #            wasm sequences per build; STORE_DIFF_SEQS / STORE_DIFF_STEPS /
 #            STORE_DIFF_SEED / WASM_DIFF_SEQS override). The wasm of both
@@ -19,15 +21,22 @@
 #            makes it an error). SURF-1 bears on SH-5 and ASM-DEPLOY, SURF-2
 #            on ASM-DEPLOY (see wasm-surface.sh).
 #            PROP: SH-5 ASM-DEPLOY
-#   all      test, surface, mutants (default).
+#   all      test (tag check included), surface, mutants (default).
 set -uo pipefail
 export PATH="$HOME/.cargo/bin:$PATH"
 here=$(cd "$(dirname "$0")" && pwd)
 mode=${1:-all}
 [ $# -gt 0 ] && shift
 
+run_tags() {
+  python3 -I "$here/check-tags.py"
+}
+
 run_test() {
-  (cd "$here" && cargo test --locked --no-fail-fast "$@")
+  local s=0
+  run_tags || s=1
+  (cd "$here" && cargo test --locked --no-fail-fast "$@") || s=1
+  return $s
 }
 
 run_surface() {

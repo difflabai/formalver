@@ -97,6 +97,46 @@ test('MC-2 F-1: trace 0 is the brief\'s wedge, replayed exactly', (
     memberchk(settle(x1, 0, false)-err(bounds), ORs),
     memberchk(observe(o, [5, 5], 103)-err(pending), ORs) )).
 
+% F-2 (Bounds form), F-4 and F-6 on the real core: traces 209 (f2-risk), 210
+% (f4-self) and 211 (f6-stale) replay exactly, and each has its finding's
+% shape. RESULTS.md cites these traces next to the step/4 witnesses.
+collect_traces(Ns, T, A, A1) :-
+    T = trace(M, _, _, _, _), ( memberchk(M, Ns) -> A1 = [M-T | A] ; A1 = A ).
+results_of(trace(_, _, _, _, Calls), ORs) :- findall(Op-R, member(call(Op, R, _), Calls), ORs).
+
+test('MC-2 F-2, F-4, F-6: traces 209-211 replay exactly, each with its finding\'s shape', (
+    trace_file(F), fold_traces(F, collect_traces([5, 209, 210, 211]), [], Ts),
+    forall(member(N, [209, 210, 211]), (
+        check(present(N), memberchk(N-T, Ts)),
+        mc2_replay_trace(T, r(NC, Divs, Viols, _), _),
+        note("trace ~d: ~d calls, divergences ~q, violations ~q", [N, NC, Divs, Viols]),
+        check(exact(N), ( Divs == [], Viols == [] )) )),
+    % F-2: the supplied risk fixture (trace 5's config), no observe before the
+    % block, every metric in bounds; settle(false) fails Bounds, cancel by the
+    % owner and the actor and observe fail Pending; only settle(true) resolves.
+    memberchk(5-trace(_, Cfg5, _, _, _), Ts), memberchk(209-T209, Ts),
+    T209 = trace(_, Cfg209, _, _, C209), results_of(T209, R209),
+    check(f2_risk_fixture, Cfg209 == Cfg5),
+    check(f2_bounds, nth1(K, C209, call(settle(x1, 0, false), err(bounds), S2))),
+    check(f2_no_prior_observe, \+ ( nth1(J, C209, call(observe(_, _, _), _, _)), J < K )),
+    check(f2_healthy, ( S2 = s(V2, _, _, _, _), \+ violating(Cfg209, V2) )),
+    check(f2_pending, ( memberchk(cancel(o, 0, _)-err(pending), R209),
+                        memberchk(cancel(a1, 0, _)-err(pending), R209),
+                        memberchk(observe(o, _, _)-err(pending), R209) )),
+    check(f2_settle_true, memberchk(settle(x1, 0, true)-ok, R209)),
+    % F-4: recipe 0's actor is its executor, recipe 1's is the owner and its
+    % executor; each settles its own record.
+    memberchk(210-T210, Ts), T210 = trace(_, config(O, _, _, _, Rs210), _, _, _), results_of(T210, R210),
+    check(f4_self, Rs210 = [r(A, A, _, _, _, _), r(O, O, _, _, _, _)]),
+    check(f4_settles, ( memberchk(settle(A, 0, true)-ok, R210), memberchk(settle(O, 1, true)-ok, R210) )),
+    % F-6: max_age 50; with record 0 open, submit and dispatch fail
+    % SnapshotExpired and observe fails Pending until record 0 settles.
+    memberchk(211-T211, Ts), T211 = trace(_, config(_, 50, _, _, _), _, _, _), results_of(T211, R211),
+    check(f6_stale, ( memberchk(submit(_, _, _, _, _, _)-err(snapshot_expired), R211),
+                      memberchk(dispatch(_, _, _)-err(snapshot_expired), R211),
+                      memberchk(observe(_, _, _)-err(pending), R211) )),
+    check(f6_unblocked, append(_, [settle(_, 0, true)-ok, observe(_, _, _)-ok, submit(_, _, _, _, _, _)-ok(_)], R211)) )).
+
 test('MC-2 detects a corrupted trace (result and post-state), with trace id and index', (
     load_trace(0, trace(N, Cfg, Now, Init, Calls)),
     nth1(5, Calls, call(Op, _, Post), Rest),

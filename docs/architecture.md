@@ -102,8 +102,8 @@ them are not.
 
 ```text
   real pool-core ──► traces/core.txt ──┬── REF-5 ───► TLA+ TraceCheck (TLC)
-  (pinned Rust)      209 traces,       ├── REF-5L ──► Lean machine
-        │            8,771 calls       ├── MC-2 ────► Prolog step/4 (from the docs)
+  (pinned Rust)      212 traces,       ├── REF-5L ──► Lean machine
+        │            8,804 calls       ├── MC-2 ────► Prolog step/4 (from the docs)
         │                              └── SH-8 ────► shell: host and two wasm builds
         │ Kani (being built)
         ▼
@@ -113,9 +113,10 @@ them are not.
 
 **One trace file.** `conformance/` is a standalone crate that calls the real
 `pool-core` in the submodule and writes `traces/core.txt`: the F-1 wedge, the
-five upstream fixtures, 200 random configs, and three edge traces (values at
+five upstream fixtures, 200 random configs, and six edge traces (values at
 ±10^6 and the expiry horizon, all 256 records, the release `Arithmetic` of
-F-2b). The file is checked in. TLA+ (REF-5), Lean (REF-5L), Prolog (MC-2) and
+F-2b, F-2's `Bounds` form in the `risk` fixture, F-4's self-attestation,
+F-6's expired snapshot). The file is checked in. TLA+ (REF-5), Lean (REF-5L), Prolog (MC-2) and
 the shell (`near-tests/tests/traces.rs`, on the host and on both wasm builds)
 each replay all of it and must match every result and post-state. CI's
 `conformance` job regenerates the file and fails on any difference, so no layer

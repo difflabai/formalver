@@ -4,10 +4,11 @@
 %% PROP: TX-0 TX-NOOP TX-VER AUTH-1 STALE-1 ADM-1 ADM-2 HARD-STEP DEP-1 LIFE-1
 %% PROP: ASYNC-1 TERM-1 OBS-1 PAUSE-1
 %%
-%% Written from the property catalogue (brief) and the docs it cites. MC-1
-%% applies them to every edge and state of the model's reachable graph; MC-2
-%% applies them to the REAL core's conformance traces (the post-states are the
-%% code's), so a violation there is a finding in the code.
+%% Written from the property catalogue (strategy.md section 5) and the docs
+%% it cites. MC-1 applies them to every edge and state of the model's
+%% reachable graph; MC-2 applies them to the REAL core's conformance traces
+%% (the post-states are the code's), so a violation there is a finding in the
+%% code.
 %%
 %% Ghost state g(Base, K0, Eff): Base = values at the last observe (or init),
 %% K0 = number of records then, Eff = number of effective transitions.

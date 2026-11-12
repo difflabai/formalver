@@ -5,8 +5,10 @@
 %%
 %% Each test cites the doc line it exercises. The F-1 test replays the brief's
 %% witness (conformance trace 0) call by call; F-2..F-6 have step/4 witnesses
-%% on the fixture configs (the model agrees with the real core on all 8,771
-%% trace calls, MC-2; the core reproducers are in the brief's find phase).
+%% on the fixture configs. The model agrees with the real core on all 8,804
+%% trace calls (MC-2), including the core's own reproducers: trace 0 (F-1),
+%% 207 (F-3), 208 (F-2b), 209 (F-2), 210 (F-4) and 211 (F-6); test_mc2 checks
+%% the shapes of 0 and 209-211.
 %%
 %% Run: scryer-prolog test_model.pl -g "(catch(run_tests,E,(write(E),nl,halt(2))) -> halt(0) ; halt(1))" </dev/null
 

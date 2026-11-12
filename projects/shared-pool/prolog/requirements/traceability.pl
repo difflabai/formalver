@@ -1,18 +1,22 @@
-%% traceability.pl -- Property catalogue (brief) -> layers, and requirements -> properties
+%% traceability.pl -- Property catalogue (strategy.md section 5) -> layers, and
+%% requirements -> properties
 %%
 %% PROP: C-6
 %%
-%%   property(Id, Layers, Text)   every property ID of the brief's catalogue
-%%                                (.context/shared-pool/brief.md, "Property
-%%                                catalogue" and "Assumptions"); Layers are the
-%%                                layer directories that carry it
+%%   property(Id, Layers, Text)   every property ID of the catalogue in
+%%                                projects/shared-pool/strategy.md section 5
+%%                                (the first cell of each table row there);
+%%                                Layers are the layer directories that carry
+%%                                it, as in that row's "Layer(s)" cell
 %%   prolog_evidence(Id, How)     what THIS layer does for the property
 %%   verified_by(Req, Property)   pool_req.pl requirement -> properties
 %%
-%% C-6 checks: every property has a known layer; every requirement maps to at
-%% least one property; every property named here, in threat_model.pl, or in a
-%% prolog_evidence/2 row is in the catalogue; and (when the brief is present)
-%% that the catalogue equals the brief's ID list.
+%% C-6 checks: these IDs are exactly strategy.md section 5's IDs (none missing,
+%% extra or repeated) and each layer list equals that row's Layer(s) cell, in
+%% order; strategy.md is committed, so its absence fails C-6. Also: every
+%% property has a known layer; every requirement maps to at least one
+%% property; every property named here, in threat_model.pl, or in a
+%% prolog_evidence/2 row is in the catalogue.
 
 :- module(traceability, [
     property/3,

@@ -4,24 +4,28 @@ Pin: difflabai/shared-pool-controls `a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7`
 (PR #1 head). Model: `crates/core/src/lib.rs` transcribed guard by guard
 (brief, "Exact core semantics"). Tools: TLC 2.19 / tla2tools 1.7.4 (rev
 5a47802), OpenJDK 23.0.2, 4 workers, macOS arm64. Conformance traces:
-`conformance/traces/core.txt`, sha256 `988d9a6f...1250dd`: 209 traces,
-8,771 calls. Traces 0-205 are byte-identical to the previous set (wedge, 5
-fixtures, 200 random configs); trace 206 is `arith`, trace 207 is `full`,
-trace 208 is `release-arith` (the reproducer below).
+`conformance/traces/core.txt`, sha256 `05c0deb4...377818`: 212 traces,
+8,804 calls. Traces 0-205 are the wedge, the 5 fixtures and 200 random
+configs; trace 206 is `arith`, 207 `full`, 208 `release-arith` (F-2b, the
+reproducer below), 209 `f2-risk` (F-2's `Bounds` form in the `risk`
+fixture), 210 `f4-self` (F-4) and 211 `f6-stale` (F-6). Traces 0-208 are
+byte-identical to the previous 209-trace set (sha256 `988d9a6f...1250dd`).
 Run: `projects/shared-pool/tla/run.sh [safety|liveness|apalache|trace|mutants]`
-(default: safety liveness trace). Run date 2026-11-11 (final runs ending 2026-11-12). Wall times of the
-final runs: `run.sh` (default) 573 s (safety 522 s), `run.sh mutants` 150 s.
+(default: safety liveness trace). Run date 2026-11-11 (final runs ending
+2026-11-12). Wall times of the final runs: `run.sh` (default) 573 s
+(safety 522 s), `run.sh mutants` 150 s, both on the 209-trace set. The
+trace check was rerun on 2026-11-12 on the 212 traces: 8 s.
 
 ## Model
 
 | File | Contents |
 |---|---|
-| `SharedPool.tla` | The Pool as variables (`cfg`, `values`, `version`, `observedAt`, `paused`, `records`; config is a variable no action writes, so one TLC run replays traces of 208 configs). Ghost: `base`, `k0` (values and record count at the last observe), `steps` (effective transitions), `last` (the last effective call, read only by step properties). One error operator per entry point (`SubmitErr`, `DispatchErr`, `AckErr`, `CancelErr`, `SettleErr`, `PauseErr`, `ObserveErr`, with `ReleaseErr` and `CheckBounds` shared as in the code) giving the first failing guard in code order, `"Noop"` for the core's idempotent `Ok(())`, or `"Ok"`; one action enabled exactly when it is `"Ok"`. Rejected and idempotent calls stutter (TX-0, TX-NOOP). `GuardOrder` lists each entry point's exits in order. `ValidCfg` transcribes `Config::validate`. |
+| `SharedPool.tla` | The Pool as variables (`cfg`, `values`, `version`, `observedAt`, `paused`, `records`; config is a variable no action writes, so one TLC run replays all 212 traces, of 211 distinct configs: trace 209 reuses trace 5's `risk` config). Ghost: `base`, `k0` (values and record count at the last observe), `steps` (effective transitions), `last` (the last effective call, read only by step properties). One error operator per entry point (`SubmitErr`, `DispatchErr`, `AckErr`, `CancelErr`, `SettleErr`, `PauseErr`, `ObserveErr`, with `ReleaseErr` and `CheckBounds` shared as in the code) giving the first failing guard in code order, `"Noop"` for the core's idempotent `Ok(())`, or `"Ok"`; one action enabled exactly when it is `"Ok"`. Rejected and idempotent calls stutter (TX-0, TX-NOOP). `GuardOrder` lists each entry point's exits in order. `ValidCfg` transcribes `Config::validate`. |
 | `Props.tla` | Invariants INV-WF, INV-LEDGER, INV-HARD, INV-HEALTHY, INV-DEP, INV-VER, TERM-1 (error view), LIVE-1; step properties (`StepProperty`) INV-WF config, TX-VER, LIFE-1, STALE-1, AUTH-1, ADM-1, ADM-2, HARD-STEP, DEP-1, ASYNC-1, OBS-1, TX-SUBMIT and TX-DISPATCH (time, capacity and unit guards, effect), PAUSE-1; witnesses (TLA-WIT). |
 | `MCCommon.tla` | Two small universes. `MCConfig`: metrics m0 ∈ [0,2] (init 1), m1 ∈ [-2,2] (init 1); term t(1, target 0, weight 1); recipes r0 "hedge" (a1/x1, reserve [-1,0], complete [1,-1], max 1) and r1 (a1/x1, reserve [1,-1], complete [-1,0], max 2, requires r0 × 1); max_age 1: the brief's F-1 wedge scaled down. `CreditHedgeConfig`: metric m0 "selloff loss" ∈ [0,2] (init 1); term t(0, target 2, excess); r0 "credit" (reserve [1], complete [0]) and r1 "hedge" (reserve [0], complete [-2]), both a1/x1, max 1; max_age 0: the `risk` fixture's credit position and selloff hedge (F-2) scaled down. Accounts o, a1, x1, z. Observation sets per check. |
 | `MC_Safety.{tla,cfg}` | TLA-SAFE and TLA-WIT on `MCConfig`: times {0,1,2} per call, expiry offsets {0,1,2,86400,86401}, observations {-1,0,2,3} × {-2,0,2} plus a short vector and one beyond MAX_VALUE, MaxRecords = 3. `VIEW` drops `version`, `steps`, `last` (keeps `version - steps`): a bisimulation quotient, argued in the module header. |
 | `MC_Liveness.tla` + 7 cfgs | LIVE-2 under named fairness assumptions (next section). Universe chosen per cfg (`LCfg`). Bounds in the actions (submit/pause/observe while version < 4, MaxRecords = 2), no VIEW or CONSTRAINT. |
-| `TraceCheck.{tla,cfg}`, `trace2tla.py` | REF-5: `trace2tla.py` (python3 -I, no deps) writes `build/TraceData.tla`; TLC replays all 209 traces in one run and also checks `Inv` and `StepProperty` on every core state and step. |
+| `TraceCheck.{tla,cfg}`, `trace2tla.py` | REF-5: `trace2tla.py` (python3 -I, no deps) writes `build/TraceData.tla`; TLC replays all 212 traces in one run and also checks `Inv` and `StepProperty` on every core state and step. |
 | `mutants/*.patch` | 31 spec mutants (a patch may name the checks that must kill it in a `# checks:` header). |
 | `run.sh` | The runner (TLC workers 4). |
 
@@ -39,8 +43,17 @@ versions ≥ 2^31 in the traces (7 submits carry u32::MAX) are mapped to -1 by
 `trace2tla.py`; the model reads a request version only through
 `v = version`, and every state version in the traces is ≤ 513, so the
 outcome (`Stale`) is unchanged. (3) `Energy` computes `w·r²` exactly only
-while it stays below 2^31: with r up to 2·10^6 and w up to 1,000 the core's
-i128 energy reaches 4·10^15, which TLC cannot represent. The traces stay
+while it stays below 2^31. The core computes energy in u64
+(`energy_terms`, lib.rs 151; `energy`, lib.rs 171): it first rejects
+values outside ±MAX_VALUE with `Bounds`, takes the residual
+`r = values[m] − target` in i64 (both bounded, so |r| ≤ 2·10^6) and
+converts it to u64 by shape, then forms each term `r·r·w` with
+`checked_mul` and the sum with `checked_add` (`try_fold`); any overflow
+returns `Err(Arithmetic)`, nothing wraps. With w up to 1,000 a term
+reaches 4·10^15 and 64 terms 2.56·10^17, below u64::MAX (about
+1.8·10^19), so by this arithmetic that `Arithmetic` exit does not fire
+for a valid config (an argument, not a proof: NUM-1), but the values are
+far beyond what TLC can represent. The traces stay
 inside the range: trace 206 reaches values of 10^6 but keeps the energy
 residual at most 10 (excess term with target 999,990). Energy at large
 residuals (NUM-1) is the Kani and Lean layers' job, not shown here.
@@ -69,7 +82,7 @@ at 256 records (trace replay 50 s; now 6-7 s), with the same values.
 | `liveness-f1-shape` (MC_Liveness_F1Shape.cfg): `Live2F1`, every record that stays in flight is eventually forever `Wedged` | TLA-LIVE-F1 | no error | 18,284 distinct states, 5 s |
 | `liveness-f2` (MC_Liveness_F2.cfg): observes in bounds only, WF of settle(false) and of cancel | TLA-LIVE-F2 | violated, as required (F-2) | 4 s |
 | `liveness-f2-shape` (MC_Liveness_F2Shape.cfg): `Live2F2`, every record that stays in flight is eventually forever `WedgedRelease` | TLA-LIVE-F2 | no error | 17,553 distinct states, 3 s |
-| `TraceCheck`: 209 traces, 8,771 calls, every result and post-state equal; `Inv` and `StepProperty` on every core state | REF-5 (also TX-0, TX-NOOP, CFG-1 partial) | every trace accepted | 8,980 of 8,980 states (209 initial + 8,771 steps), 7 s |
+| `TraceCheck`: 212 traces, 8,804 calls, every result and post-state equal; `Inv` and `StepProperty` on every core state | REF-5 (also TX-0, TX-NOOP, CFG-1 partial) | every trace accepted | 9,016 of 9,016 states (212 initial + 8,804 steps), 8 s |
 | Inductive invariant (Apalache) | TLA-IND | not done | open item, below |
 | Spec mutants (`mutants/*.patch`) | | 31 of 31 killed | 28 by trace, 2 by liveness, 1 by liveness-f2; 150 s |
 
@@ -147,6 +160,14 @@ violation is 0), `cancel` fails `Pending`, `observe` fails `Pending`; only
   = `Ok`, cancel by owner and actor `Pending`, observe `Pending`, B = 0,
   undoing the record's own reservation takes a metric out of [min, max], and
   a sibling record is `Completed`.
+- Trace 209 (`f2-risk`) is the unscaled reproducer on the real core, in
+  the supplied `risk` config (that of trace 5) with no observe: position
+  × 1 (selloff loss 60 → 80), hedge × 8 (admitted with the position
+  counted), both dispatched and Active; the hedge settles completed
+  (selloff loss 0); then the executor's `settle(false)` for the position
+  is `Bounds`, cancel by owner and actor `Pending`, observe `Pending`;
+  `settle(true)` is Ok and the next observe Ok. TraceCheck replays it
+  with equal results and states.
 - Not covered here: the same release path also blocks `cancel` of a
   Reserved (never dispatched) credit after the hedge completed; LIVE-2 is
   about dispatched records only.
@@ -170,18 +191,18 @@ replay it with equal results and states.
 
 ## Error coverage of the traces (exact counts)
 
-Counts of `op:result` over all 8,771 calls of `core.txt` (`noop` = the
+Counts of `op:result` over all 8,804 calls of `core.txt` (`noop` = the
 core's `Ok` with the recorded state unchanged, the model's `"Noop"`):
 
 | op | results |
 |---|---|
-| submit | ok 581, bounds 823, paused 377, unauthorized 218, prerequisite 149, stale 142, expired 117, energy 110, invalid_recipe 99, invalid_units 87, snapshot_expired 59, arithmetic 2, full 2 |
-| dispatch | not_found 896, invalid_state 231, ok 146, paused 74, unauthorized 65, expired 44, snapshot_expired 4 |
-| ack | not_found 572, noop 338, ok 67 |
-| cancel | not_found 346, ok 337, pending 81, noop 48, unauthorized 43, bounds 3, arithmetic 2 |
-| settle | not_found 994, invalid_state 373, ok 110, noop 108, unauthorized 75, bounds 2, arithmetic 1 |
+| submit | ok 588, bounds 823, paused 377, unauthorized 218, prerequisite 149, stale 142, expired 117, energy 110, invalid_recipe 99, invalid_units 87, snapshot_expired 60, arithmetic 2, full 2 |
+| dispatch | not_found 896, invalid_state 231, ok 151, paused 74, unauthorized 65, expired 44, snapshot_expired 5 |
+| ack | not_found 572, noop 338, ok 72 |
+| cancel | not_found 346, ok 338, pending 83, noop 48, unauthorized 43, bounds 3, arithmetic 2 |
+| settle | not_found 994, invalid_state 373, ok 115, noop 108, unauthorized 75, bounds 3, arithmetic 1 |
 | pause | ok 398, unauthorized 51 |
-| observe | ok 389, pending 132, bounds 24, unauthorized 51 |
+| observe | ok 391, pending 135, bounds 24, unauthorized 51 |
 
 Trace 206 (`arith`, 11 calls): submit `arithmetic` 2 (add at 999,990 + 15;
 envelope high 1,000,005), `energy` 1 (exactly 10^6), ok 3 (one with
@@ -191,7 +212,19 @@ envelope high 1,000,005), `energy` 1 (exactly 10^6), ok 3 (one with
 submit `full` 2 (another actor, also after an observe), observe ok 1.
 Trace 208 (`release-arith`, 13 calls): cancel `arithmetic` 2 (actor and
 owner), settle `arithmetic` 1 (the honest `settle(false)`), observe
-`pending` 1, then `settle(true)` ok and observe ok.
+`pending` 1, then `settle(true)` ok and observe ok. Trace 209 (`f2-risk`,
+13 calls): submit ok 2, dispatch ok 2, ack ok 2, settle ok 2 (the hedge
+completed; later the position's `settle(true)`), settle `bounds` 1 (the
+position's honest `settle(false)`), cancel `pending` 2 (owner and actor),
+observe `pending` 1, then observe ok 1. Trace 210 (`f4-self`, 8 calls):
+recipe 0 has actor = executor = a1 and recipe 1 actor = executor = owner
+o; each submits, dispatches, is acknowledged and settles its own record
+ok (submit, dispatch, ack and settle ok 2 each). Trace 211 (`f6-stale`, 12
+calls, max_age 50, observed at 100, record 0 in flight): at 151 submit and
+dispatch `snapshot_expired` 1 each and observe `pending`; cancel ok;
+observe `pending` again while record 0 is open; record 0 settles ok; then
+observe ok and submit ok (submit ok 3, dispatch ok 1, ack ok 1, cancel ok
+1, settle ok 1, observe `pending` 2 and ok 1 in all).
 
 The traces compare result kinds, so two exits with the same kind in one
 entry point (submit's two `Energy`, the several `Arithmetic`) are not told
@@ -269,7 +302,8 @@ kill them (30 is a model mutant the trace replay also kills).
 
 **Equivalent mutant (not checked in).** "`add` ignores the upper bound"
 (`AddFails` true only below -MAX_VALUE) survives every check: the trace
-replay of all 209 traces (checked), MC_Safety and the liveness checks
+replay of all 212 traces (checked again 2026-11-12: 9,016 of 9,016
+states, every trace accepted), MC_Safety and the liveness checks
 (their values stay within ±3, where `AddFails` is false either way). It is
 equivalent, not a gap: every `AddFails` in the model is followed by a
 `check_bounds` on the same vector, whose envelope low ≤ value ≤ high, so an
@@ -286,8 +320,9 @@ recovery add is unreachable (above). The same holds in the core. A
   (`1 .. NR`, `0 .. NR - 1`); an Apalache version needs
   `ApaFoldSeqLeft`/`MkSeq` sums, `DOMAIN`-based ranges and type annotations
   throughout, i.e. a rewrite of the model, which was not done. Safety is
-  shown only within the MC bounds plus on the 8,966 core states of the
-  traces; the every-size counterpart is the Lean layer's.
+  shown only within the MC bounds plus on the 9,016 core states of the
+  212 traces (212 initial + 8,804 steps); the every-size counterpart is
+  the Lean layer's.
 - **Small universes.** MC_Safety: 2 metrics, 1 term (target shape only), 2
   recipes, ≤ 3 records, 4 accounts, 3 block times, 14 observation vectors.
   MC_Liveness: ≤ 2 records, submit/pause/observe only while version < 4, two
@@ -313,7 +348,7 @@ Tagged `PROP: <ID>` where the layer checks them: TLA-SAFE (MC_Safety.tla,
 MC_Liveness.cfg, MC_Liveness_Unfair.cfg, MC_Liveness_F2Done.cfg),
 TLA-LIVE-F1 (MC_Liveness.tla, MC_Liveness_F1.cfg, MC_Liveness_F1Shape.cfg),
 TLA-LIVE-F2 (MC_Liveness.tla, MC_Liveness_F2.cfg, MC_Liveness_F2Shape.cfg;
-new ID, not yet in the catalogue), REF-5 (TraceCheck.tla, trace2tla.py),
+now in the catalogue, `property/3` of `traceability.pl`), REF-5 (TraceCheck.tla, trace2tla.py),
 TX-0 and TX-NOOP (TraceCheck.tla `Replay`), CFG-1 (TraceCheck.tla `TInit`,
 partial: Pool::new-accepted configs only), LIVE-2 (MC_Liveness.tla), and the
 invariants and step properties in Props.tla. `run.sh` lists the layer IDs.

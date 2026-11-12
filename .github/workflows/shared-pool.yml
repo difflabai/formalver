@@ -28,6 +28,9 @@ on:
       - "!**/*.rst"
       - "!**/*.adoc"
       - "!**/docs/**"
+      # Re-included (a later positive pattern wins): the prolog job's C-6
+      # reads section 5 of this file. A change to it alone runs every job.
+      - "projects/shared-pool/strategy.md"
   push:
     branches: [main]
     paths:
@@ -45,6 +48,9 @@ on:
       - "!**/*.rst"
       - "!**/*.adoc"
       - "!**/docs/**"
+      # Re-included (a later positive pattern wins): the prolog job's C-6
+      # reads section 5 of this file. A change to it alone runs every job.
+      - "projects/shared-pool/strategy.md"
   workflow_dispatch:
     inputs:
       sandbox:
@@ -129,7 +135,7 @@ jobs:
         run: tools/scripts/check-status.sh shared-pool
 
   conformance:
-    # The shared link between the layers: traces/core.txt (209 traces, 8,771
+    # The shared link between the layers: traces/core.txt (212 traces, 8,804
     # calls) must regenerate byte for byte from the pinned pool-core. TLA+,
     # Lean, Prolog and the shell replay this file, so a stale one would make
     # their replays evidence about other code. Seconds of work; pool-core has
@@ -241,10 +247,11 @@ jobs:
   prolog:
     # Requirement checks C-1..C-6, MC-1 (three small universes), MC-2 (every
     # conformance trace through step/4), the canaries, the PROP tags and the
-    # 26 mutants. extract.py reads the pinned sources, so this job needs the
-    # submodule. The brief (.context/, not in git) is absent here: C-6 then
-    # checks the transcribed catalogue in traceability.pl only.
-    # 232 s on a 10-core Mac.
+    # 28 mutants. extract.py reads the pinned sources, so this job needs the
+    # submodule. C-6 compares the catalogue in traceability.pl with section 5
+    # of projects/shared-pool/strategy.md (the path filters include that file
+    # again); a missing file or section fails it.
+    # 332 s on a 10-core Mac.
     needs: pin
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 60

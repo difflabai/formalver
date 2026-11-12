@@ -16,19 +16,21 @@
 #   4. PROP tags: every catalogue property that lists the prolog layer is
 #      tagged `PROP: <ID>` in a file of this directory, and every tagged ID
 #      is in the catalogue.
-#   5. mutants: each mutants/{model,code}/*.patch is applied to a scratch copy
-#      (code mutants: extracted facts are regenerated from the mutated
-#      source), and every `# expect: <suite> <test-name prefix>` line must
-#      hold: the suite exits non-zero AND prints `FAIL <prefix>`.
+#   5. mutants: each mutants/{model,requirements,code}/*.patch is applied to
+#      a scratch copy (code mutants: extracted facts are regenerated from the
+#      mutated source), and every `# expect: <suite> <test-name prefix>` line
+#      must hold: the suite exits non-zero AND prints `FAIL <prefix>`.
 #
-# usage: projects/shared-pool/prolog/run.sh        (about 3 minutes)
+# C-6 reads the property catalogue from ../strategy.md section 5, so that
+# file must be present (a missing one fails C-6).
+#
+# usage: projects/shared-pool/prolog/run.sh        (about 5 minutes)
 #        PROLOG_LOGS=dir run.sh                   (keep the logs in dir)
 set -uo pipefail
 export PATH="$HOME/.cargo/bin:$PATH"
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 SP=$(dirname "$HERE")
-ROOT=$(cd "$SP/../.." && pwd)
 GOAL='(catch(run_tests,E,(write(E),nl,halt(2))) -> halt(0) ; halt(1))'
 LOGS=${PROLOG_LOGS:-$(mktemp -d "${TMPDIR:-/tmp}/sp-prolog-logs.XXXXXX")}
 mkdir -p "$LOGS"
@@ -117,21 +119,22 @@ else
 fi
 
 # --- 5. mutants -------------------------------------------------------------
-# A scratch copy laid out like the repository: prolog/ and the sources it
-# extracts from are copied; traces, TLA+ and the brief are linked read-only.
+# A scratch copy laid out like the repository: prolog/, strategy.md (C-6's
+# catalogue) and the sources it extracts from are copied; the traces and TLA+
+# are linked read-only.
 mirror() { # <dir>
   local t=$1
   mkdir -p "$t/projects/shared-pool/source-mirror/crates/core" "$t/projects/shared-pool/source-mirror/crates/contract"
   cp -R "$HERE" "$t/projects/shared-pool/prolog"
+  cp "$SP/strategy.md" "$t/projects/shared-pool/strategy.md"
   cp -R "$SP/source-mirror/crates/core/src" "$t/projects/shared-pool/source-mirror/crates/core/src"
   cp -R "$SP/source-mirror/crates/contract/src" "$t/projects/shared-pool/source-mirror/crates/contract/src"
   ln -s "$SP/conformance" "$t/projects/shared-pool/conformance"
   [ -e "$SP/tla" ] && ln -s "$SP/tla" "$t/projects/shared-pool/tla"
-  [ -e "$ROOT/.context" ] && ln -s "$ROOT/.context" "$t/.context"
   return 0
 }
 killed=0; survived=0
-for p in "$HERE"/mutants/model/*.patch "$HERE"/mutants/code/*.patch; do
+for p in "$HERE"/mutants/model/*.patch "$HERE"/mutants/requirements/*.patch "$HERE"/mutants/code/*.patch; do
   [ -f "$p" ] || continue
   id=$(basename "$p" .patch)
   t="$SCRATCH/$id"; mkdir -p "$t"; mirror "$t"

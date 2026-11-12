@@ -1,6 +1,6 @@
 %% consistency.pl -- Requirement checks C-1..C-6: the docs (pool_req.pl) against
 %% the code (extracted/code_facts.pl), the TLA+ model (extracted/tla_facts.pl),
-%% the conformance traces and the property catalogue.
+%% the conformance traces and the property catalogue (strategy.md section 5).
 %%
 %% PROP: C-1 C-2 C-3 C-4 C-5 C-6
 %%
@@ -20,7 +20,10 @@
     unreachable/2,
     unreachable_rule/3,
     code_life/4,
-    brief_ids/2
+    strategy_path/1,
+    strategy_catalogue/3,
+    catalogue_rows/3,
+    catalogue_problems/3
 ]).
 
 :- use_module(library(lists)).
@@ -746,26 +749,34 @@ pending_negative(Cfg, Recs) :-
 %%% ========================================================
 %%% C-6  Traceability
 %%% ========================================================
+%% The property catalogue is projects/shared-pool/strategy.md section 5, which
+%% is committed. Its IDs are the first cell of every markdown table row between
+%% the heading "## 5." and the next "## " heading (each table's header and
+%% separator rows skipped), and its "Layer(s)" column is the property's layer
+%% list. C-6 requires those IDs to be exactly traceability.pl's property/3 IDs
+%% (none missing, none extra, none repeated on either side) and each row's
+%% layer list to equal property/3's, in the same order. A missing strategy.md,
+%% a missing section 5 or an empty ID set is a C-6 failure, never a skip.
 
 c_problems('C-6', Ps, Info) :-
     findall(P, c6_problem(P), Ps0),
-    brief_path(BP),
-    (   file_exists(BP)
-    ->  brief_ids(BP, BIds),
-        findall(Id, property(Id, _, _), PIds0), sort(PIds0, PIds),
-        subtract_sorted(BIds, PIds, Missing), subtract_sorted(PIds, BIds, Extra),
-        (   Missing == [], Extra == [] -> Ps = Ps0
-        ;   Ps = [brief_vs_catalogue(missing(Missing), extra(Extra)) | Ps0]
-        ),
-        length(BIds, NB), Brief = brief_ids(NB)
-    ;   Ps = Ps0, Brief = brief_absent(transcribed_catalogue_used)
+    strategy_path(SP),
+    (   file_exists(SP)
+    ->  strategy_catalogue(SP, Rows, SPs)
+    ;   atom_chars(SA, SP), Rows = [], SPs = [strategy_file_missing(SA)]
     ),
+    findall(CId-CLs, property(CId, CLs, _), Cat),
+    catalogue_problems(Rows, Cat, CPs),
+    append([SPs, CPs, Ps0], Ps),
+    length(Rows, NS),
+    count_where(x, ( member(row(_, RId, RLs), Rows), memberchk(RId-RLs, Cat) ), NL),
     count_where(x, property(_, _, _), NP),
     count_where(x, requirement(_, _, _), NR),
     count_where(x, threat(_, _, _, _), NT),
     count_where(x, finding(_, _, _, _), NF),
     findall(L-N, ( layer(L), count_where(x, ( property(_, Ls, _), memberchk(L, Ls) ), N) ), PerLayer),
-    Info = [properties(NP), requirements(NR), threats(NT), findings(NF), per_layer(PerLayer), Brief].
+    Info = [properties(NP), strategy_rows(NS), layers_equal(NL), requirements(NR), threats(NT),
+            findings(NF), per_layer(PerLayer)].
 
 c6_problem(no_layer(Id)) :- property(Id, [], _).
 c6_problem(unknown_layer(Id, L)) :- property(Id, Ls, _), member(L, Ls), \+ layer(L).
@@ -791,70 +802,149 @@ c6_problem(finding_without_threat(F)) :-
     \+ ( threat(_, _, _, Res), Res \== none, append(_, Tail, Res), append(FC, After, Tail),
          \+ ( After = [D | _], char_code(D, K), K >= 0'0, K =< 0'9 ) ).
 
-brief_path(P) :- root_path("../../../.context/shared-pool/brief.md", P).
+strategy_path(P) :- root_path("../strategy.md", P).
 
-subtract_sorted(A, B, C) :- findall(X, ( member(X, A), \+ memberchk(X, B) ), C).
+%% catalogue_problems(+Rows, +Catalogue, -Problems): Rows = [row(Line, Id,
+%% Layers)] from strategy.md section 5; Catalogue = [Id-Layers] from
+%% property/3. Problems = [] exactly when the two agree and Rows is not empty.
+catalogue_problems(Rows, Cat, Ps) :-
+    findall(Id, member(row(_, Id, _), Rows), SIds0), sort(SIds0, SIds),
+    findall(Id, member(Id-_, Cat), CIds0), sort(CIds0, CIds),
+    findall(P, catalogue_problem(Rows, Cat, SIds, CIds, P), Ps1),
+    (   Rows == [] -> Ps = [strategy_no_ids | Ps1] ; Ps = Ps1 ).
 
-%% brief_ids(+File, -Ids): the property IDs of the brief's catalogue section
-%% ("## Property catalogue" up to "## Tools"); "REF-1..3" expands; the
-%% assumption paragraph lists bare names that are prefixed ASM-. 'F-1' (the
-%% finding) and wildcards (INV-*, ASM-*) are not properties.
-brief_ids(File, Ids) :-
+catalogue_problem(_, _, SIds, CIds, catalogue_id_not_in_strategy(Id)) :-
+    member(Id, CIds), \+ memberchk(Id, SIds).
+catalogue_problem(Rows, _, _, CIds, strategy_id_not_in_catalogue(Id, line(N))) :-
+    member(row(N, Id, _), Rows), \+ memberchk(Id, CIds).
+catalogue_problem(Rows, _, SIds, _, strategy_duplicate_id(Id, lines(Ns))) :-
+    member(Id, SIds), findall(N, member(row(N, Id, _), Rows), Ns), Ns = [_, _ | _].
+catalogue_problem(Rows, Cat, _, _, layers_differ(Id, line(N), strategy(SLs), catalogue(CLs))) :-
+    member(row(N, Id, SLs), Rows), memberchk(Id-CLs, Cat), SLs \== CLs.
+
+%% strategy_catalogue(+File, -Rows, -Problems): catalogue_rows/3 of the file.
+strategy_catalogue(File, Rows, Ps) :-
     phrase_from_file(seq(Cs), File),
-    append(_, Sec0, Cs), append("## Property catalogue", Sec1, Sec0), !,
-    append(Sec, Tail, Sec1), append("## Tools", _, Tail), !,
-    append(Props, AsmPart0, Sec), append("Assumptions (ASM-*):", AsmPart, AsmPart0), !,
-    scan_ids(Props, P0),
-    scan_asm(AsmPart, A0),
-    append(P0, A0, All0),
-    findall(I, ( member(I, All0), \+ memberchk(I, ['F-1']) ), All1),
-    sort(All1, Ids).
+    catalogue_rows(Cs, Rows, Ps).
+
+%% catalogue_rows(+Chars, -Rows, -Problems): Rows = [row(Line, Id, Layers)] in
+%% file order, one per body row of every table in section 5 ("## 5." up to the
+%% next "## " heading). A table is a run of lines that start with '|'. Its
+%% first row is the header (first cell "ID", one cell "Layer(s)"); its second
+%% is the separator (cells of '-' and ':'). Problems name the line of a table
+%% without a separator or with another header, a row whose first cell is not a
+%% bare ID, and a row with no Layer(s) cell (its Layers are `none`).
+catalogue_rows(Cs, Rows, Ps) :-
+    text_lines(Cs, 1, Ls),
+    (   append(_, [_-H | After], Ls), append("## 5.", _, H)
+    ->  section_lines(After, Sec),
+        table_blocks(Sec, Blocks),
+        blocks_rows(Blocks, Rows, Ps)
+    ;   Rows = [], Ps = [strategy_section_5_missing]
+    ).
+
+text_lines([], _, []) :- !.
+text_lines(Cs, N, [N-L | Ls]) :-
+    line_chars(Cs, L, Rest), N1 is N + 1, text_lines(Rest, N1, Ls).
+
+line_chars([], [], []).
+line_chars([C | Cs], L, Rest) :-
+    (   C == '\n' -> L = [], Rest = Cs ; L = [C | L1], line_chars(Cs, L1, Rest) ).
+
+section_lines([], []).
+section_lines([N-L | Ls], Sec) :-
+    (   append("## ", _, L) -> Sec = [] ; Sec = [N-L | Sec1], section_lines(Ls, Sec1) ).
+
+table_blocks([], []).
+table_blocks([N-L | Ls], Bs) :-
+    (   L = [B | _], bar(B)
+    ->  take_table(Ls, More, Rest), Bs = [[N-L | More] | Bs1], table_blocks(Rest, Bs1)
+    ;   table_blocks(Ls, Bs)
+    ).
+
+take_table([N-L | Ls], [N-L | More], Rest) :- L = [B | _], bar(B), !, take_table(Ls, More, Rest).
+take_table(Rest, [], Rest).
+
+blocks_rows([], [], []).
+blocks_rows([B | Bs], Rows, Ps) :-
+    block_rows(B, Rows1, Ps1),
+    blocks_rows(Bs, Rows2, Ps2),
+    append(Rows1, Rows2, Rows), append(Ps1, Ps2, Ps).
+
+block_rows([HN-H, _-S | Body], Rows, Ps) :-
+    row_cells(S, SC), separator_row(SC), !,
+    row_cells(H, HC),
+    (   HC = ["ID" | _], nth0(LI, HC, "Layer(s)")
+    ->  body_rows(Body, LI, Rows, Ps)
+    ;   maplist(atom_chars, HA, HC), Rows = [], Ps = [strategy_table_header(line(HN), HA)]
+    ).
+block_rows([N-_ | _], [], [strategy_table_without_separator(line(N))]).
+
+body_rows([], _, [], []).
+body_rows([N-L | Ls], LI, Rows, Ps) :-
+    row_cells(L, Cells),
+    Cells = [IdC | _],
+    (   bare_id(IdC)
+    ->  atom_chars(Id, IdC),
+        (   nth0(LI, Cells, LC)
+        ->  layer_list(LC, Lay), Ps1 = []
+        ;   Lay = none, length(Cells, K), Ps1 = [strategy_row_without_layers(line(N), Id, cells(K))]
+        ),
+        Rows = [row(N, Id, Lay) | Rows1]
+    ;   atom_chars(A, IdC), Rows = Rows1, Ps1 = [strategy_row_not_a_bare_id(line(N), A)]
+    ),
+    body_rows(Ls, LI, Rows1, Ps2),
+    append(Ps1, Ps2, Ps).
+
+%% row_cells(+Line, -Cells): the trimmed cells of "| a | b |"; "\|" inside a
+%% cell is not a separator.
+row_cells(L, Cells) :-
+    trim(L, L1),
+    (   L1 = [B | L2], bar(B) -> true ; L2 = L1 ),
+    (   append(L3, [B2], L2), bar(B2), \+ ( append(_, [E], L3), backslash(E) ) -> true ; L3 = L2 ),
+    split_cells(L3, Cells0),
+    maplist(trim, Cells0, Cells).
+
+split_cells(Cs, [Cell | Cells]) :-
+    cell_chars(Cs, Cell, Rest),
+    (   Rest = [_ | Rest1] -> split_cells(Rest1, Cells) ; Cells = [] ).
+
+cell_chars([], [], []).
+cell_chars([C | Cs], Cell, Rest) :-
+    (   bar(C) -> Cell = [], Rest = [C | Cs]
+    ;   backslash(C), Cs = [B | Cs1], bar(B) -> Cell = [C, B | Cell1], cell_chars(Cs1, Cell1, Rest)
+    ;   Cell = [C | Cell1], cell_chars(Cs, Cell1, Rest)
+    ).
+
+% '|' and '\\' as char codes: library(dcgs) makes '|' an operator, which the
+% reader then rejects as an operand before '->'.
+bar(C) :- char_code(C, 124).
+backslash(C) :- char_code(C, 92).
+
+separator_row(Cells) :-
+    Cells = [_ | _],
+    \+ ( member(C, Cells), \+ separator_cell(C) ).
+separator_cell(C) :- memberchk('-', C), \+ ( member(X, C), \+ memberchk(X, "-:") ).
+
+%% layer_list(+Cell, -Layers): "kani, near-tests, prolog" -> [kani, 'near-tests', prolog].
+layer_list([], []) :- !.
+layer_list(Cell, Ls) :-
+    split_on(',', Cell, Parts), maplist(trim, Parts, Ts), maplist(atom_chars, Ls, Ts).
+
+split_on(Sep, Cs, [P | Ps]) :-
+    (   append(P0, [Sep | Rest], Cs) -> P = P0, split_on(Sep, Rest, Ps) ; P = Cs, Ps = [] ).
+
+%% bare_id(+Chars): an ID such as C-1, ASM-PRED or TLA-LIVE-F1: an upper-case
+%% letter, then upper-case letters, digits and hyphens, with at least one
+%% hyphen and not ending in one.
+bare_id([C | Cs]) :-
+    upper(C), \+ ( member(X, Cs), \+ id_char(X) ),
+    memberchk('-', Cs), last_of([C | Cs], Last), Last \== ('-').
 
 id_char(C) :- char_code(C, K), ( K >= 0'A, K =< 0'Z ; K >= 0'0, K =< 0'9 ; K =:= 45 ).
-hyphen(C) :- char_code(C, 45).
 upper(C) :- char_code(C, K), K >= 0'A, K =< 0'Z.
-digit(C) :- char_code(C, K), K >= 0'0, K =< 0'9.
-word_char(C) :- char_code(C, K), ( K >= 0'a, K =< 0'z ; K >= 0'A, K =< 0'Z ; K >= 0'0, K =< 0'9 ; K =:= 95 ).
 
-scan_ids(Cs, Ids) :- scan_ids_(Cs, none, Ids).
-scan_ids_([], _, []).
-scan_ids_([C | Cs], Prev, Ids) :-
-    (   upper(C), \+ ( Prev \== none, ( word_char(Prev) ; hyphen(Prev) ) )
-    ->  take_run([C | Cs], Run, Rest),
-        run_ids(Run, Rest, Ids1),
-        append(Ids1, Ids2, Ids),
-        last_of(Run, L),
-        scan_ids_(Rest, L, Ids2)
-    ;   scan_ids_(Cs, C, Ids)
-    ).
-
-take_run([C | Cs], [C | R], Rest) :- id_char(C), !, take_run(Cs, R, Rest).
-take_run(Rest, [], Rest).
-
-run_ids(Run, Rest, Ids) :-
-    (   member(H, Run), hyphen(H), \+ ( last_of(Run, L), hyphen(L) ),
-        \+ ( Rest = [N | _], char_code(N, NK), ( NK =:= 95 ; NK =:= 42 ) )
-    ->  atom_chars(Id, Run),
-        (   Rest = [P1, P2, D | _], char_code(P1, 46), char_code(P2, 46), digit(D),
-            append(Pre, [Lo], Run), digit(Lo)
-        ->  number_chars(LoN, [Lo]), number_chars(HiN, [D]),
-            findall(X, ( between(LoN, HiN, K), number_chars(K, KC), append(Pre, KC, XC), atom_chars(X, XC) ), Ids)
-        ;   Ids = [Id]
-        )
-    ;   Ids = []
-    ).
-
-%% scan_asm: "NAME (" items of the assumption paragraph.
-scan_asm(Cs, Ids) :- scan_asm_(Cs, none, Ids).
-scan_asm_([], _, []).
-scan_asm_([C | Cs], Prev, Ids) :-
-    (   upper(C), \+ ( Prev \== none, word_char(Prev) )
-    ->  take_run([C | Cs], Run, Rest),
-        (   ( Rest = [' ', '(' | _] ; Rest = [',' | _] ), \+ ( member(X, Run), digit(X) )
-        ->  append("ASM-", Run, IdC), atom_chars(Id, IdC), Ids = [Id | Ids1]
-        ;   Ids = Ids1
-        ),
-        last_of(Run, L),
-        scan_asm_(Rest, L, Ids1)
-    ;   scan_asm_(Cs, C, Ids)
-    ).
+trim(Cs, T) :- drop_ws(Cs, C1), reverse(C1, R1), drop_ws(R1, R2), reverse(R2, T).
+drop_ws([C | Cs], T) :- ws(C), !, drop_ws(Cs, T).
+drop_ws(Cs, Cs).
+ws(' ').  ws('\t').  ws('\r').

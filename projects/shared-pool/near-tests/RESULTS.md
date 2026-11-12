@@ -9,6 +9,8 @@ Toolchain 1.98, near-sdk 5.29.1 (`unit-testing`), mocked runtime =
 near-vm-runner 0.37.4 `VMLogic`.
 
 Run: `./run.sh test | surface | mutants` (or `./run.sh` for all three).
+`test` and the default `all` first run `check-tags.py`, the PROP-tag check
+(below); any problem it reports fails the run.
 
 ## How the shell is exercised
 
@@ -42,7 +44,7 @@ Run: `./run.sh test | surface | mutants` (or `./run.sh` for all three).
 |---|---|---|
 | `tests/shell.rs` (14) | SH-1..SH-7, SH-9, SH-10, RD-PREVIEW (shell half); NT-F1 under SH-5, NT-F2 under SH-10, NT-F4 under SH-3 | exact scenarios on host + both wasm builds |
 | `tests/store_diff.rs` (2) | SH-8 (+SH-1, SH-3..SH-7, SH-9, RD-PREVIEW) | 2,000 x 40 random calls on the host path (fixtures, wedge, open, random configs), Borsh reload every call, results, panic messages, events, receipts, stored bytes and views (get_pool, get_commitments edges, preview) every call; 300 x 40 per wasm build with JSON views every 4 calls; coverage of 46 required outcomes |
-| `tests/traces.rs` (1) | SH-8 (+SH-3, SH-4, SH-5), LIVE-2 (F-1, trace 0) | all 209 conformance traces (8,771 calls, incl. `Arithmetic`, `Full` and release `Arithmetic` in traces 206-208) replayed through the shell on host + both wasm builds: every result and post-state equals the trace |
+| `tests/traces.rs` (1) | SH-8 (+SH-3, SH-4, SH-5), LIVE-2 (F-1, trace 0) | all 212 conformance traces (8,804 calls, incl. `Arithmetic`, `Full` and release `Arithmetic` in traces 206-208, and F-2's `Bounds` form, F-4 and F-6 in traces 209-211) replayed through the shell on host + both wasm builds: every result and post-state equals the trace |
 | `tests/executor.rs` (8) | EX-1..EX-5 (+SH-3, SH-6, SH-7 end to end; RT-RACE, pool side) | executor alone on host + both builds (state checked against a Borsh mirror), executor wrappers, end-to-end normal/reject/unknown/panic flows through the router, settle-before-callback race |
 | `tests/wedge.rs` (3) | LIVE-2 (F-1), LIVE-1 (control), RT-WEDGE (mocked runtime), +SH-3, SH-5, EX-4, EX-5 | F-1 through the shell (host + both builds), control without the disturbing observe, F-1 end to end with the executor |
 | `tests/lockfile.rs` (1) | precondition of all 16 near-tests IDs (scope tag) | lockfile equality |
@@ -58,8 +60,27 @@ LIVE-1, LIVE-2, RT-WEDGE and RT-RACE (mocked-runtime analogues in
 `tests/lockfile.rs` checks the content of no property. It carries the 16
 near-tests IDs only as the scope of its precondition.
 
+`check-tags.py` (python3 -I, standard library only, paths relative to the
+script, under a second) checks these rules: every `PROP:` line is a comment
+tag of IDs only, each ID in `property/3`; every `#[test]` has its own tag
+line directly above it; every property whose layers include near-tests is
+tagged on a test that checks it (lockfile.rs's scope tag does not count);
+each file header equals the union of its tests' tags; `run.sh`,
+`run-mutants.sh` and `wasm-surface.sh` carry tags, and SURF-1 and SURF-2
+each have a tag line; no SURF-n is used as a tag; and the tag set
+`check-status.sh` extracts equals the one found. It exits 1 and lists every
+problem otherwise. Checked 2026-11-12: 0 problems (41 tag lines in 9
+files, 29 tests, 21 distinct IDs). On a temporary copy, an unknown ID added
+to one tag line (`SH-99`) gives exit 1 with 2 problems (not in the
+catalogue; header differs from the union), and deleting the tag line above
+`sh2_new_is_private_and_initialises_once` gives exit 1 with 3 problems
+(no tag line; header differs; SH-2 untagged); `run.sh test` exits 1 on the
+first even with a cargo that passes.
+
 Last run (2026-11-11): all 29 pass. Re-run 2026-11-12 after the tag-only
-change: all 29 pass (27 s); `./run.sh surface` unchanged. Coverage of the default SH-8 host run
+change: all 29 pass (27 s); `./run.sh surface` unchanged. Re-run
+2026-11-12 with the 212 traces: `./run.sh test` passes the tag check (0
+problems) and all 29 tests (27 s wall). Coverage of the default SH-8 host run
 (80,000 calls) includes every submit reason except Full and Arithmetic
 (unreachable within 40 calls / values of +-1000; both are covered by
 `sh4`/`sh5` on crafted states), every dispatch/settle/cancel/observe error,
@@ -77,7 +98,7 @@ including `completed:Bounds` and `cancelled:Bounds` (F-1 shapes).
 | SH-5 | finding (NT-F1) | host path and `--cfg near` wasm: every core error of every method panics with exactly the error string and changes nothing (`sh5_core_errors_are_panics_with_the_error_string`, SH-8). The documented build (`scripts/build.sh`) reports no message at all: NT-F1 |
 | SH-6 | pass | `sh6_dispatch_promise_shape`: `execute{id,recipe,units}` to the recipe's executor, 30 Tgas, 0 deposit, then `on_result{id}` to the pool, 30 Tgas, depending on it; the callback promise is returned; no event; mutant m11 |
 | SH-7 | pass | `sh7_reconcile_guard_and_promise_shape`: NotFound / InvalidState for Reserved, Completed, Cancelled; `status{id}` 10 Tgas then `on_result` for Dispatched/Unknown/Active, by anyone, no state write; mutants m05, m15 |
-| SH-8 | pass | `sh8_store_diff_host` (80,000 calls), `sh8_store_diff_wasm` (12,000 calls per build), `conformance_traces_through_the_shell` (8,771 calls x 3 paths) |
+| SH-8 | pass | `sh8_store_diff_host` (80,000 calls), `sh8_store_diff_wasm` (12,000 calls per build), `conformance_traces_through_the_shell` (8,804 calls x 3 paths) |
 | SH-9 | pass | `sh9_views_and_paging_at_256_records`: 12 x 7 (from, limit) edge pairs at 256 records incl. u32::MAX, JSON views on wasm; views every call in SH-8; mutant m06 |
 | RD-PREVIEW | pass (shell half) | the `preview` view equals `pool_core::Pool::preview` (same pinned crate) on a contract reloaded from storage: 2 random requests after every call of `sh8_store_diff_host`, one per 4 calls per build in `sh8_store_diff_wasm` (JSON, no write), 3 crafted requests at 256 records in `sh9_views_and_paging_at_256_records` (JSON, no write). The core half (allowed <=> candidate Ok; allowed and version < u32::MAX => submit Ok) belongs to the Kani and Prolog layers. No mutant targets it |
 | SH-10 | pass (NT-F2) | `sh10_mutating_methods_reject_attached_deposits`: `new`, `submit`, `dispatch`, `settle`, `cancel`, `set_paused`, `observe`, `on_result` reject 1 yocto and 1 NEAR (`Method X doesn't accept deposit`) before reading input; mutant m12. `reconcile` (a `&self` call method) accepts and keeps a deposit: NT-F2 |
