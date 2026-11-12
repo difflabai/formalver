@@ -67,7 +67,7 @@ test('MC-2: all traces replay with exact agreement and no property violation', (
     note("results seen: ~q", [Hits]),
     (   ND > 0 -> forall(( nth1(K, Divs, D), K =< 10 ), note("DIVERGENCE ~q", [D])) ; true ),
     (   NV > 0 -> forall(( nth1(K, Viols, V), K =< 10 ), note("VIOLATION ~q", [V])) ; true ),
-    check(traces(NT), NT >= 209), check(calls(NC), NC >= 8000),
+    check(traces(NT), NT >= 212), check(calls(NC), NC >= 8000),
     check(divergences(ND), ND =:= 0), check(violations(NV), NV =:= 0) )).
 
 % Non-vacuity of the replay: every op kind succeeds somewhere and the traces

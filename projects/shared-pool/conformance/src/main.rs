@@ -376,6 +376,107 @@ fn release_arith() -> (Config, Vec<Op>) {
     (c, ops)
 }
 
+/// F-2 (Bounds form) in the supplied `risk` fixture, healthy start, no
+/// observe: a credit position (recipe 0) and a hedge (recipe 3) admitted on
+/// the strength of the position's reservation; the hedge completes; the
+/// executor's honest settle(false) for the position fails Bounds, cancel and
+/// observe fail Pending; only settle(true) resolves it.
+fn f2_risk() -> (Config, Vec<Op>) {
+    let c = fixture("risk");
+    let q = |recipe, units, version| Request { recipe, units, version, expires_at: 200 };
+    let ops = vec![
+        Op::Submit("a1".into(), q(0, 1, 0), 100),
+        Op::Submit("a2".into(), q(3, 8, 1), 100),
+        Op::Dispatch("a1".into(), 0, 100),
+        Op::Ack(0, true),
+        Op::Dispatch("a2".into(), 1, 100),
+        Op::Ack(1, true),
+        Op::Settle("x1".into(), 1, true),
+        Op::Settle("x1".into(), 0, false), // honest non-execution: Bounds
+        Op::Cancel("o".into(), 0, 101),    // Pending
+        Op::Cancel("a1".into(), 0, 101),   // Pending
+        Op::Observe("o".into(), vec![60, 40, 30, 40], 102), // Pending
+        Op::Settle("x1".into(), 0, true),  // only a completion report resolves it
+        Op::Observe("o".into(), vec![60, 40, 30, 40], 103),
+    ];
+    (c, ops)
+}
+
+/// F-4: `validate` accepts actor = executor (recipe 0) and owner = executor
+/// (recipe 1): a principal attests its own completion.
+fn f4_self() -> (Config, Vec<Op>) {
+    let m = Metric { name: "m".into(), unit: "u".into(), initial: 5, min: 0, max: 10 };
+    let r = |name: &str, actor: &str, executor: &str| Recipe {
+        name: name.into(),
+        actor: actor.into(),
+        executor: executor.into(),
+        reserve: vec![-1],
+        complete: vec![0],
+        max_units: 2,
+        requires: vec![],
+    };
+    let c = Config {
+        name: "f4-self".into(),
+        owner: "o".into(),
+        metrics: vec![m],
+        terms: vec![Term { metric: 0, target: 0, weight: 1, shape: Shape::Excess }],
+        recipes: vec![r("self", "a1", "a1"), r("owner", "o", "o")],
+        max_age_seconds: 0,
+    };
+    let q = |recipe, version| Request { recipe, units: 1, version, expires_at: 200 };
+    let ops = vec![
+        Op::Submit("a1".into(), q(0, 0), 100),
+        Op::Dispatch("a1".into(), 0, 100),
+        Op::Ack(0, true),
+        Op::Settle("a1".into(), 0, true), // the actor attests its own work
+        Op::Submit("o".into(), q(1, 4), 100),
+        Op::Dispatch("o".into(), 1, 100),
+        Op::Ack(1, true),
+        Op::Settle("o".into(), 1, true),  // the owner attests its own work
+    ];
+    (c, ops)
+}
+
+/// F-6: with max_age > 0, one long-open record blocks the only snapshot
+/// refresh (observe Pending), so admissions and dispatches stop
+/// (SnapshotExpired) until that record settles.
+fn f6_stale() -> (Config, Vec<Op>) {
+    let m = Metric { name: "m".into(), unit: "u".into(), initial: 5, min: 0, max: 10 };
+    let r = |name: &str| Recipe {
+        name: name.into(),
+        actor: "a1".into(),
+        executor: "x1".into(),
+        reserve: vec![-1],
+        complete: vec![0],
+        max_units: 2,
+        requires: vec![],
+    };
+    let c = Config {
+        name: "f6-stale".into(),
+        owner: "o".into(),
+        metrics: vec![m],
+        terms: vec![Term { metric: 0, target: 0, weight: 1, shape: Shape::Excess }],
+        recipes: vec![r("slow"), r("next")],
+        max_age_seconds: 50,
+    };
+    let q = |recipe, version, expires_at| Request { recipe, units: 1, version, expires_at };
+    let ops = vec![
+        Op::Submit("a1".into(), q(0, 0, 1000), 100),
+        Op::Dispatch("a1".into(), 0, 100),
+        Op::Ack(0, true),
+        Op::Submit("a1".into(), q(1, 3, 1000), 120),
+        Op::Submit("a1".into(), q(1, 4, 1000), 151),        // SnapshotExpired
+        Op::Dispatch("a1".into(), 1, 151),                  // SnapshotExpired
+        Op::Observe("o".into(), vec![3], 151),              // Pending: record 0 open
+        Op::Cancel("a1".into(), 1, 152),
+        Op::Observe("o".into(), vec![4], 152),              // still Pending
+        Op::Settle("x1".into(), 0, true),
+        Op::Observe("o".into(), vec![4], 153),
+        Op::Submit("a1".into(), q(1, 7, 1000), 153),         // admissions resume
+    ];
+    (c, ops)
+}
+
 #[derive(Clone, Debug)]
 enum Op {
     Submit(String, Request, u64),
@@ -568,7 +669,7 @@ fn generate(traces: usize, len: usize, seed: u64) -> (String, BTreeMap<String, u
     }
     // Appended so the wedge, fixture and random trace numbers stay stable
     // (the Prolog and shell layers address fixtures 1-5 by number).
-    for (c, ops) in [arith(), full(), release_arith()] {
+    for (c, ops) in [arith(), full(), release_arith(), f2_risk(), f4_self(), f6_stale()] {
         emit(&mut out, n, &c, ops, 100);
         n += 1;
     }
