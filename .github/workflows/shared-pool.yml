@@ -111,7 +111,7 @@ jobs:
 
   status-lint:
     # status.toml claims nothing the repository doesn't back (near-approval
-    # strategy.md sections 12 and 14). It records no properties yet.
+    # strategy.md sections 12 and 14): 82 properties, 14 assumptions.
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:

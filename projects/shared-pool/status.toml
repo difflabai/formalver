@@ -3,10 +3,41 @@ name = "shared-pool"
 upstream = "https://github.com/difflabai/shared-pool-controls"
 upstream_path = ""
 pinned_commit = "a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7"   # PR #1 head (feat/shared-pool-controls, 2026-11-12): "Address review: reconcile griefing, broken doc link, CI robustness". Not on main yet: re-pin when the PR merges.
-last_reviewed = "2026-11-11"
+last_reviewed = "2026-11-12"
 release_overflow_checks = true  # ASM-COMPILE: check-pin.sh fails unless upstream [profile.release] sets overflow-checks = true
 
 # Status values, evidence vocabulary and ceilings: projects/near-approval/strategy.md section 12.
+# Status values: unverified | in-progress | verified | verified-with-assumptions | stale
+# Project rules: projects/shared-pool/strategy.md section 12. In short:
+#   - Nothing here goes past in-progress: the pin is an unmerged PR head and
+#     [review] spec_reviewer is empty.
+#   - One module per strategy.md section 5 subsection (5.1 .. 5.13); the
+#     properties are exactly section 5's non-ASM rows (82), the
+#     [assumptions.<ID>] tables its ASM-* rows (14). IDs equal
+#     prolog/requirements/traceability.pl's property/3.
+#   - `layer` is the first layer of the row's Layer(s) cell (near-tests maps
+#     to unit, difftest or wasm-check by the file that tags it); `cross` holds
+#     the row's other layers plus any other layer whose files carry the ID's
+#     PROP tag. Other evidence the row cites is named in `harness`.
+#   - Kani-primary properties stay unverified until the Kani layer lands
+#     (strategy.md section 6; kani/ is being built). Their other layers'
+#     results are recorded in `cross` and `harness`, not in `status`.
+# Property keys (near-approval strategy.md section 12): id, status, layer,
+#   evidence (the TARGET evidence), cross, harness (where the `PROP:` tag or
+#   the ID sits), depends_on (relative to upstream_path, here the repository
+#   root), assumptions (ASM IDs; strategy.md section 12 says which),
+#   description; optional blocked_by (an OQ of strategy.md section 16) and
+#   finding: the F-n / NT-Fn that the row's
+#   section 5 Statement or Status cell names (a false property, a finding
+#   witness, or a caveat). status-lint ignores `finding`; it is for readers.
+# Assumption keys: statement (strategy.md section 5.14), level
+#   (threat_model.pl assumption/3), checked_by (properties only: the union of
+#   assumption_checked_by/2 and section 5.14's Evidence cell), status, and,
+#   where there is one, source: the NEAR pages near-approval read against its
+#   [protocol_reference], or the upstream docs at the pin as spec:<line>,
+#   api:<line>, handoff:<line>. observed / observed_on record what a check
+#   saw, including checks that are not properties (check-pin.sh, the wasm
+#   surface).
 
 [review]
 spec_reviewer = ""          # empty until a named human who did not write pool-core signs off
@@ -39,3 +70,391 @@ upstream_rust = "1.98"      # source-mirror rust-toolchain.toml
 "docs/spec.md" = "8b3a03f0d6aed6545f1a6edc617b1d5c8a795df15bbb2a573f67f1baf21be3e6"
 "docs/api.md" = "1730c10d46af74772c49fbf0c54ce27f6e827b3b536e286adc1c92ad098e840c"
 "docs/verification-handoff.md" = "07bb0a92806c130bbd0a591928ecce91d831dd22284441063cbfcf7e1d5116d9"
+
+# ---------------------------------------------------------------------------
+# Trust assumptions (strategy.md sections 3.3 and 5.14).
+# level: high | med | low | policy (threat_model.pl assumption/3)
+# ---------------------------------------------------------------------------
+
+[assumptions.ASM-PRED]
+statement = "The predecessor cannot be forged"
+level = "high"
+checked_by = ["RT-PRED", "SH-1"]
+source = ["https://nomicon.io/RuntimeSpec/Receipts.html", "https://nomicon.io/RuntimeSpec/Components/BindingsSpec/ContextAPI.html", "spec:11"]
+observed = "RT-PRED: an actor's relay.forward(submit) is attributed to the relay (the decision event's actor is the relay, Unauthorized, storage byte-identical); the same request sent directly is accepted; with the relay as a recipe's actor, a forward signed by an unrelated account is accepted as the relay's submit; dispatch, cancel, settle (even signed by the executor's key), set_paused and observe through the relay fail Unauthorized and write nothing. SH-1 (mocked runtime, host and both wasm builds): relayed calls are the relay's on every method"
+observed_on = "near-sandbox 2.13.4 (near-workspaces 0.23.0), one shard; both builds of a4bb5c3 (upstream pool_contract sha256 8ddc9280...380f7c, cfg-near af617a8f...903c02), rustc 1.98.1, 2026-11-11"
+status = "in-progress"
+
+[assumptions.ASM-PRIVATE]
+statement = "#[private] <=> predecessor = current account"
+level = "high"
+checked_by = ["RT-PRIVATE", "SH-2", "SH-3"]
+source = ["https://docs.rs/near-sdk/5.29.1/near_sdk/", "spec:11", "api:7", "api:18"]
+observed = "RT-PRIVATE: pool.new fails 'Method new is private' for the owner, the actor, an unrelated account and the executor, and through the relay when signed with the pool's own key; exec.new the same; a second new by the contract's own account fails 'The contract has already been initialized'; on_result fails 'Method on_result is private' for four foreign callers and the relay; on the pool's own key it passes the private check and fails reading the absent promise result; storage unchanged in every case. On the upstream build each failure is a bare unreachable trap (NT-F1 = SB-1)"
+observed_on = "near-sandbox 2.13.4 (near-workspaces 0.23.0), one shard; both builds of a4bb5c3 (upstream pool_contract sha256 8ddc9280...380f7c, cfg-near af617a8f...903c02), rustc 1.98.1, 2026-11-11"
+status = "in-progress"
+
+[assumptions.ASM-CALLBACK]
+statement = "The callback sees the executor's return or PromiseError"
+level = "high"
+checked_by = ["RT-CALLBACK", "SH-3"]
+source = ["https://nomicon.io/RuntimeSpec/Components/BindingsSpec/PromisesAPI.html", "https://docs.rs/near-sdk/5.29.1/near_sdk/", "api:34"]
+observed = "RT-CALLBACK: 'active' -> Active, reservation kept; 'cancelled' -> settle(executor, false) -> Cancelled, reservation released exactly; 'unknown' -> Unknown; execute panics -> the callback sees PromiseError -> Unknown, the dispatch transaction succeeds and the reservation is kept. SH-3 (mocked runtime): a promise result that is not a JSON string makes #[callback_result] panic, so the record stays where it was instead of Unknown (NT-F4)"
+observed_on = "near-sandbox 2.13.4 (near-workspaces 0.23.0), one shard; both builds of a4bb5c3 (upstream pool_contract sha256 8ddc9280...380f7c, cfg-near af617a8f...903c02), rustc 1.98.1, 2026-11-11"
+status = "in-progress"
+
+[assumptions.ASM-ATOMIC]
+statement = "A panicking receipt writes nothing"
+level = "high"
+checked_by = ["RT-REVERT"]
+source = ["https://nomicon.io/RuntimeSpec/Receipts.html", "https://nomicon.io/RuntimeSpec/Actions.html"]
+observed = "RT-REVERT: ten core errors through the wasm (Unauthorized, NotFound and InvalidState on dispatch and settle; Unauthorized and Pending on cancel; Unauthorized on set_paused; Pending on observe), Paused on dispatch, Bounds on observe (three inputs) and Arithmetic at version = u32::MAX (patched in) for set_paused and submit: each panics, the pool's raw storage is byte-identical and no event is emitted"
+observed_on = "near-sandbox 2.13.4 (near-workspaces 0.23.0), one shard; both builds of a4bb5c3 (upstream pool_contract sha256 8ddc9280...380f7c, cfg-near af617a8f...903c02), rustc 1.98.1, 2026-11-11"
+status = "in-progress"
+
+[assumptions.ASM-INTERLEAVE]
+statement = "Receipts can run between dispatch and on_result; ack and settle are independent model steps"
+level = "med"
+checked_by = ["RT-RACE"]
+source = ["https://nomicon.io/RuntimeSpec/Scenarios/CrossContractCall.html", "https://nomicon.io/RuntimeSpec/Receipts.html"]
+observed = "RT-RACE (one shard): a settle sent from inside execute always lands before the dispatch callback and the late 'active' ack is a no-op (version +2, not +3), for settle(true) and settle(false); the executor key's settle 0-400 ms after dispatch produced every serial order the core allows, the late-ack order included; the operator's finish cannot overtake the callback on one shard (a gap, not a failure). Multiple shards and congestion are not tested"
+observed_on = "near-sandbox 2.13.4 (near-workspaces 0.23.0), one shard; both builds of a4bb5c3 (upstream pool_contract sha256 8ddc9280...380f7c, cfg-near af617a8f...903c02), rustc 1.98.1, 2026-11-11"
+status = "in-progress"
+
+# Untested: TLA+ and Lean allow any block time per call (a superset of
+# monotone time); MC-1 assumes it, and so does LIVE-2, which cites MC-1.
+[assumptions.ASM-TIME]
+statement = "The block timestamp is monotone"
+level = "high"
+checked_by = []
+source = ["https://nomicon.io/RuntimeSpec/Components/BindingsSpec/ContextAPI.html", "https://nomicon.io/ChainSpec/BlockProcessing.html"]
+status = "unverified"
+
+# F-2: the honest settle(false) is the report that fails. Carried by the rows
+# that model an honest executor (LIVE-2, TLA-LIVE-F2, MC-1's release-blocked
+# states) and, as T-UNKNOWN's residual, by its mitigations ASYNC-1,
+# RT-CALLBACK, SH-3 and INV-LEDGER (threat_model.pl).
+[assumptions.ASM-EXEC]
+statement = "The executor is honest: settle(false) only on definitive nonexecution"
+level = "policy"
+checked_by = []
+source = ["handoff:32", "api:14", "spec:50"]
+status = "unverified"
+
+# T-OBS's residual: carried by its mitigations OBS-1 and INV-WF
+# (threat_model.pl). The in-bounds observations of LIVE-1 (B = 0),
+# TLA-LIVE-1 and TLA-LIVE-F2 are premises of those claims, not this assumption:
+# a true observation may be out of bounds (spec:54).
+[assumptions.ASM-OWNER]
+statement = "Observations are true"
+level = "policy"
+checked_by = []
+source = ["handoff:32", "spec:54", "spec:56"]
+status = "unverified"
+
+# No deployment of this pin exists (strategy.md section 9.3). No property
+# carries it: T-REDEPLOY's only mitigation is this assumption itself
+# (threat_model.pl) and no section 5 row checks a deployment. It underlies
+# every on-chain result, as ASM-TOOLS underlies every tool result.
+[assumptions.ASM-DEPLOY]
+statement = "No code replacement; the deployment lock is out of scope"
+level = "policy"
+checked_by = []
+source = ["spec:56", "handoff:40"]
+observed = "near-tests/wasm-surface.sh, both builds: SURF-1 passes (pool_contract exports the 12 documented methods and contract_source_metadata, no upgrade or migrate method); SURF-2 fails as recorded: both contracts import 15 host functions that deploy, delete accounts, add keys, transfer, stake, or use gas keys or global contracts (NT-F3), so the import surface cannot rule out code replacement"
+observed_on = "near-tests ./run.sh surface on a4bb5c3 (Plain and --cfg near builds), 2026-11-12"
+status = "unverified"
+
+# Controls, not checks of soundness: canaries, witnesses and mutants in every
+# runner, the Lean axiom audit (lean/Audit.lean), extract.py --check.
+[assumptions.ASM-TOOLS]
+statement = "Scryer, TLC, Lean, Kani and the extractors are sound for what is used"
+level = "med"
+checked_by = []
+status = "unverified"
+
+# Checked only by [review] spec_reviewer, which is empty. The Prolog author
+# had read the code (strategy.md section 8).
+[assumptions.ASM-SPEC]
+statement = "The specs, and the Prolog transcription of the docs, mean what we intend"
+level = "low"
+checked_by = []
+status = "unverified"
+
+[assumptions.ASM-MODEL]
+statement = "The small scopes are representative: Kani's bounds, TLC's universes and 32-bit integers, MC-1's universes"
+level = "med"
+checked_by = ["LEAN-IND", "LEAN-STEP", "LEAN-LIVE1", "REF-5", "REF-5L", "MC-2"]
+observed = "Lean proves Inv, the step properties and LIVE-1 for the model at every size (LEAN-IND, LEAN-STEP, LEAN-LIVE1). Traces 206 (values at +-1,000,000) and 207 (256 records) replay equal on TLC (REF-5), Lean (REF-5L) and Prolog (MC-2). Not covered: TLC's MaxVersion is 2^31 - 1 and it cannot represent large energies; Kani's bounds are not chosen yet"
+status = "in-progress"
+
+[assumptions.ASM-LEAN-TLA]
+statement = "The Lean and TLA+ models transcribe the code"
+level = "med"
+checked_by = ["REF-5", "REF-5L", "MC-2", "C-2"]
+observed = "212 real-core traces (8,804 calls) equal on TLC TraceCheck (REF-5, 9,016 of 9,016 states), the Lean machine (REF-5L) and Prolog step/4 (MC-2, 0 divergences); C-2: TLA+ GuardOrder = the code's guard order. Evidence, not a proof: the per-step Kani links REF-1..3 (strategy.md section 5.13) are pending and are not in checked_by until they have a result"
+status = "in-progress"
+
+[assumptions.ASM-COMPILE]
+statement = "overflow-checks = true in the release profile"
+level = "high"
+checked_by = []
+source = ["https://doc.rust-lang.org/cargo/reference/profiles.html#overflow-checks"]
+observed = "tools/scripts/check-pin.sh shared-pool (release_overflow_checks = true): upstream Cargo.toml [profile.release] sets overflow-checks = true at a4bb5c3 (pin ok, 2026-11-12); the sandbox builds use that profile"
+status = "in-progress"
+
+# ---------------------------------------------------------------------------
+# strategy.md section 5.1: configuration and numerics.
+# Kani primary (section 5 lists kani first): unverified until the Kani layer
+# lands. CFG-1 is proved for the Lean model without the string checks.
+# ---------------------------------------------------------------------------
+[modules.config_numerics]
+source = "crates/core/src/lib.rs"
+lean_model = "lean/PoolLean/Machine.lean"
+
+  [modules.config_numerics.properties]
+  CFG-1 = { id = "CFG-1", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["lean", "tla"], harness = "kani: kani/src (strategy.md section 6, not landed); lean: Inv.lean inv_init; tla: TraceCheck.tla TInit (the configs the core accepted)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Pool::new is Ok iff validate is Ok, and the initial state satisfies INV. Lean proves Valid cfg => Inv (init cfg now), strings not modelled" }
+  CFG-2 = { id = "CFG-2", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["lean"], harness = "kani: kani/src (strategy.md section 6, not landed); lean: Machine.lean Valid (these checks as a definition; no theorem about the Rust)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "validate => references in range, vectors of length n, prerequisites strictly earlier and distinct, values bounded" }
+  NUM-1 = { id = "NUM-1", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["lean"], harness = "kani: kani/src (strategy.md section 6, not landed); lean: exact Int energy, overflow not modelled", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-COMPILE", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Valid config and bounded values => energy_terms and energy are Ok and exact" }
+  NUM-2 = { id = "NUM-2", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["lean"], harness = "kani: kani/src (strategy.md section 6, not landed); trace 206 (Arithmetic from add at 999,990 + 15 and from the envelope at 1,000,005) replayed by REF-5, REF-5L, MC-2 and SH-8; TLA+ mutants 23 and 24", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-COMPILE", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "add fails closed exactly when the exact result leaves +-1,000,000 (the boundary is tested by trace 206)" }
+  ROB-1 = { id = "ROB-1", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = [], harness = "kani: kani/src (strategy.md section 6, not landed); Lean's INV-WF shows every index the guards read is in range but does not model panics", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-COMPILE", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "No core panic from any INV state, for any arguments" }
+
+# ---------------------------------------------------------------------------
+# strategy.md section 5.2: transition contracts. Each gives the exact result
+# (the first failing guard, in the code's order), the exact post-state and
+# the frame. Kani primary: unverified until the Kani layer lands. TLA+, Lean
+# and Prolog check them now (proved for the model where Lean has a theorem;
+# all replay the 212 real-core traces).
+# ---------------------------------------------------------------------------
+[modules.transitions]
+source = "crates/core/src/lib.rs"
+tla_model = "tla/SharedPool.tla"
+lean_model = "lean/PoolLean/Machine.lean"
+prolog_requirements = "prolog/model/pool_machine.pl"
+
+  [modules.transitions.properties]
+  TX-0 = { id = "TX-0", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["tla", "lean", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); lean: StepProps.lean stepProps (every call, every state); tla: TraceCheck.tla Replay; prolog: tests/test_mc2.pl (MC-2), verification/props.pl", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Every Err leaves the Pool unchanged" }
+  TX-SUBMIT = { id = "TX-SUBMIT", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["tla", "lean", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); tla: Props.tla TX-SUBMIT in StepProperty (time, capacity and unit guards, effect), TraceCheck (REF-5); lean: REF-5L replay; prolog: tests/test_mc2.pl, tests/test_model.pl, C-2 guard order", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "submit: exact result in guard order, exact post-state, frame" }
+  TX-DISPATCH = { id = "TX-DISPATCH", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["tla", "lean", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); tla: Props.tla TX-DISPATCH in StepProperty, TraceCheck (REF-5); lean: REF-5L replay; prolog: tests/test_mc2.pl, tests/test_model.pl, C-2 guard order", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "dispatch: exact result in guard order, exact post-state, frame" }
+  TX-ACK = { id = "TX-ACK", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["tla", "lean", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); tla: TraceCheck (REF-5); lean: REF-5L replay; prolog: tests/test_mc2.pl, tests/test_model.pl, C-2 guard order, C-3 lifecycle", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "acknowledge: exact result in guard order, exact post-state, frame (the no-op ack keeps the version: div-ack-noop-version)" }
+  TX-CANCEL = { id = "TX-CANCEL", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["tla", "lean", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); tla: TraceCheck (REF-5); lean: REF-5L replay; prolog: tests/test_mc2.pl, tests/test_model.pl, C-2 guard order", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "cancel: exact result in guard order, exact post-state, frame" }
+  TX-SETTLE = { id = "TX-SETTLE", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["tla", "lean", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); tla: TraceCheck (REF-5); lean: REF-5L replay; prolog: tests/test_mc2.pl, tests/test_model.pl, C-2 guard order", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "settle: exact result in guard order, exact post-state, frame" }
+  TX-PAUSE = { id = "TX-PAUSE", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["tla", "lean", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); tla: TraceCheck (REF-5); lean: REF-5L replay; prolog: tests/test_mc2.pl, tests/test_model.pl, C-2 guard order", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "set_paused: exact result in guard order, exact post-state, frame" }
+  TX-OBSERVE = { id = "TX-OBSERVE", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["tla", "lean", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); tla: TraceCheck (REF-5); lean: REF-5L replay; prolog: tests/test_mc2.pl, tests/test_model.pl, C-2 guard order", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "observe: exact result in guard order, exact post-state, frame" }
+  TX-NOOP = { id = "TX-NOOP", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["tla", "lean", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); lean: StepProps.lean stepProps; tla: TraceCheck.tla Replay; prolog: tests/test_mc2.pl (MC-2)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Idempotent Ok paths change nothing, version included" }
+  TX-VER = { id = "TX-VER", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["tla", "lean", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); lean: StepProps.lean stepProps; tla: Props.tla TX-VER in StepProperty; prolog: tests/test_mc2.pl (MC-2)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Every other Ok increments the version by exactly 1" }
+
+# ---------------------------------------------------------------------------
+# strategy.md section 5.3: step properties. Kani primary: unverified until
+# the Kani layer lands. Proved for the Lean model at every size,
+# model-checked by TLC (StepProperty) and checked on every replayed call of
+# the real core's traces (MC-2).
+# ---------------------------------------------------------------------------
+[modules.step_properties]
+source = "crates/core/src/lib.rs"
+tla_model = "tla/Props.tla"
+lean_model = "lean/PoolLean/StepProps.lean"
+prolog_requirements = "prolog/verification/props.pl"
+
+  [modules.step_properties.properties]
+  # F-4: Config::validate accepts actor = executor (and the owner as either);
+  # AUTH-1 still holds, the authority it checks is the configured one.
+  AUTH-1 = { id = "AUTH-1", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["tla", "lean", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); lean: StepProps.lean exec_auth (every Ok, no-ops included); tla: Props.tla AUTH-1 in StepProperty; prolog: tests/test_mc2.pl (MC-2)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], finding = "F-4", description = "Effective submit and dispatch => caller = actor; cancel => actor or owner; settle => executor; pause and observe => owner. F-4: actor = executor is accepted" }
+  STALE-1 = { id = "STALE-1", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["tla", "lean", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); lean: StepProps.lean stale1_no_replay, version_mono_run; tla: Props.tla STALE-1 in StepProperty; prolog: tests/test_mc2.pl (MC-2)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Submit Ok => request version = version; versions never repeat, so an accepted request cannot replay" }
+  ADM-1 = { id = "ADM-1", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["tla", "lean", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); lean: StepProps.lean stepProps; tla: Props.tla ADM-1 in StepProperty; prolog: tests/test_mc2.pl (MC-2)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Submit Ok => energy(post) <= energy(pre)" }
+  ADM-2 = { id = "ADM-2", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["tla", "lean", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); lean: StepProps.lean stepProps; tla: Props.tla ADM-2 in StepProperty; prolog: tests/test_mc2.pl (MC-2), tests/test_model.pl", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Submit Ok in a violating state => energy(post + completion) < energy(pre)" }
+  HARD-STEP = { id = "HARD-STEP", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["tla", "lean", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); lean: StepProps.lean stepProps; tla: Props.tla HARD-STEP in StepProperty; prolog: tests/test_mc2.pl (MC-2)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Every Ok except observe: PV_i(post) <= PV_i(pre) for every metric" }
+  DEP-1 = { id = "DEP-1", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["tla", "lean", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); lean: Calls.lean dep1; tla: Props.tla DEP-1 in StepProperty; prolog: tests/test_mc2.pl (MC-2), tests/test_model.pl", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Submit Ok => prerequisites met by Completed units" }
+  LIFE-1 = { id = "LIFE-1", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["tla", "lean", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); lean: StepProps.lean stepProps; tla: Props.tla LIFE-1 in StepProperty; prolog: tests/test_mc2.pl (MC-2), C-3", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Status graph Reserved -> Dispatched or Cancelled, Dispatched -> Active or Unknown, Unknown -> Active, in flight -> Completed or Cancelled; terminals absorbing; append-only; id, recipe, units and expiry immutable" }
+  ASYNC-1 = { id = "ASYNC-1", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["tla", "lean", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); lean: StepProps.lean stepProps; tla: Props.tla ASYNC-1 in StepProperty; prolog: tests/test_mc2.pl (MC-2); on the wasm: RT-CALLBACK", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-EXEC", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Acknowledge never changes values; Active and Unknown keep the reservation" }
+  TERM-1 = { id = "TERM-1", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["tla", "lean", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); lean: StepProps.lean term1, term1_cancel; tla: Props.tla TERM-1 (error view, in InvMC); prolog: tests/test_mc2.pl (MC-2), tests/test_model.pl", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "The same terminal repeated is an Ok no-op; the opposite terminal is InvalidState (settle; cancel of a Completed record gives Pending, div-cancel-terminal-name)" }
+  OBS-1 = { id = "OBS-1", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["tla", "lean", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); lean: Calls.lean obs1; tla: Props.tla OBS-1 in StepProperty; prolog: tests/test_mc2.pl (MC-2)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-OWNER", "ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Observe Ok => no open record, config unchanged" }
+  PAUSE-1 = { id = "PAUSE-1", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["tla", "lean", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); lean: Calls.lean pause1_blocks, pause1_transparent; tla: Props.tla PAUSE-1 in StepProperty, WitStep_Paused* witnesses; prolog: tests/test_mc2.pl (MC-2), tests/test_model.pl", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "Paused => submit and dispatch have no effect; settle, ack, cancel and observe are unaffected" }
+
+# ---------------------------------------------------------------------------
+# strategy.md section 5.4: invariants. Section 5 lists tla first, so TLC
+# (MC_Safety InvMC, and Inv on every TraceCheck state) is primary and these
+# rows are in-progress; Kani is a cross layer here, and is pending as for the
+# kani-primary rows (strategy.md section 12, "Kani pending"). Inv omits
+# INV-HEALTHY (it enumerates subsets), so TraceCheck does not check that one.
+# Lean proves the conjunction Inv at every size (inv_init, inv_step,
+# reach_inv) and INV-HEALTHY as Live.lean healthy; Prolog checks each
+# invariant on MC-1's graphs and the real core's trace states.
+# ---------------------------------------------------------------------------
+[modules.invariants]
+source = "crates/core/src/lib.rs"
+tla_model = "tla/Props.tla"
+lean_model = "lean/PoolLean/Inv.lean"
+prolog_requirements = "prolog/verification/props.pl"
+
+  [modules.invariants.properties]
+  INV-WF = { id = "INV-WF", status = "in-progress", layer = "tla", evidence = "model-check", cross = ["lean", "kani", "prolog"], harness = "tla: Props.tla INV-WF (InvMC in MC_Safety.cfg, Inv on every TraceCheck state); lean: Inv.lean reach_inv; prolog: verification/props.pl via tests/test_mc1.pl (MC-1) and tests/test_mc2.pl (MC-2); kani: kani/src (not landed)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-OWNER", "ASM-MODEL", "ASM-LEAN-TLA", "ASM-TOOLS", "ASM-SPEC"], description = "Values have length n and are bounded; records[j].id = j; recipe in range; 1 <= units <= max_units; at most 256 records; config never changes" }
+  INV-LEDGER = { id = "INV-LEDGER", status = "in-progress", layer = "tla", evidence = "model-check", cross = ["lean", "kani", "prolog"], harness = "tla: Props.tla INV-LEDGER (InvMC, TraceCheck); lean: Inv.lean reach_inv; prolog: verification/props.pl via tests/test_mc1.pl and tests/test_mc2.pl; kani: kani/src (not landed)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-EXEC", "ASM-MODEL", "ASM-LEAN-TLA", "ASM-TOOLS", "ASM-SPEC"], description = "values = base + sum of reservations of records since k0 not Cancelled + sum of completions of Completed records since k0" }
+  INV-HARD = { id = "INV-HARD", status = "in-progress", layer = "tla", evidence = "model-check", cross = ["lean", "kani", "prolog"], harness = "tla: Props.tla INV-HARD (InvMC, TraceCheck); lean: Inv.lean reach_inv; prolog: verification/props.pl via tests/test_mc1.pl and tests/test_mc2.pl; kani: kani/src (not landed)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-LEAN-TLA", "ASM-TOOLS", "ASM-SPEC"], description = "The envelope over the open records is computable and EV_i <= B_i" }
+  INV-HEALTHY = { id = "INV-HEALTHY", status = "in-progress", layer = "tla", evidence = "model-check", cross = ["lean", "kani", "prolog"], harness = "tla: Props.tla INV-HEALTHY (in InvMC, checked by MC_Safety and the MC_Liveness configs; TraceCheck checks Inv, which omits it); lean: Live.lean healthy; prolog: verification/props.pl via tests/test_mc1.pl and tests/test_mc2.pl; kani: kani/src (not landed)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-LEAN-TLA", "ASM-TOOLS", "ASM-SPEC"], description = "B = 0 => every subset of open completions lands in bounds" }
+  INV-DEP = { id = "INV-DEP", status = "in-progress", layer = "tla", evidence = "model-check", cross = ["lean", "kani", "prolog"], harness = "tla: Props.tla INV-DEP (InvMC, TraceCheck); lean: Inv.lean reach_inv; prolog: verification/props.pl via tests/test_mc1.pl and tests/test_mc2.pl; kani: kani/src (not landed)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-LEAN-TLA", "ASM-TOOLS", "ASM-SPEC"], description = "Every record's prerequisites are met by Completed records of lower index" }
+  INV-VER = { id = "INV-VER", status = "in-progress", layer = "tla", evidence = "model-check", cross = ["lean", "kani", "prolog"], harness = "tla: Props.tla INV-VER (InvMC, TraceCheck); lean: Inv.lean reach_inv; prolog: tests/test_mc2.pl (MC-2, per edge; MC-1's visited key drops the version); kani: kani/src (not landed)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-LEAN-TLA", "ASM-TOOLS", "ASM-SPEC"], description = "The version equals the number of effective transitions" }
+
+# ---------------------------------------------------------------------------
+# strategy.md section 5.5: reads. Kani primary: unverified until the Kani
+# layer lands. The shell half of RD-PREVIEW is tested (near-tests); the core
+# half and RD-BEST are checked on the Prolog model only.
+# ---------------------------------------------------------------------------
+[modules.reads]
+source = "crates/core/src/lib.rs"
+prolog_requirements = "prolog/model/pool_machine.pl"
+
+  [modules.reads.properties]
+  RD-PREVIEW = { id = "RD-PREVIEW", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["difftest", "unit", "prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); near-tests: tests/store_diff.rs sh8_store_diff_host, sh8_store_diff_wasm and tests/shell.rs sh9_views_and_paging_at_256_records (the shell's preview equals the core's); prolog: tests/test_model.pl preview_allowed over a request grid (model only)", depends_on = ["crates/core/src/lib.rs", "crates/contract/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "preview.allowed <=> candidate Ok; allowed and version < u32::MAX => submit Ok; no mutation, no panic" }
+  RD-BEST = { id = "RD-BEST", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = ["prolog"], harness = "kani: kani/src (strategy.md section 6, not landed); prolog: tests/test_model.pl best_quantity against brute force on small cases (model only)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS", "ASM-SPEC"], description = "best_quantity is sound and minimal as documented" }
+
+# ---------------------------------------------------------------------------
+# strategy.md section 5.6: liveness.
+# ---------------------------------------------------------------------------
+[modules.liveness]
+source = "crates/core/src/lib.rs"
+tla_model = "tla/MC_Liveness.tla"
+lean_model = "lean/PoolLean/Live.lean"
+
+  [modules.liveness.properties]
+  LIVE-1 = { id = "LIVE-1", status = "in-progress", layer = "lean", evidence = "model-proof", cross = ["tla", "prolog", "unit"], harness = "lean: Live.lean live1, live1_exec, live1_reach (canary/Live1NoPremise.lean must fail to compile); tla: Props.tla LIVE-1 (InvMC in MC_Safety); prolog: verification/props.pl on every MC-2 trace state; near-tests: tests/wedge.rs f1_control_without_the_disturbing_observe", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-LEAN-TLA", "ASM-TOOLS", "ASM-SPEC"], description = "INV, B = 0 and version < u32::MAX => settle(executor, id, true) is Ok for every Dispatched, Active or Unknown record" }
+  # FALSE at the pin. Stays unverified (strategy.md section 12): F-1 breaks it
+  # after a disturbing observe, F-2 in a healthy state. Its counterexample
+  # witnesses (TLA-LIVE-F1, TLA-LIVE-F2, LEAN-WIT, RT-WEDGE) pass while the
+  # findings reproduce.
+  LIVE-2 = { id = "LIVE-2", status = "unverified", layer = "tla", evidence = "model-check", cross = ["prolog", "unit", "difftest"], harness = "tla: MC_Liveness.tla LIVE-2 (MC_Liveness_F1 and _F2 violated; MC_Liveness holds on the completion path); prolog: tests/test_mc1.pl (dead records in wedge, release-blocked in reliance, none in healthy); near-tests: tests/wedge.rs, tests/traces.rs (traces 0 and 209 on the real core); sandbox: RT-WEDGE", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-EXEC", "ASM-INTERLEAVE", "ASM-TIME", "ASM-MODEL", "ASM-LEAN-TLA", "ASM-TOOLS", "ASM-SPEC"], finding = "F-1, F-2", description = "Every dispatched record eventually becomes terminal under executor fairness. Fails: F-1 (disturbed-state hedge wedge), F-2 (healthy-state release wedge in the risk fixture)" }
+
+# ---------------------------------------------------------------------------
+# strategy.md section 5.7: contract shell, mocked runtime (near-tests/), on
+# the host and on two wasm builds. shell.rs is `unit`, store_diff.rs and
+# traces.rs are `difftest`, wasm-surface.sh is `wasm-check`.
+# ---------------------------------------------------------------------------
+[modules.contract_shell]
+source = "crates/contract/src/lib.rs"
+prolog_requirements = "prolog/requirements/pool_req.pl"
+
+  [modules.contract_shell.properties]
+  SH-1 = { id = "SH-1", status = "in-progress", layer = "unit", evidence = "test", cross = ["difftest"], harness = "near-tests/tests/shell.rs sh1_caller_is_the_predecessor_not_the_signer, sh1_now_is_the_block_timestamp_in_whole_seconds; tests/store_diff.rs (15% relayed calls); mutants m02, m10", depends_on = ["crates/contract/src/lib.rs", "crates/core/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-PRED"], description = "caller = predecessor; now = block time in whole seconds" }
+  SH-2 = { id = "SH-2", status = "in-progress", layer = "unit", evidence = "test", cross = [], harness = "near-tests/tests/shell.rs sh2_new_is_private_and_initialises_once; mutant m09", depends_on = ["crates/contract/src/lib.rs", "crates/core/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-PRIVATE"], description = "new is private and initializes once" }
+  # NT-F4: a promise result that is not a JSON string makes
+  # #[callback_result] panic; the record stays where it was, not Unknown.
+  SH-3 = { id = "SH-3", status = "in-progress", layer = "unit", evidence = "test", cross = ["difftest"], harness = "near-tests/tests/shell.rs sh3_on_result_is_private, sh3_on_result_maps_the_status_string, sh3_non_string_promise_results_fail_the_callback (NT-F4); tests/store_diff.rs, tests/traces.rs; mutants m01, m03, m04, m08, m14", depends_on = ["crates/contract/src/lib.rs", "crates/core/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-PRIVATE", "ASM-CALLBACK", "ASM-EXEC"], finding = "NT-F4", description = "on_result is private, and maps the status string as documented. Fails for a promise result that is not a JSON string: #[callback_result] panics and the record stays where it was instead of becoming Unknown, against api:34 (NT-F4)" }
+  SH-4 = { id = "SH-4", status = "in-progress", layer = "unit", evidence = "test", cross = ["difftest"], harness = "near-tests/tests/shell.rs sh4_rejected_submit_returns_the_decision_and_writes_nothing (15 rejection cases, Full and Arithmetic included); tests/store_diff.rs, tests/traces.rs; mutant m13", depends_on = ["crates/contract/src/lib.rs", "crates/core/src/lib.rs", "Cargo.lock"], assumptions = [], description = "submit = core preview then submit; a rejected submit writes nothing" }
+  # NT-F1: holds on the --cfg near build (how cargo-near builds; the scope of
+  # strategy.md section 1) and is FALSE on the documented build
+  # (scripts/build.sh), where every failure is a bare unreachable trap.
+  SH-5 = { id = "SH-5", status = "in-progress", layer = "unit", evidence = "test", cross = ["difftest", "wasm-check"], harness = "near-tests/tests/shell.rs sh5_core_errors_are_panics_with_the_error_string, nt_f1_upstream_build_drops_every_panic_message; tests/store_diff.rs, tests/traces.rs; near-tests/wasm-surface.sh SURF-1 (only the --cfg near build imports panic_utf8)", depends_on = ["crates/contract/src/lib.rs", "crates/core/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-ATOMIC"], finding = "NT-F1", description = "A core Err panics with exactly the error string and changes nothing. Holds on the host and the --cfg near wasm. Fails on the documented build (scripts/build.sh): every failure is a bare unreachable trap with no message; state still reverts (NT-F1)" }
+  SH-6 = { id = "SH-6", status = "in-progress", layer = "unit", evidence = "test", cross = ["difftest"], harness = "near-tests/tests/shell.rs sh6_dispatch_promise_shape; tests/store_diff.rs; tests/executor.rs ex5_end_to_end_normal_reject_unknown_panic; mutant m11", depends_on = ["crates/contract/src/lib.rs", "crates/core/src/lib.rs", "Cargo.lock"], assumptions = [], description = "dispatch promise shape: execute{id,recipe,units} to the executor, 30 Tgas, then on_result" }
+  SH-7 = { id = "SH-7", status = "in-progress", layer = "unit", evidence = "test", cross = ["difftest"], harness = "near-tests/tests/shell.rs sh7_reconcile_guard_and_promise_shape; tests/store_diff.rs; tests/executor.rs ex5_end_to_end_normal_reject_unknown_panic; mutants m05, m15", depends_on = ["crates/contract/src/lib.rs", "crates/core/src/lib.rs", "Cargo.lock"], assumptions = [], description = "reconcile guard and promise shape: status{id} 10 Tgas, then on_result, by anyone, no state write" }
+  SH-8 = { id = "SH-8", status = "in-progress", layer = "difftest", evidence = "test", cross = [], harness = "near-tests/tests/store_diff.rs sh8_store_diff_host (80,000 calls), sh8_store_diff_wasm (12,000 calls per build); tests/traces.rs conformance_traces_through_the_shell (8,804 calls x 3 paths)", depends_on = ["crates/contract/src/lib.rs", "crates/core/src/lib.rs", "Cargo.lock"], assumptions = [], description = "Borsh state round trip: the shell equals the core, with a reload before every call" }
+  SH-9 = { id = "SH-9", status = "in-progress", layer = "unit", evidence = "test", cross = ["difftest"], harness = "near-tests/tests/shell.rs sh9_views_and_paging_at_256_records; tests/store_diff.rs (views every call); mutant m06", depends_on = ["crates/contract/src/lib.rs", "crates/core/src/lib.rs", "Cargo.lock"], assumptions = [], description = "Views: get_pool, get_commitments pages of at most 50" }
+  # NT-F2: reconcile is a &self method, so near-sdk generates no deposit
+  # check; it accepts and keeps an attached deposit (api:3 says every
+  # mutating method is nonpayable).
+  SH-10 = { id = "SH-10", status = "in-progress", layer = "unit", evidence = "test", cross = [], harness = "near-tests/tests/shell.rs sh10_mutating_methods_reject_attached_deposits, nt_f2_reconcile_accepts_and_keeps_an_attached_deposit (NT-F2); mutant m12", depends_on = ["crates/contract/src/lib.rs", "crates/core/src/lib.rs", "Cargo.lock"], assumptions = [], finding = "NT-F2", description = "Nonpayable methods reject deposits: new, submit, dispatch, settle, cancel, set_paused, observe and on_result do. Fails against api:3 (all mutating methods are nonpayable) for reconcile, a &self method with no deposit check, which accepts and keeps an attached deposit (NT-F2)" }
+
+# ---------------------------------------------------------------------------
+# strategy.md section 5.8: the executor (near-tests/tests/executor.rs, host
+# and both wasm builds, end to end through the receipt router).
+# ---------------------------------------------------------------------------
+[modules.executor]
+source = "crates/executor/src/lib.rs"
+
+  [modules.executor.properties]
+  EX-1 = { id = "EX-1", status = "in-progress", layer = "unit", evidence = "test", cross = [], harness = "near-tests/tests/executor.rs ex1_only_the_lock_executes, ex1_executor_wrappers; mutant m17", depends_on = ["crates/executor/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-PRED"], description = "Only the lock executes" }
+  EX-2 = { id = "EX-2", status = "in-progress", layer = "unit", evidence = "test", cross = [], harness = "near-tests/tests/executor.rs ex2_payload_binding_and_dedupe; mutants m16, m21", depends_on = ["crates/executor/src/lib.rs", "Cargo.lock"], assumptions = [], description = "Payload binding and dedupe: a replay returns the recorded status; another payload fails" }
+  EX-3 = { id = "EX-3", status = "in-progress", layer = "unit", evidence = "test", cross = [], harness = "near-tests/tests/executor.rs ex3_only_the_operator_attests; mutant m18", depends_on = ["crates/executor/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-PRED"], description = "Only the operator finishes, confirms or sets the mode" }
+  EX-4 = { id = "EX-4", status = "in-progress", layer = "unit", evidence = "test", cross = [], harness = "near-tests/tests/executor.rs ex4_terminal_conflict_rejected; tests/wedge.rs f1_wedge_end_to_end_with_the_executor; mutant m19", depends_on = ["crates/executor/src/lib.rs", "Cargo.lock"], assumptions = [], description = "A conflicting terminal outcome is rejected" }
+  EX-5 = { id = "EX-5", status = "in-progress", layer = "unit", evidence = "test", cross = [], harness = "near-tests/tests/executor.rs ex5_notify_calls_lock_settle, ex5_end_to_end_normal_reject_unknown_panic; tests/wedge.rs f1_wedge_end_to_end_with_the_executor; mutant m20", depends_on = ["crates/executor/src/lib.rs", "Cargo.lock"], assumptions = [], description = "Notify calls lock.settle{id,completed}, 40 Tgas" }
+
+# ---------------------------------------------------------------------------
+# strategy.md section 5.9: runtime (sandbox/, real wasm on near-sandbox
+# 2.13.4, one shard). Every row ran on both builds (upstream and --cfg near),
+# with a host pool_core oracle compared after every step.
+# ---------------------------------------------------------------------------
+[modules.runtime]
+source = "crates/contract/src/lib.rs"
+prolog_requirements = "prolog/requirements/threat_model.pl"
+
+  [modules.runtime.properties]
+  RT-PRED = { id = "RT-PRED", status = "in-progress", layer = "sandbox", evidence = "test", cross = [], harness = "sandbox/tests/runtime.rs::rt_pred_relay_is_the_caller", depends_on = ["crates/contract/src/lib.rs", "crates/core/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-PRED"], description = "Calls through a relay are attributed to the relay" }
+  RT-PRIVATE = { id = "RT-PRIVATE", status = "in-progress", layer = "sandbox", evidence = "test", cross = [], harness = "sandbox/tests/runtime.rs::rt_private_new_and_on_result", depends_on = ["crates/contract/src/lib.rs", "crates/executor/src/lib.rs", "crates/core/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-PRIVATE"], description = "new and on_result reject foreign callers" }
+  RT-CALLBACK = { id = "RT-CALLBACK", status = "in-progress", layer = "sandbox", evidence = "test", cross = [], harness = "sandbox/tests/runtime.rs::rt_callback_status_mapping", depends_on = ["crates/contract/src/lib.rs", "crates/executor/src/lib.rs", "crates/core/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-CALLBACK", "ASM-EXEC"], description = "execute panic -> Unknown; 'cancelled' -> Cancelled and released; 'active' -> Active" }
+  RT-REVERT = { id = "RT-REVERT", status = "in-progress", layer = "sandbox", evidence = "test", cross = [], harness = "sandbox/tests/runtime.rs::rt_revert_core_errors_write_nothing", depends_on = ["crates/contract/src/lib.rs", "crates/core/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-ATOMIC"], description = "A core error leaves storage byte-identical and emits nothing" }
+  RT-RACE = { id = "RT-RACE", status = "in-progress", layer = "sandbox", evidence = "test", cross = ["unit"], harness = "sandbox/tests/runtime.rs::rt_race_settle_before_callback, rt_race_executor_key_settles_while_callback_in_flight, rt_race_operator_finish_vs_callback; near-tests/tests/executor.rs ex5_settle_before_callback_is_absorbed (pool side)", depends_on = ["crates/contract/src/lib.rs", "crates/executor/src/lib.rs", "crates/core/src/lib.rs", "Cargo.lock"], assumptions = ["ASM-INTERLEAVE"], description = "Settle before the execute callback; the late ack is ignored. Tested on one shard; the operator's finish cannot overtake the callback there" }
+  # Finding witness: passes while F-1 reproduces on the wasm. When upstream
+  # fixes F-1 it fails as stale; invert it, do not delete it (section 12).
+  RT-WEDGE = { id = "RT-WEDGE", status = "in-progress", layer = "sandbox", evidence = "test", cross = ["unit"], harness = "sandbox/tests/runtime.rs::rt_wedge_f1_end_to_end; near-tests/tests/wedge.rs f1_wedge_end_to_end_with_the_executor (mocked runtime)", depends_on = ["crates/contract/src/lib.rs", "crates/executor/src/lib.rs", "crates/core/src/lib.rs", "Cargo.lock"], assumptions = [], finding = "F-1", description = "F-1 end to end: the executor commits 'completed', its settle(true) fails Bounds and the record stays Active; finish(cancelled), confirm_not_executed, both settles, cancel and observe all fail; after 200 more blocks observe and settle still fail" }
+  RES-1 = { id = "RES-1", status = "in-progress", layer = "sandbox", evidence = "test", cross = [], harness = "sandbox/tests/resources.rs::res_1_gas_at_max_state", depends_on = ["crates/contract/src/lib.rs", "crates/executor/src/lib.rs", "crates/core/src/lib.rs", "Cargo.lock"], assumptions = [], description = "Gas at the maximum-size state stays under 300 Tgas (worst pool receipt 12.56 Tgas: submit #256)" }
+
+# ---------------------------------------------------------------------------
+# strategy.md section 5.10: requirement checks and Prolog model checks
+# (prolog/run.sh: suites, canaries, PROP tags, 28 of 28 mutants killed).
+# ---------------------------------------------------------------------------
+[modules.requirements]
+source = "docs/spec.md"
+prolog_requirements = "prolog/requirements/pool_req.pl"
+
+  [modules.requirements.properties]
+  C-1 = { id = "C-1", status = "in-progress", layer = "prolog", evidence = "check", cross = [], harness = "verification/consistency.pl c_check('C-1') over extracted/code_facts.pl; tests/test_requirements.pl", depends_on = ["docs/api.md", "docs/spec.md", "crates/core/src/lib.rs", "crates/contract/src/lib.rs"], assumptions = ["ASM-SPEC", "ASM-TOOLS"], description = "Authority matrix: docs = shell attributes and caller sources = core caller checks (12 methods, 6 core caller checks, 14 shell -> core calls)" }
+  C-2 = { id = "C-2", status = "in-progress", layer = "prolog", evidence = "check", cross = [], harness = "verification/consistency.pl c_check('C-2') over extracted/code_facts.pl and extracted/tla_facts.pl; tests/test_requirements.pl", depends_on = ["docs/spec.md", "docs/api.md", "crates/core/src/lib.rs"], assumptions = ["ASM-SPEC", "ASM-TOOLS"], description = "Guard order: docs = code = TLA+ GuardOrder (8 op kinds, 56 guards)" }
+  C-3 = { id = "C-3", status = "in-progress", layer = "prolog", evidence = "check", cross = [], harness = "verification/consistency.pl c_check('C-3') over extracted/code_facts.pl, extracted/tla_facts.pl and the traces; tests/test_requirements.pl", depends_on = ["docs/spec.md", "docs/api.md", "crates/core/src/lib.rs"], assumptions = ["ASM-SPEC", "ASM-TOOLS"], description = "Lifecycle: docs = code = TLA+ Edges = the traces (36 rows, 11 edges); one recorded divergence, div-ack-noop-version" }
+  C-4 = { id = "C-4", status = "in-progress", layer = "prolog", evidence = "check", cross = [], harness = "verification/consistency.pl c_check('C-4') over extracted/code_facts.pl; tests/test_requirements.pl", depends_on = ["docs/spec.md", "docs/api.md", "docs/verification-handoff.md", "crates/core/src/lib.rs"], assumptions = ["ASM-SPEC", "ASM-TOOLS"], description = "Constants: docs = code (8 compared, 4 derived)" }
+  # Finding witness: passes while F-2 (risk fixture release search) and F-4
+  # (CASH-SELF-ENFORCED) reproduce; it fails if either stops reproducing.
+  C-5 = { id = "C-5", status = "in-progress", layer = "prolog", evidence = "check", cross = [], harness = "verification/consistency.pl c_check('C-5'); tests/test_requirements.pl (fixture claims on trace configs 1-5, a two-record release search per fixture)", depends_on = ["docs/spec.md", "docs/verification-handoff.md", "crates/core/src/lib.rs", "crates/core/src/fixtures.rs"], assumptions = ["ASM-SPEC", "ASM-TOOLS"], finding = "F-2, F-4", description = "Fixture conservation (STOCK, CASH, RISK, self-authorization): 23 claims; F-2 and F-4 reproduced" }
+  C-6 = { id = "C-6", status = "in-progress", layer = "prolog", evidence = "check", cross = [], harness = "verification/consistency.pl c_check('C-6') over requirements/traceability.pl, requirements/threat_model.pl and strategy.md section 5; tests/test_requirements.pl", depends_on = ["docs/spec.md", "docs/api.md", "docs/verification-handoff.md"], assumptions = ["ASM-TOOLS"], description = "Traceability: traceability.pl = strategy.md section 5 (IDs and layer lists: 96 IDs, 96 rows, 96 equal layer lists); requirements, threats and findings traced" }
+  MC-1 = { id = "MC-1", status = "in-progress", layer = "prolog", evidence = "model-check", cross = [], harness = "verification/model_check.pl via tests/test_mc1.pl (universes wedge 3,740 states, healthy 3,856, reliance 630; all complete)", depends_on = ["docs/spec.md", "docs/api.md", "crates/core/src/lib.rs"], assumptions = ["ASM-EXEC", "ASM-MODEL", "ASM-TIME", "ASM-TOOLS", "ASM-SPEC"], description = "Small model check of step/4: no INV or step-property violation; F-1 dead records in wedge, F-2 release-blocked states in reliance, neither in healthy" }
+  MC-2 = { id = "MC-2", status = "in-progress", layer = "prolog", evidence = "test", cross = [], harness = "verification/mc2.pl via tests/test_mc2.pl", depends_on = ["docs/spec.md", "docs/api.md", "crates/core/src/lib.rs"], assumptions = ["ASM-TOOLS", "ASM-SPEC"], description = "Replay of every trace through step/4: 212 traces, 8,804 calls, 0 divergences; invariants, step properties and LIVE-1 on the code's own states" }
+
+# ---------------------------------------------------------------------------
+# strategy.md section 5.11: TLA+ (tla/run.sh; 31 of 31 spec mutants killed).
+# ---------------------------------------------------------------------------
+[modules.tla_model]
+source = "crates/core/src/lib.rs"
+tla_model = "tla/SharedPool.tla"
+
+  [modules.tla_model.properties]
+  TLA-SAFE = { id = "TLA-SAFE", status = "in-progress", layer = "tla", evidence = "model-check", cross = [], harness = "MC_Safety.tla, MC_Safety.cfg (InvMC and StepProperty)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-LEAN-TLA", "ASM-TOOLS", "ASM-SPEC"], description = "InvMC and StepProperty in every reachable state and step of MC_Safety: 2,306,738 distinct states, depth 15" }
+  # Open (OQ-7): Apalache 0.47.2 rejects the model's recursive sums; the
+  # every-size safety result is LEAN-IND.
+  TLA-IND = { id = "TLA-IND", status = "unverified", layer = "tla", evidence = "bounded-proof", cross = [], harness = "tla/run.sh apalache (prints skip; no Apalache model yet)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-LEAN-TLA", "ASM-TOOLS", "ASM-SPEC"], blocked_by = "OQ-7", description = "Inv is inductive (Apalache)" }
+  TLA-LIVE-1 = { id = "TLA-LIVE-1", status = "in-progress", layer = "tla", evidence = "model-check", cross = [], harness = "MC_Liveness.tla with MC_Liveness.cfg (17,964 states) and MC_Liveness_F2Done.cfg (17,553); MC_Liveness_Unfair.cfg must fail and does", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-INTERLEAVE", "ASM-MODEL", "ASM-LEAN-TLA", "ASM-TOOLS", "ASM-SPEC"], description = "LIVE-2 on the completion path: observes in bounds, executor weakly fair to completing" }
+  # Finding witnesses: pass while their finding reproduces (the required
+  # violation is found); when upstream fixes it they fail as stale and are
+  # inverted, not deleted (section 12).
+  TLA-LIVE-F1 = { id = "TLA-LIVE-F1", status = "in-progress", layer = "tla", evidence = "model-check", cross = [], harness = "MC_Liveness.tla with MC_Liveness_F1.cfg (violated, as required) and MC_Liveness_F1Shape.cfg (18,284 states, holds)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-INTERLEAVE", "ASM-MODEL", "ASM-LEAN-TLA", "ASM-TOOLS"], finding = "F-1", description = "F-1 as a LIVE-2 counterexample (must be violated); every counterexample in the small universe is the F-1 wedge" }
+  TLA-LIVE-F2 = { id = "TLA-LIVE-F2", status = "in-progress", layer = "tla", evidence = "model-check", cross = [], harness = "MC_Liveness.tla with MC_Liveness_F2.cfg (violated, as required) and MC_Liveness_F2Shape.cfg (17,553 states, holds)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-EXEC", "ASM-INTERLEAVE", "ASM-MODEL", "ASM-LEAN-TLA", "ASM-TOOLS"], finding = "F-2", description = "F-2 as a LIVE-2 counterexample: healthy observations, a fair honest executor (must be violated); every counterexample in CreditHedgeConfig is the F-2 wedge" }
+  TLA-WIT = { id = "TLA-WIT", status = "in-progress", layer = "tla", evidence = "model-check", cross = [], harness = "Props.tla witnesses checked in MC_Safety (Witness_Completed, _Prerequisite, _Disturbed, _Wedge; WitStep_CancelledAfterDispatch, _UnknownToActive, _Recovery, _PausedSettle/Ack/Cancel/Observe), each violated, as required", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-LEAN-TLA", "ASM-TOOLS"], description = "Completed, prerequisite, disturbed and wedge states, and seven step shapes, are reachable" }
+  REF-5 = { id = "REF-5", status = "in-progress", layer = "tla", evidence = "model-check", cross = [], harness = "TraceCheck.tla, TraceCheck.cfg, trace2tla.py (tla/run.sh trace)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-TOOLS"], description = "The TLA+ model accepts every real-core trace: TraceCheck, 9,016 of 9,016 states (212 traces, 8,804 calls), Inv and StepProperty on every core state and step" }
+
+# ---------------------------------------------------------------------------
+# strategy.md section 5.12: Lean (lean/run.sh; axiom audit 40/40, 3 canaries,
+# 16 of 16 mutants killed). REF-5L is a trace replay, test-class evidence,
+# recorded as lean/model-check because lean allows no `test` (section 12).
+# ---------------------------------------------------------------------------
+[modules.lean_model]
+source = "crates/core/src/lib.rs"
+lean_model = "lean/PoolLean/Machine.lean"
+
+  [modules.lean_model.properties]
+  LEAN-IND = { id = "LEAN-IND", status = "in-progress", layer = "lean", evidence = "model-proof", cross = [], harness = "PoolLean/Inv.lean inv_init, inv_step, reach_inv", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-LEAN-TLA", "ASM-TOOLS", "ASM-SPEC"], description = "Inv holds initially and after every call, at every size" }
+  LEAN-STEP = { id = "LEAN-STEP", status = "in-progress", layer = "lean", evidence = "model-proof", cross = [], harness = "PoolLean/StepProps.lean stepProps, stepProps_step, exec_auth, term1, term1_cancel, stale1_no_replay, version_mono_run", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-LEAN-TLA", "ASM-TOOLS", "ASM-SPEC"], description = "Every call from every state satisfies the step properties" }
+  LEAN-LIVE1 = { id = "LEAN-LIVE1", status = "in-progress", layer = "lean", evidence = "model-proof", cross = [], harness = "PoolLean/Live.lean live1, live1_exec, live1_reach", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-LEAN-TLA", "ASM-TOOLS", "ASM-SPEC"], description = "LIVE-1 at every size" }
+  # Finding witness (F-1, f1_forever); fails as stale when upstream fixes F-1.
+  LEAN-WIT = { id = "LEAN-WIT", status = "in-progress", layer = "lean", evidence = "model-proof", cross = [], harness = "PoolLean/Witness.lean (f1_forever and the healthy-side instances)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-LEAN-TLA", "ASM-TOOLS"], finding = "F-1", description = "F-1 witness, permanent for every continuation, and healthy-side non-vacuity" }
+  REF-5L = { id = "REF-5L", status = "in-progress", layer = "lean", evidence = "model-check", cross = [], harness = "lean/run.sh replay (pool-lean replay, Main.lean). A replay of the 212 traces: test-class evidence (strategy.md section 5.12 says tested), recorded as model-check because layer lean allows no test (strategy.md section 12)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-TOOLS"], description = "The Lean machine agrees with the real core on every trace: 212 traces, 8,804 calls (2,547 Ok), every result and post-state equal" }
+  LEAN-GUARD = { id = "LEAN-GUARD", status = "in-progress", layer = "lean", evidence = "model-proof", cross = [], harness = "PoolLean/Guard.lean Guard.guards_order, Guard.outcome_mem", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-LEAN-TLA", "ASM-TOOLS", "ASM-SPEC"], description = "Each call's guard list is the code's order; compared with TLA+ GuardOrder by hand, not mechanised" }
+
+# ---------------------------------------------------------------------------
+# strategy.md section 5.13: Kani refinement links (strategy.md section 17.2).
+# Unverified until the Kani layer lands.
+# ---------------------------------------------------------------------------
+[modules.kani_refinement]
+source = "crates/core/src/lib.rs"
+tla_model = "tla/SharedPool.tla"
+
+  [modules.kani_refinement.properties]
+  REF-1 = { id = "REF-1", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = [], harness = "kani: h_ref_* (planned, strategy.md section 17.2)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS"], description = "Guard exactness: the core's error is the TLA+ error operator's, so Ok exactly when the action is enabled" }
+  REF-2 = { id = "REF-2", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = [], harness = "kani: h_ref_* (planned, strategy.md section 17.2)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS"], description = "Effect exactness: on Ok, the abstraction of the post-state is the TLA+ action's post-state" }
+  REF-3 = { id = "REF-3", status = "unverified", layer = "kani", evidence = "bounded-proof", cross = [], harness = "kani: h_ref_* (planned, strategy.md section 17.2)", depends_on = ["crates/core/src/lib.rs"], assumptions = ["ASM-MODEL", "ASM-TOOLS"], description = "Rejected and idempotent calls stutter in the model" }

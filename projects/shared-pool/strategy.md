@@ -164,8 +164,8 @@ bound the threat. They do not prevent it.
 ### 3.3 Trust assumptions (TCB)
 
 The 14 assumptions, with their levels and what checks each, are the table
-in §5.14 (`threat_model.pl`'s `assumption/3`). They go into `status.toml`
-as `[assumptions.<ID>]` with the properties (§13 step 2). PRED, PRIVATE,
+in §5.14 (`threat_model.pl`'s `assumption/3`). They are in `status.toml`
+as `[assumptions.<ID>]`, next to the properties (§12). PRED, PRIVATE,
 CALLBACK and ATOMIC (high) and INTERLEAVE (med, one shard) are tested on
 the real runtime. COMPILE is checked by `check-pin.sh`. TIME (high) and
 EXEC, OWNER and DEPLOY (policy) are untested. TOOLS, MODEL and LEAN-TLA
@@ -761,11 +761,13 @@ Specific to this project:
 |---|---|
 | `release_overflow_checks = true` | In `[project]`. `check-pin.sh` fails unless upstream keeps `overflow-checks = true` (ASM-COMPILE). |
 | Unmerged pin | While `pinned_commit` is not on upstream `main`, no property goes past `in-progress`. The `pinned_commit` comment says it is a PR head. |
-| Properties | Not added yet. They go under `[modules.<m>.properties]`, one module per §5 subsection, with IDs equal to `traceability.pl`'s. |
-| Layer names | `near-tests/` carries `unit` (`shell.rs`, `executor.rs`, `wedge.rs`) and `difftest` (`store_diff.rs`, `traces.rs`). The surface check is `wasm-check`. The conformance generator is not a layer: each replay is recorded under the layer that runs it (REF-5 `tla`, REF-5L `lean`, MC-2 `prolog`, SH-8 `difftest`). |
-| False properties | LIVE-2 stays `unverified` with `finding = "F-1, F-2"`. status-lint ignores the key; it is for readers. |
+| Properties | The 82 non-ASM rows of §5, under `[modules.<m>.properties]`, one module per §5 subsection: `config_numerics` (§5.1), `transitions` (§5.2), `step_properties` (§5.3), `invariants` (§5.4), `reads` (§5.5), `liveness` (§5.6), `contract_shell` (§5.7), `executor` (§5.8), `runtime` (§5.9), `requirements` (§5.10), `tla_model` (§5.11), `lean_model` (§5.12) and `kani_refinement` (§5.13). IDs equal `traceability.pl`'s. `layer` is the first layer of the row's *Layer(s)* cell. `cross` holds the row's other layers, plus any other layer whose files carry the ID's `PROP:` tag. |
+| Kani pending | Every property with `layer = "kani"` stays `unverified` until the Kani layer lands (§6), even where TLA+, Lean or Prolog already check it. Those results are in `cross` and `harness`. The §5.4 invariants list `tla` first, so TLC is their primary layer and they are `in-progress`. |
+| Layer names | `near-tests/` carries `unit` (`shell.rs`, `executor.rs`, `wedge.rs`) and `difftest` (`store_diff.rs`, `traces.rs`). The surface check is `wasm-check`. The conformance generator is not a layer: each replay is recorded under the layer that runs it (REF-5 `tla`, REF-5L `lean`, MC-2 `prolog`, SH-8 `difftest`). REF-5 is `model-check`, a TLC run. REF-5L is a replay, test-class evidence (§5.12 says tested), recorded as `model-check` because `lean` allows no `test`; its `harness` says so. |
+| False properties | LIVE-2 stays `unverified` with `finding = "F-1, F-2"`. SH-5 is `in-progress` with `finding = "NT-F1"`: it holds on the `--cfg near` build that §1 scopes, and is false on `scripts/build.sh`. Every row whose §5 Statement or Status cell names a finding carries `finding` too: the witnesses below, and the caveats on AUTH-1, SH-3 and SH-10. status-lint ignores the key; it is for readers. |
 | Finding witnesses | TLA-LIVE-F1, TLA-LIVE-F2, LEAN-WIT, RT-WEDGE and C-5's known findings pass while their finding reproduces. When upstream fixes one, its witness fails as stale. Invert it into the property it guarded; do not delete it. |
-| `[assumptions.<ID>]` | Not added yet; added with the properties. `statement` and `level` from `threat_model.pl`; `checked_by` from `assumption_checked_by/2`. |
+| `[assumptions.<ID>]` | The 14 rows of §5.14. `statement` is §5.14's; `level` is `threat_model.pl`'s, the same as §5.14's. `checked_by` lists properties only: those of `assumption_checked_by/2` and of §5.14's *Evidence* cell that have a result. Pending ones (REF-1..3 for ASM-LEAN-TLA) are named in `observed`, as is a check that is not a property (`check-pin.sh`, the wasm surface). `source` cites the NEAR pages near-approval read, or the upstream docs as `spec:<line>`. |
+| Property `assumptions` | The ASMs the row's claim rests on: its tools and models (TOOLS, SPEC, MODEL, LEAN-TLA), the runtime behaviour it relies on, and the environment it assumes (TIME for MC-1 and LIVE-2, which cites MC-1; an honest executor, EXEC, for LIVE-2, TLA-LIVE-F2 and MC-1's release-blocked states). Where a §3.2 threat's residual is an ASM, every property that mitigates the threat lists it: EXEC on ASYNC-1, RT-CALLBACK, SH-3 and INV-LEDGER (T-UNKNOWN), OWNER on OBS-1 and INV-WF (T-OBS). The in-bounds observations of LIVE-1, TLA-LIVE-1 and TLA-LIVE-F2 are premises of those claims, not OWNER. No property lists DEPLOY: T-REDEPLOY's only mitigation is the assumption itself, and no §5 row checks a deployment (§9.3). |
 
 ---
 
@@ -782,22 +784,22 @@ Specific to this project:
 | M5 | Verus | Deferred (§7) |
 | M6 | Sandbox | Done, on one shard |
 | M7 | Deployment | Out of scope |
-| CI | `.github/workflows/shared-pool.yml` (§14) | Being written |
+| CI | `.github/workflows/shared-pool.yml` (§14) | Written; Kani jobs added with the layer |
 
 **Next, in order.**
 1. Land the Kani layer: harnesses, covers (F-1 among them), canary,
    mutants, REF-1..3.
-2. Add the §5 properties to `status.toml`.
-3. Report F-1..F-6, NT-F1..NT-F4 and the two doc divergences on PR #1.
-4. When PR #1 merges, re-pin to the merge commit: regenerate the traces,
+2. Report F-1..F-6, NT-F1..NT-F4 and the two doc divergences on PR #1.
+3. When PR #1 merges, re-pin to the merge commit: regenerate the traces,
    recompute the hashes, rerun every layer, and update the findings.
-5. A named reviewer who wrote neither `pool-core` nor the models signs off
+4. A named reviewer who wrote neither `pool-core` nor the models signs off
    the specs (`[review] spec_reviewer`).
 
-Closed from this list: pointing C-6 at §5 instead of the brief (§5), and
-a conformance trace of F-2's `Bounds` form on the `risk` fixture (trace
-209; traces 210 and 211 add F-4 and F-6). TLA+, Lean, Prolog and the
-shell replay all three.
+Closed from this list: pointing C-6 at §5 instead of the brief (§5); a
+conformance trace of F-2's `Bounds` form on the `risk` fixture (trace
+209; traces 210 and 211 add F-4 and F-6), which TLA+, Lean, Prolog and the
+shell all replay; and the §5 properties and assumptions in `status.toml`
+(82 properties and 14 assumptions, §12).
 
 ---
 

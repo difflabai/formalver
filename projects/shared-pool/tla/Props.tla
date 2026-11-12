@@ -47,7 +47,7 @@ InvHard == CheckEnvOk /\ \A m \in MIdx : EV(values, 0, 0, -1, m) <= B(m)
 
 \* PROP: INV-HEALTHY (corollary of INV-HARD): with B = 0 every subset of the
 \* open records' completions lands inside [min, max]. Enumerates subsets,
-\* so only MC_Safety checks it.
+\* so the model-checking configs check it (InvMC); TraceCheck's Inv omits it.
 OpenIds == {j \in 0 .. NR - 1 : Open(Rec(j).status)}
 InvHealthy ==
     Healthy =>
