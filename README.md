@@ -15,7 +15,7 @@ Nothing here is Production Ready.
 | Project | Label | What it is |
 |---|---|---|
 | [near-approval](projects/near-approval/strategy.md) | Development Ready | Verification of [trust-framework](https://github.com/difflabai/trust-framework) `contracts/approval` |
-| [shared-pool](projects/shared-pool/strategy.md) | In-Progress | Verification of [shared-pool-controls](https://github.com/difflabai/shared-pool-controls) PR #1 (pool-core and its NEAR contract) |
+| [shared-pool](projects/shared-pool/strategy.md) | Development Ready | Verification of [shared-pool-controls](https://github.com/difflabai/shared-pool-controls) v1.0.0, `pool-core` and its NEAR contract (contract code byte-identical to the pin `a4bb5c3`) |
 | [ironclaw](projects/ironclaw/strategy.md) safety modules | In-Progress | Scaffold of [nearai/ironclaw](https://github.com/nearai/ironclaw) `src/safety/` |
 | [strategy](strategy/README.md) | In-Progress | A plan for deriving a verification strategy from a codebase. No extractor yet. |
 | [near-proofs](near-proofs/README.md) | In-Progress | Submissions to [NEAR Proof Arena](https://github.com/ilblackdragon/near-proof-arena). None yet. |
@@ -122,9 +122,9 @@ python3 tools/scripts/tla-facts.py projects/near-approval --check
 
 ## shared-pool
 
-In-Progress. Pin [`a4bb5c3`](https://github.com/difflabai/shared-pool-controls/commit/a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7), a head of shared-pool-controls PR #1. The PR is not merged. Its two later commits (to `4b68c4e`, checked 2026-11-12) change only `README.md` and `ui/`, none of the files [`status.toml`](projects/shared-pool/status.toml) hashes. Re-pin when the PR merges.
+Development Ready. Verified: shared-pool-controls v1.0.0 (contract code byte-identical to the pin `a4bb5c3`). Pin [`a4bb5c3`](https://github.com/difflabai/shared-pool-controls/commit/a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7), a head of shared-pool-controls PR #1. The PR has merged, and the pin is on upstream `main`. v1.0.0 is [`6f61616`](https://github.com/difflabai/shared-pool-controls/commit/6f616160303e0376fc5e032837fcd566a344f66a) ("Mark the contract as v1.0.0"). `crates/core/src/lib.rs`, `crates/contract` and `crates/executor` are byte-identical in the two commits; the version number is only in the root `Cargo.toml`. `check-pin.sh` fetches `6f61616` and fails if that stops being true. The pin stays: moving it would renumber the conformance traces and change the wasm hashes, with no change in the code the layers check.
 
-The label is In-Progress because the pin is an unmerged PR head, the Kani layer is still being built, and nobody has signed the spec. It does not mean the runs below are empty. TLA+, Lean, Prolog and near-tests carry vacuity guards and fail without them: TLC witnesses must be violated, Lean and Prolog canaries must fail, and every checked-in mutant must be killed.
+Every layer passes on the pin, Kani included. Every property stays `in-progress`. [`status.toml`](projects/shared-pool/status.toml) refuses `verified*` until `[review] spec_reviewer` names a person who did not write `pool-core`. Nobody has signed. The layers carry vacuity guards and fail without them: TLC witnesses must be violated, the Lean, Prolog and Kani canaries must fail, every Kani cover must be satisfied, and every checked-in mutant must be killed.
 
 [`conformance/`](projects/shared-pool/conformance) runs the pinned `pool-core` and generates 212 traces (8,804 calls) from it. TLA+, Lean and Prolog are separate models that replay its traces. The NEAR shell (near-tests) wraps the real core and replays them too. All four match every trace's results and post-states.
 
@@ -133,11 +133,11 @@ The label is In-Progress because the pin is an unmerged PR head, the Kani layer 
 - Prolog: C-1 to C-6 pass, with F-2 and F-4 reproduced by C-5. MC-1 explores three universes (3,740, 3,856 and 630 states). MC-2: 0 divergences. COV-2: the core's preview and best_quantity equal the model's on 36,797 requests. 33 of 33 mutants killed (2 of them mutate the core's reads).
 - near-tests: all 29 tests pass, on the host path and on two wasm builds (plain cargo and `--cfg near`). SH-8 alone makes 80,000 random host calls. 21 of 21 shell mutants killed.
 - Sandbox: RT-PRED, RT-PRIVATE, RT-CALLBACK, RT-REVERT, RT-RACE and RES-1 pass on both wasm builds. The worst pool receipt is 12.56 Tgas at 256 records. RT-WEDGE reproduces F-1.
-- Kani: no result yet, and no CI job.
+- Kani: on the real `pool-core`, 89 of 89 harnesses as required (`h_canary` must fail, and does), 164 of 164 covers satisfied, 30 of 30 must-kill mutants killed. Within 1 metric, 1 term and 2 recipes, values anchored at 0 and ±10^6 and deltas −3..3, every call from a 2-record INV state returns exactly the executable spec's result and post-state and refines the TLA+ model (REF-1..3), and INV holds in every reachable state of at most 3 records; nothing is shown outside those bounds ([`kani/RESULTS.md`](projects/shared-pool/kani/RESULTS.md)).
 
-Two findings are high. F-1: after an `observe` puts a metric out of bounds, a dispatched hedge can be neither settled (`Bounds` both ways) nor cancelled (`Pending`), and every later `observe` fails `Pending` (trace 0). F-2: in the supplied `risk` fixture, with every metric in bounds, once a hedge that relied on a position's reservation has completed, the executor's honest `settle(false)` for the unexecuted position fails `Bounds` and `cancel` and `observe` fail `Pending`, contrary to `docs/spec.md` (trace 209; variant F-2b fails `Arithmetic` instead, trace 208). The other findings, F-3 to F-6 and the shell's NT-F1 to NT-F4 (NT-F1 is SB-1), are in [strategy §4](projects/shared-pool/strategy.md). Every core finding but F-5 (version u32::MAX, out of reach of a trace) has a conformance trace.
+Two findings are high. F-1: after an `observe` puts a metric out of bounds, a dispatched hedge can be neither settled (`Bounds` both ways) nor cancelled (`Pending`), and every later `observe` fails `Pending` (trace 0). F-2: in the supplied `risk` fixture, with every metric in bounds, once a hedge that relied on a position's reservation has completed, the executor's honest `settle(false)` for the unexecuted position fails `Bounds` and `cancel` and `observe` fail `Pending`, contrary to `docs/spec.md` (trace 209; variant F-2b fails `Arithmetic` instead, trace 208). The other findings, F-3 to F-6 and the shell's NT-F1 to NT-F4 (NT-F1 is SB-1), are in [strategy §4](projects/shared-pool/strategy.md). Every core finding has a Kani cover on the real core, and every one but F-5 (version u32::MAX, out of reach of a trace) a conformance trace. Upstream [PR #4](https://github.com/difflabai/shared-pool-controls/pull/4) proposes fixes for these findings as v1.1. It is not merged, and this project has not verified it.
 
-[`shared-pool`](.github/workflows/shared-pool.yml) CI runs the pin check, status-lint, the trace `--check` and the runners of TLA+, Lean, Prolog, near-tests and the sandbox. The sandbox job runs only on manual dispatch. Kani is not in CI yet: its jobs are added, sized from its `RESULTS.md`, when the layer lands.
+[`shared-pool`](.github/workflows/shared-pool.yml) CI runs the pin check (with the v1.0.0 identity), status-lint, the trace `--check`, the runners of TLA+, Lean, Prolog and near-tests, and Kani's plain mode and plain-mode mutants. When a change reaches the Kani layer, `kani` runs the 89 harnesses in 29 groups and `covers` checks their covers together. 36 harnesses peaked above 13 GB (`h_wedge` at 39 GB), so those groups need a larger runner, named by the `KANI_RUNNER` variable; without one they run partly on swap on GitHub's 16 GB runner ([strategy §14](projects/shared-pool/strategy.md)). The sandbox job and the Kani mutants run only on manual dispatch.
 
 ```bash
 git submodule update --init projects/shared-pool/source-mirror
@@ -148,6 +148,10 @@ projects/shared-pool/lean/run.sh                                # fetches Lean v
 projects/shared-pool/prolog/run.sh                              # scryer-prolog 0.10.0
 projects/shared-pool/near-tests/run.sh all                      # Rust 1.98, wasm32 target
 projects/shared-pool/sandbox/run.sh                             # fetches near-sandbox 2.13.4
+projects/shared-pool/kani/run.sh plain                          # random tests, seconds; not proof
+cargo install --locked kani-verifier --version 0.68.0 && cargo kani setup
+projects/shared-pool/kani/run.sh kani                           # 89 harnesses, one at a time: ~7.5 h, up to 39 GB
+projects/shared-pool/kani/run.sh mutants                        # plain mode; --kani adds each mutant's harness
 ```
 
 ## ironclaw

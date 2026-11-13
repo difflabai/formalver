@@ -1,7 +1,8 @@
 # shared-pool: Prolog layer results
 
 Pin: difflabai/shared-pool-controls `a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7`
-(PR #1 head). Docs transcribed: `docs/spec.md`, `docs/api.md`,
+(PR #1 head, merged; its contract code is byte-identical to v1.0.0's,
+strategy.md section 13). Docs transcribed: `docs/spec.md`, `docs/api.md`,
 `docs/verification-handoff.md` at that pin, cited as `spec:<line>`,
 `api:<line>`, `handoff:<line>`. Tools: Scryer Prolog 0.10.0
 (`scryer-prolog`, every suite run as
@@ -295,7 +296,9 @@ from the copy and writes the copy's `core.txt` and `reads.txt`.
   u32::MAX (where `submit` adds the version-overflow check) are not
   compared. "preview allowed ⇒ submit Ok" is checked on the real core by
   the generator for these requests, not proved. near-tests covers the shell
-  half of RD-PREVIEW. The proofs are pending Kani.
+  half of RD-PREVIEW. Kani proves RD-PREVIEW within its step bounds
+  (`h_preview`, `h_preview_post`) and RD-BEST as a composition (`h_best`
+  with other harnesses); see `kani/RESULTS.md`.
 - **C-2 unreachable sites.** The alignment may skip five kinds of code error
   site that cannot fire from an INV state. Each rule names what discharges it:
   - `add_length`: CFG-2, INV-WF.

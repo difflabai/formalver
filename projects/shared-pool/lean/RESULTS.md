@@ -2,7 +2,8 @@
 
 Runner: `projects/shared-pool/lean/run.sh [build|audit|canary|replay|mutants]`
 (default: all; exit 0 = every check passes). Lean 4.34.1, core library only
-(no Mathlib). Pin: shared-pool-controls `a4bb5c3c` (PR #1 head),
+(no Mathlib). Pin: shared-pool-controls `a4bb5c3c` (PR #1 head, merged; its contract
+code is byte-identical to v1.0.0's, strategy.md section 13),
 `crates/core/src/lib.rs`.
 
 ## What is proved (every size, kernel-checked)

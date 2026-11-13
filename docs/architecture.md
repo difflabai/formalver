@@ -20,8 +20,9 @@ Three projects use different subsets:
   (see [ironclaw](#ironclaw-two-layers)).
 - **near-approval** uses Prolog, Kani, TLA+ and Lean today, and plans Verus on
   the real code as an optional upgrade.
-- **shared-pool** uses Prolog, TLA+, Lean, shell tests and the sandbox, with
-  Kani still being built. One trace file from the real core links them (see
+- **shared-pool** uses Prolog, Kani, TLA+, Lean, shell tests and the
+  sandbox, on shared-pool-controls v1.0.0 (contract code byte-identical to
+  the pin `a4bb5c3`). One trace file from the real core links them (see
   [shared-pool](#shared-pool-one-trace-file-links-the-layers)).
 
 ## near-approval: how the layers fit
@@ -105,7 +106,8 @@ them are not.
   (pinned Rust)      212 traces,       ├── REF-5L ──► Lean machine
         │            8,804 calls       ├── MC-2 ────► Prolog step/4 (from the docs)
         │                              └── SH-8 ────► shell: host and two wasm builds
-        │ Kani (being built)
+        │ Kani: one step from a 2-record INV state, within small bounds;
+        │ REF-1..3 to tla.rs, a transcription of SharedPool.tla
         ▼
   near-sdk shell ──► wasm ──► near-sandbox: RT-*, RES-1,
                               a host pool-core as the oracle
@@ -127,17 +129,23 @@ that file the same way.
 
 **One runner per layer.** Each layer directory has a `run.sh`. Exit 0 means
 every check passed, vacuity guards included: TLC witnesses violated, Lean
-canaries rejected and a clean axiom audit, Prolog canary suites failing, and
-every checked-in mutant killed. [`shared-pool.yml`](../.github/workflows/shared-pool.yml)
+canaries rejected and a clean axiom audit, Prolog canary suites failing,
+Kani's `h_canary` failing and every Kani cover satisfied, and every
+checked-in mutant killed. [`shared-pool.yml`](../.github/workflows/shared-pool.yml)
 calls these scripts directly. near-approval runs most layers through shared
 scripts instead (`tools/scripts/run-{kani,tla,lean,prolog}.sh near-approval`).
-Kani has no job yet. Its jobs are added, sized from its `RESULTS.md`, when the
-layer lands.
+For Kani, `plain` and `mutants` run plain mode on every run. When a change
+reaches the Kani layer, `kani` runs the 89 harnesses in 29 groups sized by
+the peaks in `kani/RESULTS.md`, and `covers` checks their covers together.
+36 harnesses peaked above 13 GB, up to 39 GB: their groups need a runner
+larger than GitHub's hosted one (`KANI_RUNNER`).
 
 **What near-approval has and shared-pool does not, yet.**
-- Kani refinement (REF-1..3): no per-step proof yet that the real core
-  refines the TLA+ model. The only code-to-model link is the trace replay,
-  which is evidence, not proof.
+- A cutoff (CUT-1): near-approval argues its Kani bounds suffice at every
+  size. shared-pool's Kani results, REF-1..3 included, hold only within the
+  step bounds (1 metric, 1 term, 2 recipes, 2-record pre-states; INV up to
+  3 records). REF-1..3 link the core to `tla.rs`, a hand transcription of
+  `SharedPool.tla`; `tla.rs` and TLC meet only on the traces.
 - Graph equality (MC-3, MC-4): the Prolog, TLC and Lean models are compared
   on the traces only, not on their reachable graphs.
 - Apalache: TLA-IND is open. Lean carries the every-size results.
@@ -250,5 +258,6 @@ and its `layer`, so a Kani result can never be reported as more than a
 bounded proof, and a Lean result never as a proof of the code (strategy §12).
 
 shared-pool's `status.toml` records 83 properties and 14 assumptions; none
-is past `in-progress`, and none may be while the pin is an unmerged PR head.
+is past `in-progress`, and none may be until a spec reviewer signs. Its Kani
+rows also carry `kani_bound`, the bounds the bounded proof holds within.
 Its strategy §12 adopts near-approval's conventions.

@@ -1,7 +1,8 @@
 # shared-pool: TLA+ layer results
 
 Pin: difflabai/shared-pool-controls `a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7`
-(PR #1 head). Model: `crates/core/src/lib.rs` transcribed guard by guard
+(PR #1 head, merged; its contract code is byte-identical to v1.0.0's,
+strategy.md section 13). Model: `crates/core/src/lib.rs` transcribed guard by guard
 (brief, "Exact core semantics"). Tools: TLC 2.19 / tla2tools 1.7.4 (rev
 5a47802), OpenJDK 23.0.2, 4 workers, macOS arm64. Conformance traces:
 `conformance/traces/core.txt`, sha256 `05c0deb4...377818`: 212 traces,

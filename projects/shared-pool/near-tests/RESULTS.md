@@ -1,8 +1,10 @@
 # shared-pool near-tests: results
 
 Shell layer of the shared-pool verification (near-approval strategy.md
-section 9 pattern). Target: difflabai/shared-pool-controls PR #1 head
-`a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7` (`../source-mirror`); contract
+section 9 pattern). Target: difflabai/shared-pool-controls v1.0.0, whose
+contract code is byte-identical to the pin, a head of PR #1,
+`a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7` (`../source-mirror`; strategy.md
+section 13); contract
 `crates/contract/src/lib.rs` sha256 `6ee32c1e…9784`, executor
 `crates/executor/src/lib.rs` `917d0dcc…05c5`, core `9a4eb36c…05c4`.
 Toolchain 1.98, near-sdk 5.29.1 (`unit-testing`), mocked runtime =

@@ -3,7 +3,7 @@
 ## Target
 
 [`difflabai/shared-pool-controls`](https://github.com/difflabai/shared-pool-controls)
-PR #1 is a NEAR contract that admits agent work against one shared pool of
+v1.0.0 (PR #1, merged) is a NEAR contract that admits agent work against one shared pool of
 bounded metrics. The pool holds metric values, an immutable policy, and up
 to 256 commitment records. The policy has metrics with hard bounds,
 weighted potential terms, and recipes. Each recipe names one actor and one
