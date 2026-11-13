@@ -23,6 +23,7 @@ all="plain loops kani tla lean prolog near_unit sandbox verus"
 expect "" $p/strategy.md $p/kani/RESULTS.md README.md
 expect "verus" $p/status.toml
 expect "" tools/scripts/check-pin.sh tools/scripts/check-status.sh tools/scripts/test-check-status.sh
+expect "" tools/scripts/check-kani-record.py tools/scripts/test-check-kani-record.sh
 expect "" .github/approval-seen tools/scripts/record-approval-check.sh tools/scripts/test-record-approval-check.sh
 expect "" tools/scripts/approval-changed.sh tools/scripts/test-approval-changed.sh .github/workflows/near-approval-watch.yml
 expect "" docs/architecture.svg projects/near-approval/lean/docs/diagram.png .github/CODEOWNERS

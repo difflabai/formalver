@@ -30,6 +30,8 @@ else
       "$p"/status.toml) add="verus" ;;
       # Checked by the pin job alone (pin and status-lint).
       "$s"/check-pin.sh | "$s"/check-status.sh | "$s"/test-check-status.sh) add="" ;;
+      # shared-pool's local Kani record check (shared-pool.yml kani-record).
+      "$s"/check-kani-record.py | "$s"/test-check-kani-record.sh) add="" ;;
       # A recording PR only advances the already-successful schedule baseline.
       .github/approval-seen | "$s"/record-approval-check.sh | "$s"/test-record-approval-check.sh | "$s"/approval-changed.sh | "$s"/test-approval-changed.sh | .github/workflows/near-approval-watch.yml) add="" ;;
       # The weekly upstream watch.
