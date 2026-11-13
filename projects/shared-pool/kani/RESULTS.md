@@ -116,9 +116,10 @@ in 0.9 to 4.3 times the table's times. `h_energy_max` (1,800 s),
 of time on swap, and `h_bmc_from_init_po`'s runner shut down after 33
 minutes. In run 43488691444 (commit `89f99d6`: memory plus swap at twice
 each group's peak, and on swap each harness's share of the job's time),
-27 of the 29 groups passed (87 harnesses). `h_bmc_from_init_s_submit`'s runner lost contact after
-52 minutes on swap, and `h_bmc_from_init_po` ran for over 3 hours before
-the run was cancelled. strategy.md section 14 has the workflow.
+27 of the 29 groups passed (87 harnesses).
+`h_bmc_from_init_s_submit`'s runner lost contact after 52 minutes on
+swap, and `h_bmc_from_init_po` ran for over 3 hours before the run was
+cancelled. strategy.md section 14 has the workflow.
 
 ## Layout
 
@@ -305,32 +306,39 @@ commands in `kani/local/README.md`) and the block below.
 On every run, CI's `kani-record` job (`tools/scripts/check-kani-record.py`)
 checks that:
 - the record's fingerprint of the Kani inputs is the commit's. The
-  inputs are the git object ids of `kani/src`, `Cargo.toml`,
-  `Cargo.lock`, `mutants`, `run.sh` and `.gitignore`, the core's gitlink
-  and `conformance/traces/core.txt`, and `tools/versions.env`'s `KANI`
-  and `CBMC`;
-- `jobs.tsv` and `covers.tsv` match the digest in `provenance.txt`;
+  inputs are every file under `kani/` except `kani/local` and the
+  Markdown, with the git object ids of `kani/src`, `Cargo.toml`,
+  `Cargo.lock`, `mutants`, `run.sh` and `.gitignore` on lines of their
+  own, the core's gitlink and `conformance/traces/core.txt`, and
+  `tools/versions.env`'s `KANI` and `CBMC`;
+- `jobs.tsv` and `covers.tsv` match the digest in `provenance.txt`, and
+  the fingerprint is the hash of the record's input lines and, where the
+  clone has the record's commit, that commit's;
 - every recorded harness is `ok` and every recorded mutant as its patch
   expects;
 - the `kani` groups and the record together are `run.sh list`, each
   harness once, and `kani-mutants` and the record are `mutants/*.patch`,
   each mutant once;
-- the block below is `record.py table`.
+- the block below is there and is `record.py table`.
 
 A change to any Kani input fails that job until
 `kani/local/run-local.py --record` has been run at the new commit and
-the record committed. The `covers` job checks the record's covers with
-the groups'. CI cannot check that the run took place as recorded: the
-record, like the tables above, rests on the word of whoever ran it.
-Anyone with a 64 GB machine can repeat it with `run-local.py --record`
-and compare.
+the record committed (or, on a `KANI_RUNNER`, until the run's
+`kani-large` and `kani-mutants-large` jobs verify all it records). The
+`covers` job checks the record's covers with the groups'. CI cannot
+check that the run took place as recorded: the record, like the tables
+above, rests on the word of whoever ran it. Anyone with a 64 GB machine
+can repeat it with `run-local.py --record` and compare.
 
 The block's times and peaks are this run's, with two jobs at a time, so
 they need not equal the one-at-a-time measurements in "Kani results",
 which size the groups. A mutant's time is its whole job, plain mode
-included. Its plain mode used the host's default Rust toolchain
-(`provenance.txt`, `rustc`). CI's `mutants` job reruns every mutant's
-plain mode with `tools/versions.env`'s toolchain on every run.
+included. Its plain mode used the host's default Rust toolchain (rustc
+1.95.0, not `tools/versions.env`'s 1.97.0; `run-local.py` now sets
+1.97.0 for the mutant jobs, as CI does). The record does not cover the
+plain half of a mutant's verdict, and `RUST_TOOLCHAIN` is not in the
+fingerprint: CI's `mutants` job reruns every mutant's plain mode with
+`tools/versions.env`'s toolchain on every run.
 
 <!-- kani-local-record: begin (kani/local/record.py writes this block; do not edit) -->
 **PLACEHOLDER, not a result: the local record is not written yet.** The
