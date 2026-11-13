@@ -22,6 +22,8 @@
 #                                   tla.rs) one at a time; their covers (the
 #                                   "ref ..." family) all SATISFIED.
 #        run.sh all                 plain, kani, mutants.
+#        run.sh list                the harnesses `kani` runs by default, one
+#                                   per line (CI checks its groups cover them).
 #
 # A mutant patch applies to crates/core (paths a/crates/core/...) unless it
 # has "# applies-to: kani", then to this crate (paths a/src/..., e.g. a
@@ -32,7 +34,10 @@
 #      1800; the h_step_*_inv_3 parts 7200 unless it is set), KANI_MAX_GB
 #      resident GB of CBMC before a harness is stopped
 #      (default 40; reported as OUT-OF-MEMORY), KANI_LOG_DIR (default:
-#      target/kani-logs), KEEP_LOGS=dir.
+#      target/kani-logs), KEEP_LOGS=dir. KANI_DEFER_COVERS=1: `kani` writes
+#      KANI_LOG_DIR/covers.tsv (family, cover, status) but leaves the family
+#      check to tools/scripts/check-covers.sh over every group's file (CI
+#      runs a family's harnesses in separate jobs).
 # Exit 0 iff every check passes.
 set -uo pipefail
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -277,6 +282,10 @@ do_kani() {
     fi
   done
   # Covers, per family: each must be SATISFIED in some harness of its family.
+  if [ "${KANI_DEFER_COVERS:-0}" = 1 ]; then
+    echo "covers: $(cut -f1,2 "$covers_all" | sort -u | wc -l | tr -d ' ') recorded in $covers_all, family check deferred"
+    return $fail
+  fi
   local missing
   missing=$(awk -F'\t' '{k=$1 "\t" $2; if ($3=="SATISFIED") s[k]=1; else if (!(k in s)) s[k]=0}
                          END {for (k in s) if (!s[k]) print k}' "$covers_all")
@@ -415,11 +424,12 @@ case "$cmd" in
   kani) do_kani "$@" ;;
   mutants) do_mutants "$@" ;;
   ref) do_kani $(harnesses | grep '^h_ref_') ;;
+  list) harnesses ;;
   all)
     rc=0
     do_plain || rc=1
     do_kani || rc=1
     do_mutants || rc=1
     exit $rc ;;
-  *) echo "usage: $0 plain | kani [h...] | ref | mutants [--kani] [glob] | all" >&2; exit 2 ;;
+  *) echo "usage: $0 plain | kani [h...] | ref | mutants [--kani] [glob] | all | list" >&2; exit 2 ;;
 esac
