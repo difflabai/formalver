@@ -237,12 +237,16 @@ jobs:
   # Without KANI_RUNNER the Kani jobs fall back to CI_RUNNER, then
   # ubuntu-latest, as near-approval's do, and routed runs (see above `jobs:`)
   # always get ubuntu-latest. On hosted Linux the swap step gives every group
-  # memory plus swap of at least 1.25 times its peak, and the groups above
-  # 16 GB run partly on swap. No run has measured Kani on swap: such a group
-  # may run out of time there, and then it fails (TIMEOUT in the job's
-  # output and logs). Nothing is skipped: a group passes only if every
-  # harness in it does. A runner whose memory plus swap is below a group's
-  # peak fails that group at once (the runner-size step).
+  # memory plus swap of at least twice its peak, and the groups above 15 GB
+  # run partly on swap. The first run there (CI run 43469880167, at 1.25
+  # times) verified 85 of the 89 harnesses, those on swap up to 4.3 times
+  # slower than measured; h_energy_max, h_validate and
+  # h_bmc_from_init_s_submit ran out of time, and h_bmc_from_init_po's
+  # runner shut down (strategy.md section 14). A group that runs out of
+  # time fails (TIMEOUT in the job's output and logs). Nothing is skipped:
+  # a group passes only if every harness in it does. A runner whose memory
+  # plus swap is below a group's peak fails that group at once (the
+  # runner-size step).
   #
   # Per group: gb is the largest measured peak, rounded up. KANI_MAX_GB is
   # 1.5 times gb: a harness that needs half as much again as it did has
@@ -254,7 +258,8 @@ jobs:
   # KANI_TIMEOUT, per harness, is three times the slowest measured time in
   # the group, and at least run.sh's 1800 s (it replaces run.sh's 7200 s for
   # the _inv_3 parts, whose slowest took 1788 s). Each group's harnesses
-  # times KANI_TIMEOUT fit the 360 minutes.
+  # times KANI_TIMEOUT fit the 360 minutes. On swap the kani step raises it
+  # to each harness's share of 330 minutes.
   # A family's covers can be split across groups: each group only records
   # its covers (KANI_DEFER_COVERS=1), and the covers job checks them all
   # together, as near-approval's does. That job also fails if a harness of
@@ -352,7 +357,7 @@ jobs:
       matrix:
         # group: harnesses, run one at a time; gb: the largest peak in
         # kani/RESULTS.md, rounded up; timeout: KANI_TIMEOUT (seconds per
-        # harness).
+        # harness; more on swap, see the kani step).
         include:
           # Peaks of 13 GB or less: in memory on ubuntu-latest.
           - { group: "h_canary h_full_256 h_best h_live1 h_wedge_healthy", gb: 11, timeout: 1800 }
@@ -415,12 +420,15 @@ jobs:
         if: env.KANI_SWAP_GB != '0' && runner.environment == 'github-hosted' && runner.os == 'Linux'
         run: |
           # Free preinstalled SDKs this job does not use. Swap: KANI_SWAP_GB,
-          # or enough for memory plus swap to reach 1.25 times the matrix
-          # entry's peak (GB) if that is more, leaving 6 GB of disk for the
-          # build and logs.
+          # or enough for memory plus swap to reach twice the matrix entry's
+          # peak (GB) if that is more, leaving 6 GB of disk for the build and
+          # logs. Twice: the peaks are macOS resident memory, which leaves out
+          # compressed pages, and at 1.25 times (34 GB for a 27 GB peak) the
+          # runner of h_bmc_from_init_po shut down mid-harness (CI run
+          # 43469880167).
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
           ram=$(( $(awk '/^MemTotal:/{print $2}' /proc/meminfo) / 1048576 ))
-          want=$(( (GB * 5 + 3) / 4 - ram + 1 ))
+          want=$(( 2 * GB - ram ))
           avail=$(df --output=avail -BG / | tail -1 | tr -dc 0-9)
           gb=$(( KANI_SWAP_GB > want ? KANI_SWAP_GB : want ))
           gb=$(( gb < avail - 6 ? gb : avail - 6 ))
@@ -445,7 +453,7 @@ jobs:
               echo "::error::this job's harnesses peaked at $GB GB and the runner has $ram GB of memory and $swap GB of swap: set KANI_RUNNER to a runner with at least $(( (GB * 5 + 3) / 4 )) GB (strategy.md section 14)"
               exit 1
             fi
-            echo "::warning::this job's harnesses peaked at $GB GB, above the runner's $ram GB: they run on swap, which no run has measured, and may run out of time; KANI_RUNNER names a larger runner (strategy.md section 14)"
+            echo "::warning::this job's harnesses peaked at $GB GB, above the runner's $ram GB: they run on swap, up to 4 times slower than measured or out of time (CI run 43469880167); KANI_RUNNER names a larger runner (strategy.md section 14)"
           fi
       - name: Kani ${{ matrix.group }}
         env:
@@ -463,6 +471,25 @@ jobs:
           export KANI_CBMC="${KANI_HOME:-$HOME/.kani}/kani-$v/bin/cbmc"
           # GROUP: harness names separated by spaces.
           read -ra harnesses <<<"$GROUP"
+          if [ -r /proc/meminfo ]; then
+            ram=$(( $(awk '/^MemTotal:/{print $2}' /proc/meminfo) / 1048576 ))
+            # On swap (memory below the group's peak) the measured times do
+            # not hold: in CI run 43469880167 harnesses on swap took up to
+            # 4.3 times their macOS time, three ran out of time and
+            # h_step_submit_inv_3 used 3,586 of its 3,600 s. There each
+            # harness may use an equal share of 330 of the job's 360 minutes.
+            share=$(( 330 * 60 / ${#harnesses[@]} ))
+            if [ "$ram" -lt "$GB" ] && [ "$share" -gt "$KANI_TIMEOUT" ]; then
+              echo "::notice::on swap: KANI_TIMEOUT $KANI_TIMEOUT -> $share s per harness (330 minutes over ${#harnesses[@]})"
+              export KANI_TIMEOUT=$share
+            fi
+            # Memory and swap in use every 5 minutes, in the job's output,
+            # which survives a runner that goes down (the uploaded logs do
+            # not).
+            (while sleep 300; do free -g | awk '/^Mem:/{m=$3} /^Swap:/{w=$3} END{print "memory in use " m " GB, swap in use " w " GB"}'; done) &
+            sampler=$!
+            trap 'pkill -P "$sampler" 2>/dev/null; kill "$sampler" 2>/dev/null || true' EXIT
+          fi
           projects/shared-pool/kani/run.sh kani "${harnesses[@]}"
       - name: Upload logs
         if: always()
@@ -602,12 +629,15 @@ jobs:
         if: env.KANI_SWAP_GB != '0' && runner.environment == 'github-hosted' && runner.os == 'Linux'
         run: |
           # Free preinstalled SDKs this job does not use. Swap: KANI_SWAP_GB,
-          # or enough for memory plus swap to reach 1.25 times the matrix
-          # entry's peak (GB) if that is more, leaving 6 GB of disk for the
-          # build and logs.
+          # or enough for memory plus swap to reach twice the matrix entry's
+          # peak (GB) if that is more, leaving 6 GB of disk for the build and
+          # logs. Twice: the peaks are macOS resident memory, which leaves out
+          # compressed pages, and at 1.25 times (34 GB for a 27 GB peak) the
+          # runner of h_bmc_from_init_po shut down mid-harness (CI run
+          # 43469880167).
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
           ram=$(( $(awk '/^MemTotal:/{print $2}' /proc/meminfo) / 1048576 ))
-          want=$(( (GB * 5 + 3) / 4 - ram + 1 ))
+          want=$(( 2 * GB - ram ))
           avail=$(df --output=avail -BG / | tail -1 | tr -dc 0-9)
           gb=$(( KANI_SWAP_GB > want ? KANI_SWAP_GB : want ))
           gb=$(( gb < avail - 6 ? gb : avail - 6 ))
@@ -632,7 +662,7 @@ jobs:
               echo "::error::this job's harnesses peaked at $GB GB and the runner has $ram GB of memory and $swap GB of swap: set KANI_RUNNER to a runner with at least $(( (GB * 5 + 3) / 4 )) GB (strategy.md section 14)"
               exit 1
             fi
-            echo "::warning::this job's harnesses peaked at $GB GB, above the runner's $ram GB: they run on swap, which no run has measured, and may run out of time; KANI_RUNNER names a larger runner (strategy.md section 14)"
+            echo "::warning::this job's harnesses peaked at $GB GB, above the runner's $ram GB: they run on swap, up to 4 times slower than measured or out of time (CI run 43469880167); KANI_RUNNER names a larger runner (strategy.md section 14)"
           fi
       - name: Mutant ${{ matrix.mutant }} (plain mode and Kani)
         env:
@@ -640,10 +670,15 @@ jobs:
           KEEP_LOGS: ${{ runner.temp }}/kani-mutant-logs
           MUTANT: ${{ matrix.mutant }}
         run: |
-          # As in the kani job.
+          # As in the kani job (on swap: a share of 300 minutes for each of
+          # at most two harnesses, after the plain run).
           export KANI_MAX_GB=$(( (GB * 3 + 1) / 2 ))
           v=$(sed -n 's/^KANI=//p' tools/versions.env)
           export KANI_CBMC="${KANI_HOME:-$HOME/.kani}/kani-$v/bin/cbmc"
+          if [ -r /proc/meminfo ] && [ $(( $(awk '/^MemTotal:/{print $2}' /proc/meminfo) / 1048576 )) -lt "$GB" ] && [ $(( 300 * 60 / 2 )) -gt "$KANI_TIMEOUT" ]; then
+            export KANI_TIMEOUT=$(( 300 * 60 / 2 ))
+            echo "::notice::on swap: KANI_TIMEOUT $KANI_TIMEOUT s per harness"
+          fi
           mkdir -p "$KEEP_LOGS"
           projects/shared-pool/kani/run.sh mutants --kani "$MUTANT-*"
       - name: Upload logs

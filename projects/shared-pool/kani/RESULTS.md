@@ -88,6 +88,18 @@ that harness satisfies, so a family's own cover left unsatisfied fails
 the run, and the "0 of N" rows (`h_preview_post`, the `_tx`/`_post`/`_inv`
 parts, the non-submit `h_bmc_from_init_s_*`) do not.
 
+**CI, first run on GitHub's hosted runner** (run 43469880167,
+2026-11-13; `ubuntu-latest`, 4 CPUs, 15 GB, a swap file of 1.25 times
+each group's peak; the 29 groups of `.github/workflows/shared-pool.yml`).
+85 of the 89 harnesses verified as required, with the results of the
+table (`h_canary` FAILED on its own assertion only), in 0.9 to 4.3 times
+the time above. Four did not finish: `h_energy_max` (out of time at
+1,800 s), `h_validate` (2,400 s) and `h_bmc_from_init_s_submit`
+(3,600 s) on swap, and `h_bmc_from_init_po`, whose runner shut down
+after 33 minutes. For those four the results here are this machine's
+only. strategy.md section 14 has the numbers and the change to the
+workflow (twice the swap, the job's time on swap).
+
 ## Layout
 
 | File | Contents |

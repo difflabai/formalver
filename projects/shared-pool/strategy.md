@@ -38,13 +38,16 @@ numerics, the reads and the refinement links REF-1..3 on the real
 `pool-core` (§6). TLA+, Lean, Prolog and the shell tests replay the same
 212 real-core traces (§10). The sandbox compares the chain with a host
 `pool-core` oracle. CI passed on GitHub (PR #31) for every layer but
-Kani. The Kani jobs and a check that the pin's contract code is v1.0.0's
-are now in the workflow, and have not run there yet (§14). Two high
-findings, F-1 and F-2, show that the settlement liveness the docs rely on
-does not hold. Nothing is verified: there is no spec reviewer (§12). Next:
-a first CI run of the Kani jobs, 36 of whose 89 harnesses need a runner
-larger than GitHub's hosted one (§14, OQ-11), and the findings upstream
-(§13).
+Kani. The first CI run with the Kani jobs and the check that the pin's
+contract code is v1.0.0's (run 43469880167) passed every other job, plain
+mode, the mutants and 85 of the 89 harnesses on GitHub's 16 GB hosted
+runner, many of them on swap. Four harnesses with the largest SAT
+instances ran out of time there or lost their runner, so `kani` and
+`covers` failed; the workflow now gives harnesses on swap twice the swap
+and the job's whole time (§14). Two high findings, F-1 and F-2, show that
+the settlement liveness the docs rely on does not hold. Nothing is
+verified: there is no spec reviewer (§12). Next: Kani green in CI, on swap
+or on a larger runner (§14, OQ-11), and the findings upstream (§13).
 
 ---
 
@@ -87,8 +90,9 @@ models the world (spec:31); receipt order across shards; optimality of
 | **2. Models and operational** | TLA+ (§17), Lean (§18), Prolog (§8), near-tests and sandbox (§9) | built | Every-size safety for the model (Lean). Liveness and its failures over all event sequences in small universes (TLC). An independent reading of the docs (Prolog). The shell on the host and two wasm builds. Runtime assumptions on a local chain. TLA+, Lean, Prolog and the shell are tied to the real core by the traces (§10); the sandbox by a host `pool-core` oracle (§9.2). |
 | **3. Unbounded on the code** | Verus (§7) | deferred | Removes the transcription gap between the Lean model and the code. |
 
-Tier 1 is done within its bounds, and its CI jobs are in the workflow
-(§14). Next: their first CI run and the spec review (§13). Revisit Tier 3 after
+Tier 1 is done within its bounds. Its CI jobs ran once on the hosted
+runner, where 85 of the 89 harnesses passed (§14). Next: Kani green in CI
+and the spec review (§13). Revisit Tier 3 after
 upstream decides on F-1 and F-2, since a fix changes what a proof covers.
 
 ### Upstream's obligations (handoff:9-23)
@@ -950,7 +954,7 @@ Specific to this project:
 | # | Deliverable | State |
 |---|---|---|
 | M0 | Submodule at the PR #1 head; `status.toml` with 16 `[source_hashes]` and `release_overflow_checks`; conformance generator and traces | Done |
-| M1 | Kani on the real core (§6) | Done: 89 harnesses, 164 covers, 31 mutants, REF-1..3. In the workflow (§14), not yet run in CI. |
+| M1 | Kani on the real core (§6) | Done: 89 harnesses, 164 covers, 31 mutants, REF-1..3. In the workflow (§14); its first CI run verified 85 of the 89 harnesses on the hosted runner. |
 | M1.5 | TLA+ (§17) | Done, except TLA-IND (open). REF-1..3 done with M1 (§17.2). |
 | M1.6 | Lean (§18) | Done |
 | M3 | Shell: `near-tests/`, wasm surface | Done |
@@ -958,7 +962,7 @@ Specific to this project:
 | M5 | Verus | Deferred (§7) |
 | M6 | Sandbox | Done, on one shard |
 | M7 | Deployment | Out of scope |
-| CI | `.github/workflows/shared-pool.yml` (§14) | Green on PR #31 (run 43194245726) for every layer but Kani; the Kani jobs and the v1.0.0 check were added after that run |
+| CI | `.github/workflows/shared-pool.yml` (§14) | Green on PR #31 (run 43194245726) for every layer but Kani. Run 43469880167, the first with the Kani jobs and the v1.0.0 check: every job green but `kani` (4 of 29 groups failed on the 16 GB hosted runner) and so `covers` (§14) |
 
 **Pin decision (2026-11-13).** PR #1 merged (`b9e994f`), and upstream
 marked the contract v1.0.0 in `6f61616`. `git diff a4bb5c3 6f61616 --
@@ -976,9 +980,13 @@ Upstream PR #4 (v1.1) proposes fixes for the findings; v1.1 is not
 verified here.
 
 **Next, in order.**
-1. Run the Kani jobs in CI. 36 harnesses peaked above 13 GB: set
-   `KANI_RUNNER` to a runner with at least 49 GB, or record how they fare
-   on swap on the 16 GB hosted runner (§14, OQ-11).
+1. Kani green in CI. Run 43469880167 verified 85 of the 89 harnesses on
+   the 16 GB hosted runner. `h_energy_max`, `h_validate` and
+   `h_bmc_from_init_s_submit` ran out of time on swap, and
+   `h_bmc_from_init_po`'s runner shut down. The workflow now doubles the
+   swap and gives each harness on swap its share of 330 minutes. If that
+   is not enough, set `KANI_RUNNER` to a runner with at least 49 GB (§14,
+   OQ-11).
 2. Report F-1..F-6, NT-F1..NT-F4 and the two doc divergences upstream.
 3. When v1.1 (PR #4) merges, re-pin to it: regenerate the traces,
    recompute the hashes, rerun every layer, invert the finding witnesses
@@ -987,7 +995,8 @@ verified here.
    the specs (`[review] spec_reviewer`).
 
 Closed from this list: the Kani layer with REF-1..3 (§6, §17.2); the Kani
-jobs and the v1.0.0 byte-identity check in the workflow (§14);
+jobs and the v1.0.0 byte-identity check in the workflow (§14), and their
+first run;
 re-pinning to PR #1's merge, replaced by the byte-identity decision above;
 pointing C-6 at §5 instead of the brief (§5); a
 conformance trace of F-2's `Bounds` form on the `risk` fixture (trace
@@ -1018,12 +1027,29 @@ peaked above it, 31 of them above 16 GB and `h_wedge` at 39.0 GB. Those
 need a larger runner, named by the `KANI_RUNNER` repository variable (at
 least 49 GB, with `KANI_SWAP_GB` 0). Without it, the Kani jobs fall back to
 `CI_RUNNER`, then `ubuntu-latest`, as near-approval's do; there a swap file
-brings memory plus swap to 1.25 times each group's peak, and the larger
-groups run partly on swap. No run has measured that: a group that runs out
-of time fails, it is not skipped. Per group, `KANI_TIMEOUT` is three times
-its slowest measured harness (at least 1,800 s) and `KANI_MAX_GB` 1.5 times
-its peak. No loop-bounds job: near-approval's U-1 serves its cutoff, and
-this project claims none; `run.sh` keeps unwinding assertions on.
+brings memory plus swap to twice each group's peak, and the larger groups
+run partly on swap. A group that runs out of time fails, it is not
+skipped. Per group, `KANI_TIMEOUT` is three times its slowest measured
+harness (at least 1,800 s) and `KANI_MAX_GB` 1.5 times its peak. On swap
+(the runner's memory below the group's peak), each harness may instead
+use an equal share of 330 of the job's 360 minutes. No loop-bounds job:
+near-approval's U-1 serves its cutoff, and this project claims none;
+`run.sh` keeps unwinding assertions on.
+
+First run on the hosted runner (run 43469880167, with 1.25 times the peak
+as memory plus swap and the measured timeouts). Every job but `kani` and
+`covers` passed. 25 of the 29 groups passed: 85 of the 89 harnesses as
+required, `h_canary` failing on its own assertion. In memory, harnesses
+took 0.9 to 2.1 times their time on the Mac (median 1.4); on swap, 1.0 to
+4.3 times (median 1.6), and `h_step_submit_inv_3` used 3,586 of its
+3,600 s. Four did not finish, the four with the largest SAT instances:
+`h_energy_max` (226 million clauses, out of time at 1,800 s),
+`h_bmc_from_init_s_submit` (100 million, 3,600 s), `h_validate` (72
+million, 2,400 s) and `h_bmc_from_init_po` (160 million), whose runner
+shut down after 33 minutes with no log. `covers` then failed because
+`h_bmc_from_init_po` had no log. The swap was doubled and the time on swap
+extended after this run; the peaks are macOS resident memory, which leaves
+out compressed pages, so Linux can need more.
 
 | Job | Runs | Fails on |
 |---|---|---|
@@ -1037,7 +1063,7 @@ this project claims none; `run.sh` keeps unwinding assertions on.
 | `sandbox` | `sandbox/run.sh` (about 7 min warm) | any failure; lockfile drift |
 | `plain` | `kani/run.sh plain`: the harness bodies with a random source, 27 tests, and REF-1..3 on every trace call (10 s of tests; not proof); 15 min limit | a test failing; a cover that a body evaluates never firing |
 | `mutants` | `kani/run.sh mutants`: the 31 mutants in plain mode (about 4 min); 30 min limit | a must-kill mutant passing plain mode; mutant 20 (`must-survive`) failing it |
-| `kani` | `kani/run.sh kani <group>` with `KANI_DEFER_COVERS=1`, a matrix of 29 groups on `KANI_RUNNER` (see above); per group `KANI_TIMEOUT` and `KANI_MAX_GB`; logs uploaded | a harness failing, out of time or out of memory; `h_canary` passing, or failing on anything but its own assertion; a runner whose memory plus swap is below the group's peak |
+| `kani` | `kani/run.sh kani <group>` with `KANI_DEFER_COVERS=1`, a matrix of 29 groups on `KANI_RUNNER` (see above); per group `KANI_TIMEOUT` and `KANI_MAX_GB`; logs uploaded | a harness failing, out of time or out of memory; `h_canary` passing, or failing on anything but its own assertion; a runner whose memory plus swap is below the group's peak; a runner that shuts down |
 | `covers` | after `kani`: every harness of `run.sh list` in exactly one group's logs, then `tools/scripts/check-covers.sh` over every group's `covers.tsv` (89 harnesses, 164 covers) | a harness in no group or in two; a family's cover satisfied in none of its harnesses |
 | `kani-mutants` | `kani/run.sh mutants --kani <NN>-*`, one job per mutant on `KANI_RUNNER`, with the named harness's peak and three times its time, at least 1,800 s (manual, `mutants: true`) | a mutant whose plain or Kani result differs from its header (`killed-by`, `must-survive`) |
 
@@ -1051,7 +1077,7 @@ this project claims none; `run.sh` keeps unwinding assertions on.
 | A fix for F-1 or F-2 changes admission or release. | Every model follows the code's guard order, and the traces regenerate from the core. Witnesses flip and must be inverted (§12). |
 | Three hand-written models share a transcription error. | All replay the same real-core traces; C-2 compares guard orders; every layer has mutants; REF-1..3 tie TLA+ to the code per step, within the step bounds. |
 | The Prolog author read the code (ASM-SPEC). | Doc citations on every fact; a named independent reviewer. |
-| Kani is slow on `Vec`-heavy state: 7.5 h for the 89 harnesses, one at a time, with peaks up to 39 GB. | Fixed small shapes, step parts, per-loop unwinding (§6); plain mode runs in seconds; `kani` runs 29 groups in parallel, only when the Kani layer's inputs change. 36 harnesses need `KANI_RUNNER`; on the hosted runner they run on swap, unmeasured (§14, OQ-11). |
+| Kani is slow on `Vec`-heavy state: 7.5 h for the 89 harnesses, one at a time, with peaks up to 39 GB. | Fixed small shapes, step parts, per-loop unwinding (§6); plain mode runs in seconds; `kani` runs 29 groups in parallel, only when the Kani layer's inputs change. 36 harnesses peaked above 13 GB; on the hosted runner they run on swap, up to 4.3 times slower, and four did not finish in run 43469880167 (§14, OQ-11). |
 | Kani's bounds are small: 1 metric, 1 term, 2 recipes and 2 records per step. | Plain mode at larger shapes, Lean at every size, the traces at 256 records and ±1,000,000 (ASM-MODEL). |
 | Kani or CBMC is unsound for a construct the harnesses use. Two hazards were found in Kani 0.68.0. | Canary, covers and mutants; both hazards worked around and documented (`kani/RESULTS.md`, Tool issues), with a scan of every goto program for the first (ASM-TOOLS). |
 | TLC's 32-bit integers | Overflow aborts a run, so no run passes silently. Lean covers large values, and Kani's `h_energy` the core's energy over the whole value range. |
@@ -1075,7 +1101,7 @@ this project claims none; `run.sh` keeps unwinding assertions on.
 | OQ-8 | L-1b: confirm with upstream that a reservation that cured a violation is meant to be uncancellable. |
 | OQ-9 | Docs: update spec:39 and api:26 for the no-op acknowledgment, and api:34 for non-string results (NT-F4); state a minimum prepaid gas per method in api.md (none is given). Measured at the maximum-size state (§9.2, RES-1): `dispatch` needs at least 70 Tgas, `reconcile` 46 Tgas and the executor's `finish` 43 Tgas; 70 Tgas leaves under 1 Tgas spare for `dispatch`, so the documented figure needs headroom. |
 | OQ-10 | Who reviews the specs? |
-| OQ-11 | Kani in CI: which large runner? `kani` groups the 89 harnesses by measured peak (§14). 53 fit the 16 GB hosted runner in memory. 36 peaked above 13 GB (31 above 16 GB, up to 39 GB): they need `KANI_RUNNER` (at least 49 GB), or must be shown to finish on swap on the hosted runner, which no run has measured. |
+| OQ-11 | Kani in CI: swap or a large runner? `kani` groups the 89 harnesses by measured peak (§14). 53 fit the 16 GB hosted runner in memory. 36 peaked above 13 GB (31 above 16 GB, up to 39 GB). In run 43469880167, 32 of those 36 passed on the hosted runner, partly on swap, up to 4.3 times slower than on the Mac; the four with the largest SAT instances (72 to 226 million clauses) did not. The workflow now gives them the job's whole time and twice the swap. If they still do not finish, they need `KANI_RUNNER` (at least 49 GB). |
 
 ---
 
