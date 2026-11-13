@@ -1,0 +1,15 @@
+# killed-by: h_step_submit_tx
+# envelope: the requested recipe's own completion is not included
+--- a/crates/core/src/lib.rs
++++ b/crates/core/src/lib.rs
+@@ -208,9 +208,7 @@
+                 apply(&self.config.recipes[c.recipe as usize], c.units)?;
+             }
+         }
+-        if let Some((r, u)) = extra {
+-            apply(r, u)?;
+-        }
++        let _ = extra;
+         Ok((low, high))
+     }
+     fn check_bounds(

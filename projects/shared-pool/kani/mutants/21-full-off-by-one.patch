@@ -1,0 +1,13 @@
+# killed-by: h_full_256
+# candidate: a 257th record is admitted (>= became >)
+--- a/crates/core/src/lib.rs
++++ b/crates/core/src/lib.rs
+@@ -247,7 +247,7 @@
+         {
+             return Err(Error::SnapshotExpired);
+         }
+-        if self.records.len() >= MAX_RECORDS {
++        if self.records.len() > MAX_RECORDS {
+             return Err(Error::Full);
+         }
+         let r = self
