@@ -5,6 +5,15 @@ upstream_path = ""
 pinned_commit = "a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7"   # PR #1 head (feat/shared-pool-controls, 2026-11-12 UTC): "Address review: reconcile griefing, broken doc link, CI robustness". PR #1 merged (b9e994f); the pin is on upstream main. Verified: shared-pool-controls v1.0.0 (6f616160303e0376fc5e032837fcd566a344f66a, "Mark the contract as v1.0.0"), whose crates/core/src/lib.rs, crates/contract and crates/executor are byte-identical to this pin; kept, not re-pinned (strategy.md section 13). Upstream PR #4 (v1.1) is not verified here.
 last_reviewed = "2026-11-13"
 release_overflow_checks = true  # ASM-COMPILE: check-pin.sh fails unless upstream [profile.release] sets overflow-checks = true
+# The verified release is not the pin itself (strategy.md section 13):
+# check-pin.sh fetches verified_release_commit and fails unless every
+# identical_paths entry (relative to upstream_path) is the same git tree or
+# blob, mode included, at the pin and at that commit. Upstream has no tags;
+# 6f61616 is the commit "Mark the contract as v1.0.0", head of upstream PR #2
+# (merged), on main.
+verified_release = "v1.0.0"
+verified_release_commit = "6f616160303e0376fc5e032837fcd566a344f66a"
+identical_paths = ["crates/core/src/lib.rs", "crates/contract", "crates/executor"]
 
 # Status values, evidence vocabulary and ceilings: projects/near-approval/strategy.md section 12.
 # Status values: unverified | in-progress | verified | verified-with-assumptions | stale
