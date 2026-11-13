@@ -1,0 +1,312 @@
+#!/usr/bin/env python3
+"""Run shared-pool's large Kani harnesses and mutants on this machine (and record them).
+
+The jobs are the kani-large groups' harnesses and the kani-mutants-large
+mutants of .github/workflows/shared-pool.yml (measured peaks above 13 GB,
+which ubuntu-latest cannot hold in memory), each with its matrix timeout as
+KANI_TIMEOUT. Each job is kani/run.sh (`kani <harness>` or
+`mutants --kani 'NN-*'`) from an exact copy of the commit's Kani inputs
+(git archive of projects/shared-pool/kani and conformance/traces/core.txt,
+and of the source-mirror submodule at the commit's gitlink), one copy per
+lane, with its own KANI_LOG_DIR and KEEP_LOGS and KANI_DEFER_COVERS=1. At
+most --lanes jobs run at once, and only while their measured peaks
+(kani/RESULTS.md) sum to at most --budget-gb; the longest start first.
+Memory is sampled every 3 s: the run.sh process tree and its largest cbmc
+process. run.sh is used as it is; KANI_MAX_GB stays its default (40) unless
+set in the environment.
+
+usage: run-local.py [--out DIR] [--rev REV] [--lanes N] [--budget-gb GB]
+                    [--record] [--dry-run]
+  --out DIR      output (default kani/target/local-run/run-<UTC time>)
+  --rev REV      the commit to run (default HEAD)
+  --record       when every job passed, run record.py DIR (writes kani/local;
+                 then commit it)
+  --dry-run      print the jobs and exit
+
+Output, as record.py reads it: env.txt (commit, kani-tree, core-pin, tool
+versions, host, lanes, budget, start and end), jobs.json, progress.log
+(ends with ALL DONE), results.tsv (job kind lane start_utc secs rc verdict
+peak_tree_gb peak_cbmc_gb est_peak_gb est_secs; a harness's verdict is
+run.sh's result, a mutant's expect/plain/kani with "!" if run.sh flagged it
+UNEXPECTED), logs/<job>/ (stdout.txt, covers.tsv, the Kani and plain logs).
+About 4 hours for the 36 harnesses and 16 mutants on a 10-core, 64 GB Mac
+with the defaults. Needs Kani and its CBMC at tools/versions.env's versions
+(cargo install --locked kani-verifier --version <KANI>; cargo kani setup)
+and the source-mirror submodule (git submodule update --init
+projects/shared-pool/source-mirror).
+"""
+import argparse
+import datetime
+import json
+import os
+import platform
+import re
+import signal
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
+SP = "projects/shared-pool"
+CHECK = os.path.join(ROOT, "tools/scripts/check-kani-record.py")
+RECORD = os.path.join(HERE, "record.py")
+
+
+def sh(*args, **kw):
+    r = subprocess.run(list(args), capture_output=True, text=True, **kw)
+    if r.returncode != 0:
+        sys.exit("run-local.py: %s: exit %d: %s" % (" ".join(args), r.returncode, (r.stderr or r.stdout).strip()))
+    return r.stdout
+
+
+def now():
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def iso(t):
+    return t.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def host():
+    if sys.platform == "darwin":
+        cpu = sh("sysctl", "-n", "machdep.cpu.brand_string").strip()
+        n = sh("sysctl", "-n", "hw.ncpu").strip()
+        gb = int(sh("sysctl", "-n", "hw.memsize")) // 2 ** 30
+        return "%s %s cores %d GB, macOS %s" % (cpu, n, gb, platform.mac_ver()[0])
+    cpu = "?"
+    try:
+        with open("/proc/cpuinfo") as f:
+            cpu = next((l.split(":", 1)[1].strip() for l in f if l.startswith("model name")), "?")
+        with open("/proc/meminfo") as f:
+            gb = int(next(l.split()[1] for l in f if l.startswith("MemTotal:"))) // 2 ** 20
+    except OSError:
+        gb = 0
+    return "%s %d cores %d GB, %s %s" % (cpu, os.cpu_count() or 0, gb, platform.system(), platform.release())
+
+
+def jobs_from_workflow():
+    """kani-large's harnesses and kani-mutants-large's mutants, with measured estimates."""
+    meas = {}
+    try:
+        with open(os.path.join(ROOT, SP, "kani/RESULTS.md")) as f:
+            for m in re.finditer(r"^\| `(h_\w+)` \| (\S+) \| (\d+) \| ([\d.]+) \|", f.read(), re.M):
+                meas.setdefault(m.group(1), (int(m.group(3)), float(m.group(4))))
+    except OSError:
+        pass
+    jobs = []
+    for line in sh(sys.executable, "-I", CHECK, "matrix", "kani-large").splitlines():
+        group, gb, to = line.split("\t")
+        for h in group.split():
+            secs, peak = meas.get(h, (int(to) // 3, float(gb)))
+            jobs.append(dict(name=h, kind="harness", peak=peak, est=secs, timeout=int(to), args=["kani", h]))
+    for line in sh(sys.executable, "-I", CHECK, "matrix", "kani-mutants-large").splitlines():
+        mu, gb, to = line.split("\t")
+        jobs.append(dict(name="mutant-" + mu, kind="mutant", peak=float(gb), est=int(to) / 3, timeout=int(to),
+                         args=["mutants", "--kani", mu + "-*"]))
+    # Longest first; the scheduler takes the first job that fits the budget.
+    jobs.sort(key=lambda j: -j["est"])
+    return jobs
+
+
+def make_lane(lane, commit, core):
+    """An exact copy of the commit's Kani inputs at lane/."""
+    os.makedirs(lane)
+    a = subprocess.Popen(["git", "-C", ROOT, "archive", "--format=tar", commit, SP + "/kani",
+                          SP + "/conformance/traces/core.txt"], stdout=subprocess.PIPE)
+    subprocess.run(["tar", "-x", "-C", lane], stdin=a.stdout, check=True)
+    if a.wait() != 0:
+        sys.exit("run-local.py: git archive %s failed" % commit)
+    sm = os.path.join(lane, SP, "source-mirror")
+    os.makedirs(sm)
+    a = subprocess.Popen(["git", "-C", os.path.join(ROOT, SP, "source-mirror"), "archive", "--format=tar", core],
+                         stdout=subprocess.PIPE)
+    subprocess.run(["tar", "-x", "-C", sm], stdin=a.stdout, check=True)
+    if a.wait() != 0:
+        sys.exit("run-local.py: git archive of the source-mirror at %s failed" % core)
+
+
+def tree_rss(root):
+    """(tree KB, largest cbmc KB) for the process tree rooted at pid root."""
+    try:
+        out = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,rss=,comm="], capture_output=True, text=True).stdout
+    except OSError:
+        return 0, 0
+    kids, rss, comm = {}, {}, {}
+    for line in out.splitlines():
+        p = line.split(None, 3)
+        if len(p) < 4:
+            continue
+        pid, ppid, r = int(p[0]), int(p[1]), int(p[2])
+        kids.setdefault(ppid, []).append(pid)
+        rss[pid], comm[pid] = r, p[3]
+    tot, cb, stack = 0, 0, [root]
+    while stack:
+        p = stack.pop()
+        tot += rss.get(p, 0)
+        if os.path.basename(comm.get(p, "")).startswith("cbmc"):
+            cb = max(cb, rss.get(p, 0))
+        stack.extend(kids.get(p, []))
+    return tot, cb
+
+
+def verdict(job, so):
+    if job["kind"] == "harness":
+        m = re.search(r"^%s\s+(\S+)\s+(\d+)" % re.escape(job["name"]), so, re.M)
+        return m.group(1) if m else "NO-RESULT"
+    nn = job["name"].split("-", 1)[1]
+    m = re.search(r"^(%s-\S*)\s+(\S+)\s+(\S+)\s+(\S+)(.*)$" % re.escape(nn), so, re.M)
+    if not m:
+        return "NO-RESULT"
+    return "%s/%s/%s%s" % (m.group(2), m.group(3), m.group(4), "!" if "UNEXPECTED" in m.group(5) else "")
+
+
+def passed(job, v):
+    if job["kind"] == "harness":
+        return v == ("ok-FAILED" if job["name"] == "h_canary" else "ok")
+    return v in ("killed/killed/killed", "survive/survived/survived")
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--out")
+    ap.add_argument("--rev", default="HEAD")
+    ap.add_argument("--lanes", type=int, default=2)
+    ap.add_argument("--budget-gb", type=float, default=50.0)
+    ap.add_argument("--record", action="store_true")
+    ap.add_argument("--dry-run", action="store_true")
+    a = ap.parse_args()
+
+    commit = sh("git", "-C", ROOT, "rev-parse", "--verify", a.rev + "^{commit}").strip()
+    kani_tree = sh("git", "-C", ROOT, "rev-parse", commit + ":" + SP + "/kani").strip()
+    core = sh("git", "-C", ROOT, "rev-parse", commit + ":" + SP + "/source-mirror").strip()
+    versions = sh("git", "-C", ROOT, "show", commit + ":tools/versions.env")
+    kani_v = re.search(r"^KANI=(\S+)", versions, re.M).group(1)
+    cbmc_v = re.search(r"^CBMC=(\S+)", versions, re.M).group(1)
+    jobs = jobs_from_workflow()
+    if not jobs:
+        sys.exit("run-local.py: no kani-large or kani-mutants-large entries in the workflow")
+    if a.dry_run:
+        print("commit %s; %d jobs (KANI_TIMEOUT, measured peak GB, estimated s):" % (commit[:12], len(jobs)))
+        for j in jobs:
+            print("  %-28s %-8s %5d s  %5.1f GB  %5.0f s  run.sh %s" % (j["name"], j["kind"], j["timeout"], j["peak"],
+                                                                     j["est"], " ".join(j["args"])))
+        return 0
+    inputs = [l.split("\t")[0] for l in sh(sys.executable, "-I", CHECK, "fingerprint", commit).splitlines()]
+    if sh("git", "-C", ROOT, "diff", "--name-only", commit, "--",
+          *[n for n in inputs if ":" not in n and n != "fingerprint"] + ["tools/versions.env"]).strip():
+        print("run-local.py: note: the work tree's Kani inputs differ from %s; the run uses %s's" % (commit[:12],
+              commit[:12]), file=sys.stderr)
+
+    # Tools: the pinned Kani and its own CBMC (run.sh reads loop ids with it).
+    kani_line = sh("cargo", "kani", "--version").splitlines()[0].strip()
+    if not re.search(r"(^|\s)%s(\s|$)" % re.escape(kani_v), kani_line):
+        sys.exit("run-local.py: %r is not Kani %s (tools/versions.env)" % (kani_line, kani_v))
+    cbmc = os.environ.get("KANI_CBMC") or os.path.join(os.environ.get("KANI_HOME") or os.path.expanduser("~/.kani"),
+                                                       "kani-" + kani_v, "bin", "cbmc")
+    cbmc_line = sh(cbmc, "--version").strip()
+    if cbmc_line.split()[:1] != [cbmc_v]:
+        sys.exit("run-local.py: %s is %r, not CBMC %s" % (cbmc, cbmc_line, cbmc_v))
+    smr = os.path.join(ROOT, SP, "source-mirror")
+    if subprocess.run(["git", "-C", smr, "cat-file", "-e", core + "^{commit}"], capture_output=True).returncode:
+        sys.exit("run-local.py: the source-mirror submodule lacks %s: git submodule update --init %s/source-mirror"
+                 % (core, SP))
+
+    started = now()
+    out = os.path.abspath(a.out or os.path.join(ROOT, SP, "kani/target/local-run",
+                                                "run-" + started.strftime("%Y%m%dT%H%MZ")))
+    if os.path.exists(out):
+        sys.exit("run-local.py: %s exists" % out)
+    os.makedirs(os.path.join(out, "logs"))
+    lanes = ["lane%d" % i for i in range(1, a.lanes + 1)]
+    for lane in lanes:
+        make_lane(os.path.join(out, "lanes", lane), commit, core)
+    rustc = subprocess.run(["rustc", "--version"], capture_output=True, text=True,
+                           cwd=os.path.join(out, "lanes", lanes[0], SP, "kani")).stdout.strip()
+    with open(os.path.join(out, "env.txt"), "w") as f:
+        f.write("commit %s\nkani-tree %s\ncore-pin %s\nkani %s\nCBMC %s\ncbmc %s\nrustc %s\nhost %s\n"
+                "lanes %d\nbudget-gb %g\nkani-max-gb %s\nrunner projects/shared-pool/kani/local/run-local.py\n"
+                "started %s\n"
+                % (commit, kani_tree, core, kani_line, cbmc_v, cbmc_line, rustc or "?", host(), a.lanes,
+                   a.budget_gb, os.environ.get("KANI_MAX_GB") or "40 (run.sh's default)", iso(started)))
+    with open(os.path.join(out, "jobs.json"), "w") as f:
+        json.dump(jobs, f, indent=1)
+
+    def log(msg):
+        line = now().strftime("%H:%M:%SZ ") + msg
+        with open(os.path.join(out, "progress.log"), "a") as f:
+            f.write(line + "\n")
+        print(line, flush=True)
+
+    running, pending, ok = {}, list(jobs), True
+
+    def stop(signum, _frame):
+        for j in running.values():
+            try:
+                os.killpg(j["proc"].pid, signal.SIGKILL)
+            except OSError:
+                pass
+        log("stopped by signal %d; not complete" % signum)
+        sys.exit(1)
+
+    signal.signal(signal.SIGINT, stop)
+    signal.signal(signal.SIGTERM, stop)
+    log("%d jobs: %d harnesses, %d mutants; budget %g GB; output %s"
+        % (len(jobs), sum(j["kind"] == "harness" for j in jobs), sum(j["kind"] == "mutant" for j in jobs),
+           a.budget_gb, out))
+    results = open(os.path.join(out, "results.tsv"), "a")
+    while pending or running:
+        for lane in lanes:
+            if lane in running or not pending:
+                continue
+            used = sum(j["peak"] for j in running.values())
+            # Alone, a job always fits (h_wedge's peak may be most of the budget).
+            pick = next((j for j in pending if not running or used + j["peak"] <= a.budget_gb), None)
+            if pick is None:
+                break
+            pending.remove(pick)
+            d = os.path.join(out, "logs", pick["name"])
+            os.makedirs(d, exist_ok=True)
+            env = dict(os.environ, KANI_LOG_DIR=d, KANI_DEFER_COVERS="1", KANI_TIMEOUT=str(pick["timeout"]),
+                       KEEP_LOGS=d, KANI_CBMC=cbmc)
+            lane_dir = os.path.join(out, "lanes", lane)
+            so = open(os.path.join(d, "stdout.txt"), "w")
+            pick["proc"] = subprocess.Popen(["bash", os.path.join(lane_dir, SP, "kani/run.sh")] + pick["args"],
+                                            env=env, stdout=so, stderr=subprocess.STDOUT, cwd=lane_dir,
+                                            start_new_session=True)
+            pick["t0"], pick["start"] = time.monotonic(), iso(now())
+            pick["ptree"], pick["pcbmc"] = 0, 0
+            running[lane] = pick
+            log("start %s on %s (peak %s GB, est %.0f s, limit %d s)" % (pick["name"], lane, pick["peak"],
+                                                                         pick["est"], pick["timeout"]))
+        time.sleep(3)
+        for lane, j in list(running.items()):
+            t, c = tree_rss(j["proc"].pid)
+            j["ptree"], j["pcbmc"] = max(j["ptree"], t), max(j["pcbmc"], c)
+            rc = j["proc"].poll()
+            if rc is None:
+                continue
+            secs = time.monotonic() - j["t0"]
+            with open(os.path.join(out, "logs", j["name"], "stdout.txt")) as f:
+                v = verdict(j, f.read())
+            ok = ok and rc == 0 and passed(j, v)
+            row = [j["name"], j["kind"], lane, j["start"], "%.0f" % secs, str(rc), v, "%.1f" % (j["ptree"] / 1048576),
+                   "%.1f" % (j["pcbmc"] / 1048576), "%s" % j["peak"], "%.0f" % j["est"]]
+            results.write("\t".join(row) + "\n")
+            results.flush()
+            log("done  %s rc=%d %s %.0f s peak %.1f GB cbmc / %.1f GB tree"
+                % (j["name"], rc, v, secs, j["pcbmc"] / 1048576, j["ptree"] / 1048576))
+            del running[lane]
+    results.close()
+    with open(os.path.join(out, "env.txt"), "a") as f:
+        f.write("finished %s\n" % iso(now()))
+    log("ALL DONE")
+    print("run-local.py: %s; record it with: %s %s" % ("every job passed" if ok else "SOME JOBS FAILED (results.tsv)",
+                                                       os.path.relpath(RECORD), out))
+    if a.record and ok:
+        return subprocess.run([sys.executable, "-I", RECORD, out]).returncode
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
