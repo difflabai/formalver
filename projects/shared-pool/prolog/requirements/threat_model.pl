@@ -133,6 +133,8 @@ assumption_checked_by('ASM-ATOMIC', 'RT-REVERT'). assumption_checked_by('ASM-ATO
 assumption_checked_by('ASM-INTERLEAVE', 'RT-RACE').
 assumption_checked_by('ASM-TOOLS', 'canaries and mutants in every runner').
 assumption_checked_by('ASM-SPEC', 'status.toml [review] spec_reviewer (empty)').
-assumption_checked_by('ASM-LEAN-TLA', 'MC-2').     assumption_checked_by('ASM-LEAN-TLA', 'REF-5').
-assumption_checked_by('ASM-LEAN-TLA', 'REF-5L').   assumption_checked_by('ASM-LEAN-TLA', 'C-2').
+assumption_checked_by('ASM-LEAN-TLA', 'REF-1').    assumption_checked_by('ASM-LEAN-TLA', 'REF-2').
+assumption_checked_by('ASM-LEAN-TLA', 'REF-3').    assumption_checked_by('ASM-LEAN-TLA', 'MC-2').
+assumption_checked_by('ASM-LEAN-TLA', 'REF-5').    assumption_checked_by('ASM-LEAN-TLA', 'REF-5L').
+assumption_checked_by('ASM-LEAN-TLA', 'C-2').
 assumption_checked_by('ASM-COMPILE', 'tools/scripts/check-pin.sh').

@@ -18,7 +18,8 @@ the pool and, when no record is open, replaces the measured values
 
 | | |
 |---|---|
-| Pinned commit | `a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7`, head of PR #1 (branch `feat/shared-pool-controls`, 2026-11-12 UTC, "Address review: reconcile griefing, broken doc link, CI robustness"). **Not on upstream `main`.** Re-pin when the PR merges (§13). |
+| Pinned commit | `a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7`, head of PR #1 (branch `feat/shared-pool-controls`, 2026-11-12 UTC, "Address review: reconcile griefing, broken doc link, CI robustness"). PR #1 has merged (`b9e994f`), and the pin is on upstream `main`. |
+| Verified version | shared-pool-controls v1.0.0 (`6f61616`, "Mark the contract as v1.0.0"). `crates/core/src/lib.rs`, `crates/contract` and `crates/executor` are byte-identical between the pin and v1.0.0; the version number is only in the root `Cargo.toml`. The pin is kept (§13). Upstream PR #4 (v1.1) proposes fixes for the findings; v1.1 is not verified here. |
 | Crates | `pool-core` (`crates/core/src/lib.rs`, 492 lines): every decision; zero dependencies in the default build; `#![forbid(unsafe_code)]`; serde and borsh optional. `pool-contract`: a near-sdk 5.29.1 shell (predecessor → caller, block time in whole seconds, core errors → panics, a promise to the executor, a private callback, views). `pool-executor`: the synthetic executor (`execute`, `status`, `finish`, `confirm_not_executed`, fault modes). `crates/sandbox`: upstream's near-workspaces tests. |
 | Toolchain | Upstream `rust-toolchain.toml` 1.98. Release profile: codegen-units 1, `opt-level = "z"`, LTO, `panic = "abort"`, `overflow-checks = true` (ASM-COMPILE). |
 | TCB via `Cargo.lock` | near-sdk 5.29.1, borsh 1.8.1, serde_json 1.0.154, and their dependencies |
@@ -30,22 +31,23 @@ has no dependencies, so Kani can target the deployed logic itself. The
 shell is thin enough to cover with tests on the host, on the wasm, and on a
 local chain.
 
-**Status (2026-11-12, pin `a4bb5c3`).** TLA+, Lean, Prolog, the shell
-tests and the sandbox are built and pass locally. TLA+, Lean, Prolog and
-the shell tests replay the same 212 real-core traces (§10). The sandbox
-compares the chain with a host `pool-core` oracle. Kani is in progress;
-CI passes on GitHub (PR #31) for every layer but Kani, whose jobs are
-pending. Two high
-findings, F-1 and F-2, show that the settlement liveness the docs rely on
-does not hold. Nothing is verified: there is no spec reviewer, and the pin
-is an unmerged PR head. Next: land Kani, report the findings on PR #1, and
-re-pin when it merges (§13).
+**Status (2026-11-13, pin `a4bb5c3`, the contract code of v1.0.0).** Every
+layer is built and passes locally. Kani proves, within small bounds, the
+transition contracts, the step properties, INV preservation, the
+numerics, the reads and the refinement links REF-1..3 on the real
+`pool-core` (§6). TLA+, Lean, Prolog and the shell tests replay the same
+212 real-core traces (§10). The sandbox compares the chain with a host
+`pool-core` oracle. CI passes on GitHub (PR #31) for every layer but
+Kani, whose jobs are not in the workflow yet (§14). Two high findings, F-1
+and F-2, show that the settlement liveness the docs rely on does not hold.
+Nothing is verified: there is no spec reviewer (§12). Next: the Kani CI
+jobs and a CI check that the pin's contract code is v1.0.0's (§13).
 
 ---
 
 ## 1. What we establish
 
-For `pool-core` at the pin, and for the shell built as cargo-near builds
+For `pool-core` at the pin (v1.0.0's code), and for the shell built as cargo-near builds
 it (`--cfg near`, see NT-F1), under the assumptions of §5.14:
 
 | Claim | Properties |
@@ -61,7 +63,11 @@ the core, and checked on the real core's states over 212 traces. All but
 TX-0 are also model-checked in TLA+ within small bounds. The shell and
 runtime half of (b) (SH-*, RT-*) is tested, not proved, on the host, two
 wasm builds and a local chain. SH-5 holds only on the `--cfg near` build
-(NT-F1). Kani on the real code is pending. None is verified (§12).
+(NT-F1). Kani proves (a), (c), LIVE-1, TX-0 and AUTH-1 on the real
+`pool-core`, but only within its bounds: 1 metric, 1 term, 2 recipes and
+2 records per step, INV-WF to INV-DEP in every reachable state with at
+most 3 records, and INV-VER along 2-operation traces (§6). None is
+verified (§12).
 
 **Not established:** that a deployment runs this code (ASM-DEPLOY);
 that no code path transfers funds, deploys code or adds keys (source review
@@ -74,30 +80,31 @@ models the world (spec:31); receipt order across shards; optimality of
 
 | Tier | Layers | State | Result |
 |---|---|---|---|
-| **1. Code-level core** | Kani (§6) | being built | Planned: bounded proofs of every transition contract on the real `pool-core`, and REF-1..3 to tie each TLA+ step to the code. No result yet. |
+| **1. Code-level core** | Kani (§6) | built | Bounded proofs on the real `pool-core`: every transition contract, the step properties, INV preservation up to 3 records, the numerics, the reads, and REF-1..3, which tie each TLA+ step to the code. Small shapes and anchored values (§6). |
 | **2. Models and operational** | TLA+ (§17), Lean (§18), Prolog (§8), near-tests and sandbox (§9) | built | Every-size safety for the model (Lean). Liveness and its failures over all event sequences in small universes (TLC). An independent reading of the docs (Prolog). The shell on the host and two wasm builds. Runtime assumptions on a local chain. TLA+, Lean, Prolog and the shell are tied to the real core by the traces (§10); the sandbox by a host `pool-core` oracle (§9.2). |
 | **3. Unbounded on the code** | Verus (§7) | deferred | Removes the transcription gap between the Lean model and the code. |
 
-Finish Tier 1, then re-pin and get the spec review. Revisit Tier 3 after
+Tier 1 is done within its bounds. Next: Kani in CI and the spec review
+(§13). Revisit Tier 3 after
 upstream decides on F-1 and F-2, since a fix changes what a proof covers.
 
 ### Upstream's obligations (handoff:9-23)
 
 | Obligation | Properties | State |
 |---|---|---|
-| CFG | CFG-1, CFG-2 | Lean takes `validate` as its premise. Kani pending. |
-| NUM | NUM-1, NUM-2, ROB-1 | Kani pending. The ±1,000,000 boundary is tested by trace 206. |
-| AUTH | AUTH-1, SH-1, RT-PRED | Proved (model), tested. F-4: actor = executor is allowed. |
-| ADM | ADM-1, ADM-2, HARD-STEP, INV-HARD | Proved (model), model-checked. Kani pending. |
-| ATOM | TX-0, SH-5, RT-REVERT | Proved (model), tested. Messages lost on the documented build (NT-F1). |
-| STALE | STALE-1 | Proved (model). |
-| ASYNC | ASYNC-1, INV-LEDGER | Proved (model). RT-CALLBACK. |
-| TERM | TERM-1 | Proved (model). EX-4. |
-| DEP | DEP-1, INV-DEP | Proved (model). |
-| BIND | LIFE-1, SH-6, EX-2 | Proved (model), tested. |
+| CFG | CFG-1, CFG-2 | Bounded proof (Kani). Lean takes `validate` as its premise. |
+| NUM | NUM-1, NUM-2, ROB-1 | Bounded proof (Kani): `energy` over the whole value range and at 64 terms, `add` at ±1,000,000, no core panic within the step bounds. Trace 206 tests the boundary. |
+| AUTH | AUTH-1, SH-1, RT-PRED | Proved (model), bounded proof (Kani), tested. F-4: actor = executor is allowed. |
+| ADM | ADM-1, ADM-2, HARD-STEP, INV-HARD | Proved (model), model-checked, bounded proof (Kani). |
+| ATOM | TX-0, SH-5, RT-REVERT | Proved (model), bounded proof (Kani), tested. Messages lost on the documented build (NT-F1). |
+| STALE | STALE-1 | Proved (model), bounded proof (Kani). |
+| ASYNC | ASYNC-1, INV-LEDGER | Proved (model), bounded proof (Kani). RT-CALLBACK. |
+| TERM | TERM-1 | Proved (model), bounded proof (Kani). EX-4. |
+| DEP | DEP-1, INV-DEP | Proved (model), bounded proof (Kani). |
+| BIND | LIFE-1, SH-6, EX-2 | Proved (model), bounded proof (Kani), tested. |
 | STOCK, CASH | C-5 | Hold on the fixtures (bounded check). |
 | RISK | C-5 | Fails: F-2. |
-| Liveness (handoff:31) | LIVE-1, LIVE-2 | LIVE-1 (healthy, version < u32::MAX) proved (model). LIVE-2 fails: F-1, F-2. |
+| Liveness (handoff:31) | LIVE-1, LIVE-2 | LIVE-1 (healthy, version < u32::MAX) proved (model), and by Kani with up to 3 records. LIVE-2 fails: F-1, F-2. |
 
 ---
 
@@ -187,9 +194,14 @@ trace 207, F-4 trace 210 and F-6 trace 211 (§10.1). TLA+, Lean, Prolog
 and the shell (host and both wasm builds) replay each with equal results
 and post-states. F-5 needs version u32::MAX, 2³² − 1 effective
 transitions, out of reach of a trace (the highest trace version is 513);
-its evidence is a Prolog witness, a Lean mutant and the sandbox. F-1 and
+its evidence is a Prolog witness, a Lean mutant, the sandbox and Kani's
+`h_version_max_*` (from states at u32::MAX). F-1 and
 F-3 also run on a local chain (RT-WEDGE, RES-1), and part of F-5 on the
-wasm (RT-REVERT). The §4.2 findings are tests on the pinned builds.
+wasm (RT-REVERT). Kani witnesses each core finding on the real core
+within its bounds, in the sense §6 gives: F-1 by a trace from `Pool::new`,
+F-4 by a configuration, F-2, F-2b and F-5 from constructed states, F-3 by
+one cycle and the exact limit, F-6 by its mechanism. The §4.2 findings are
+tests on the pinned builds.
 Severity rates the harm to the property the docs promise.
 
 ### 4.1 Open: core
@@ -200,7 +212,7 @@ Severity rates the harm to the property the docs promise.
 | F-2 (high) | **Healthy-state release wedge in the supplied `risk` fixture.** No observe; every metric in bounds. A credit position is reserved (recipe 0, +20 on selloff loss). A selloff hedge (recipe 3, −10 per unit on completion) is admitted only because the position's +20 is counted: 60 + 20 − 70 ≥ 0 at 7 units. The hedge completes, and selloff loss is 10. The position's job never ran, so the executor honestly calls `settle(false)`. Releasing the +20 gives 10 − 20 < 0, so it fails `Bounds`. `cancel` and `observe` fail `Pending`. Only `settle(true)`, an attestation of work that did not happen, ends the record. The same check blocks `cancel` of a Reserved position. LIVE-1 is unaffected. <br>**F-2b** (found by the TLA+ layer): a release is not bounded by the envelope. After a sibling relied on the reservation, `values − reserve·units` can leave ±1,000,000. Then `cancel` (actor and owner) and the honest `settle(false)` fail `Arithmetic`. | **Trace 209** (`f2-risk`, 13 calls, the supplied `risk` config of trace 5, no observe): position × 1 (recipe 0, selloff loss 60 → 80), hedge × 8 (recipe 3, admitted with the position counted: 80 − 80 = 0), both dispatched and Active; the hedge settles completed (selloff loss 0). Then the executor's `settle(false)` for the position → `Bounds`, `cancel` by the owner and by the actor → `Pending`, `observe` → `Pending`; `settle(true)` → Ok, then `observe` → Ok. Equal under TLC, Lean, Prolog (MC-2) and the shell. <br>**Prolog:** `test_model` "F-2 witness" (position × 1, hedge × 7, hedge completed). C-5's release search finds 20 counterexamples in `risk` and none in `gpu`, `friday`, `inventory` or `hiring`. The first is `rel(p(0,1,3,7), release(0), other(reserved), via(cancel)) - err(bounds)`. MC-1 `reliance`: 150 release-blocked states with B = 0. <br>**TLA+:** TLA-LIVE-F2 (weak fairness of the honest `settle(false)` and of `cancel`); `MC_Liveness_F2Shape` shows that, in its small universe (`CreditHedgeConfig`), every LIVE-2 counterexample is this wedge. <br>**F-2b: trace 208** (`release-arith`, 13 calls), equal under TLC, Lean, Prolog and the shell. | spec:46: "In the supplied fixtures, physical availability and risk-credit timing prevent ordinary unsafe reliance on unexecuted work." spec:46 also says "resolve dependent work first", yet the dependent hedge is resolved and the release still fails. handoff:23 (RISK) is the related obligation, not contradicted. `div-F2-fixture-release`. |
 | F-3 (low) | **Lifetime slot exhaustion.** One actor fills all 256 lifetime records with free submit-and-cancel cycles. After that, `Full` is permanent for every actor. `observe` does not prune (spec:54), and nothing else does. | **Trace 207** (`full`, 515 calls): submit `ok` 256, cancel `ok` 256, then submit `full` 2 (another actor, also after an observe). TLC TraceCheck (it also kills TLA+ mutants 13 and 25), REF-5L, MC-2, near-tests `traces.rs` and `sh4`. Sandbox RES-1: submit #257 is rejected `Full`. | Not explicit. handoff:34: "256 lifetime records bound ordinary growth". |
 | F-4 (low) | **A principal can attest its own work.** `Config::validate` accepts a recipe whose actor is its executor, or the owner. That account can then submit, dispatch and settle its own work as completed. | **Trace 210** (`f4-self`, 8 calls): `validate` accepts recipe 0 with actor = executor = a1 and recipe 1 with actor = executor = the owner o. a1 submits, dispatches and settles record 0 completed, and o does the same with record 1; every call is Ok. Equal under TLC, Lean, Prolog and the shell. <br>**Prolog:** `test_model` "F-4 witness" (step/4). `extract.py` records `code_role_checks(validate, [])`. Code mutant c09 (validate rejects actor = executor) makes C-5 fail. | spec:64: "No worker can authorize its own acceptance through the wrapper". spec:50: "the independent operator". `amb-self-executor`. |
-| F-5 (low) | **Version saturation freezes every transition.** At version = u32::MAX, every transition fails `Arithmetic`, including settling in-flight records and `set_paused(false)`. Reaching it takes 2³² − 1 effective transitions. | **No trace:** reaching version u32::MAX takes 2³² − 1 effective transitions; the highest version in the traces is 513. <br>**Prolog:** `test_model` "F-5 witness" (step/4 from a paused state at version u32::MAX with record 0 Dispatched: `settle` both ways, `ack` and `set_paused(false)` fail `Arithmetic`, `observe` fails `Pending`). <br>**Lean:** mutant 04 (version overflow one too late) is killed by the proofs. <br>**TLA+:** no witness; `VerErr` transcribes the bump, but `MaxVersion` is 2³¹ − 1 and no run gets near it (§17.5). <br>**Sandbox:** RT-REVERT patches version = u32::MAX into the state: `set_paused` and `submit` fail, and storage is unchanged. | None. handoff:34 documents "Version overflow is an explicit rejection". The effect on in-flight records is not documented. |
+| F-5 (low) | **Version saturation freezes every transition.** At version = u32::MAX, every transition fails `Arithmetic`, including settling in-flight records and `set_paused(false)`. Reaching it takes 2³² − 1 effective transitions. | **No trace:** reaching version u32::MAX takes 2³² − 1 effective transitions; the highest version in the traces is 513. <br>**Prolog:** `test_model` "F-5 witness" (step/4 from a paused state at version u32::MAX with record 0 Dispatched: `settle` both ways, `ack` and `set_paused(false)` fail `Arithmetic`, `observe` fails `Pending`). <br>**Lean:** mutant 04 (version overflow one too late) is killed by the proofs. <br>**TLA+:** no witness; `VerErr` transcribes the bump, but `MaxVersion` is 2³¹ − 1 and no run gets near it (§17.5). <br>**Sandbox:** RT-REVERT patches version = u32::MAX into the state: `set_paused` and `submit` fail, and storage is unchanged. <br>**Kani:** `h_version_max_<op>`: from every INV state at version u32::MAX within the step bounds, every effective call of each kind fails `Arithmetic` and changes nothing. Reaching u32::MAX from `Pool::new` is not shown. | None. handoff:34 documents "Version overflow is an explicit rejection". The effect on in-flight records is not documented. |
 | F-6 (low) | **An open record blocks the only snapshot refresh.** With `max_age > 0`, one record open longer than `max_age` freezes the pool. `observe` needs every record terminal, so it fails `Pending`. `submit` and `dispatch` fail `SnapshotExpired` until the executor settles. | **Trace 211** (`f6-stale`, 12 calls): max_age 50, observed at 100; record 0 dispatched and Active. At now = 151, `submit` and `dispatch` fail `SnapshotExpired` and `observe` fails `Pending`; with the other record cancelled, `observe` still fails `Pending` while record 0 is open. Once the executor settles record 0, `observe` and then `submit` are Ok. Equal under TLC, Lean, Prolog and the shell. <br>**Prolog:** `test_model` "F-6 witness" on the risk fixture: max_age 300, observed at 100, one record in flight. At now = 401, `dispatch` and `submit` fail `SnapshotExpired`, and `observe` fails `Pending`. | Not explicit. spec:19, 37 and 54 state the two rules separately. |
 
 ### 4.2 Open: shell, build and runtime
@@ -275,18 +287,20 @@ surface (SH-11) check, and Kani bounded-proof. *Status* values:
 - `proved (model)`: a Lean theorem about the transcription, at every size.
 - `model-checked`: TLC or MC-1, within bounds. `tested`: on the real code.
 - `checked`: a Prolog consistency check, or SH-11's comparison of the
-  built wasm with `wasm-surface.expected`. `pending (Kani layer)`: no result
-  yet. `fails: F-n`: false, with a reproducer. No row is verified (§12).
+  built wasm with `wasm-surface.expected`. `bounded proof (Kani)`: a Kani
+  proof on the real core for every input within the harnesses' bounds
+  (§6), and nothing outside them. `fails: F-n`: false, with a reproducer.
+  No row is verified (§12).
 
 ### 5.1 Configuration and numerics
 
 | ID | Statement | Layer(s) | Evidence | Status |
 |---|---|---|---|---|
-| CFG-1 | `Pool::new` is Ok iff `validate` is Ok, and the initial state satisfies INV | kani, lean | Lean `inv_init` (`Valid cfg ⇒ Inv (init cfg now)`; strings not modelled); TLC TraceCheck on the configs the core accepted | partial: proved (model) without the string checks; Kani pending |
-| CFG-2 | `validate` ⇒ references in range, vectors of length n, prerequisites strictly earlier and distinct, values bounded | kani, lean | Lean takes these checks as the definition `Valid`; no theorem about the Rust | pending (Kani layer) |
-| NUM-1 | Valid config and bounded values ⇒ `energy_terms` and `energy` are Ok and exact | kani, lean | Lean computes exactly in `Int` and does not model overflow; TLC cannot represent large energies (§17.5) | pending (Kani layer) |
-| NUM-2 | `add` fails closed exactly when the exact result leaves ±1,000,000 | kani, lean | Trace 206: `arithmetic` from `add` at 999,990 + 15 and from the envelope at 1,000,005; TLA+ mutants 23 and 24 | pending (Kani layer); boundary tested |
-| ROB-1 | No core panic from any INV state, for any arguments | kani | Lean shows every index the guards read is in range (INV-WF), but does not model panics | pending (Kani layer) |
+| CFG-1 | `Pool::new` is Ok iff `validate` is Ok, and the initial state satisfies INV | kani, lean | Kani `h_init`, `h_validate`, `h_init_inv`, `h_init_inv_2` (a composition, §6); Lean `inv_init` (`Valid cfg ⇒ Inv (init cfg now)`; strings not modelled); TLC TraceCheck on the configs the core accepted | bounded proof (Kani, a composition); proved (model) without the string checks |
+| CFG-2 | `validate` ⇒ references in range, vectors of length n, prerequisites strictly earlier and distinct, values bounded | kani, lean | Kani `h_validate` (raw configurations, §6); Lean takes these checks as the definition `Valid`; no theorem about the Rust | bounded proof (Kani) |
+| NUM-1 | Valid config and bounded values ⇒ `energy_terms` and `energy` are Ok and exact | kani, lean | Kani `h_energy` (any value in ±1,000,000), `h_energy_exact`, `h_energy_max` (64 terms, 2.56·10^17 exact); Lean computes exactly in `Int` and does not model overflow; TLC cannot represent large energies (§17.5) | bounded proof (Kani) |
+| NUM-2 | `add` fails closed exactly when the exact result leaves ±1,000,000 | kani, lean | Kani `h_step_submit_tx`, `h_step_cancel_tx`, `h_step_settle_tx` (every `Arithmetic` exit of `add`, values at both extremes); Trace 206: `arithmetic` from `add` at 999,990 + 15 and from the envelope at 1,000,005; TLA+ mutants 23 and 24 | bounded proof (Kani); boundary tested |
+| ROB-1 | No core panic from any INV state, for any arguments | kani | Kani: every harness that calls the core (panic, overflow, bounds and unwinding checks); Lean shows every index the guards read is in range (INV-WF), but does not model panics | bounded proof (Kani) |
 
 ### 5.2 Transition contracts
 
@@ -295,32 +309,32 @@ code's order), the exact post-state, and the frame.
 
 | ID | Statement | Layer(s) | Evidence | Status |
 |---|---|---|---|---|
-| TX-0 | Every `Err` leaves the Pool unchanged | kani, tla, lean, prolog | Lean `stepProps` (every call, every state); TLC TraceCheck; MC-2 | proved (model); tested on 212 traces; Kani pending |
-| TX-SUBMIT | `submit`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | REF-5, REF-5L, MC-2 on every replayed submit; TLC `StepProperty` (time, capacity and unit guards, effect); C-2 guard order | tested on 212 traces; model-checked in part; Kani pending |
-| TX-DISPATCH | `dispatch`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | REF-5, REF-5L, MC-2; TLC `StepProperty`; C-2 | tested on 212 traces; model-checked in part; Kani pending |
-| TX-ACK | `acknowledge`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | REF-5, REF-5L, MC-2; C-2, C-3 | tested on 212 traces; Kani pending |
-| TX-CANCEL | `cancel`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | REF-5, REF-5L, MC-2; C-2 | tested on 212 traces; Kani pending |
-| TX-SETTLE | `settle`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | REF-5, REF-5L, MC-2; C-2 | tested on 212 traces; Kani pending |
-| TX-PAUSE | `set_paused`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | REF-5, REF-5L, MC-2; C-2 | tested on 212 traces; Kani pending |
-| TX-OBSERVE | `observe`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | REF-5, REF-5L, MC-2; C-2 | tested on 212 traces; Kani pending |
-| TX-NOOP | Idempotent Ok paths change nothing, version included | kani, tla, lean, prolog | Lean `stepProps`; TLC TraceCheck; MC-2 | proved (model); tested; Kani pending |
-| TX-VER | Every other Ok increments the version by exactly 1 | kani, tla, lean, prolog | Lean `stepProps`; TLC `StepProperty`; MC-2 | proved (model); model-checked; tested; Kani pending |
+| TX-0 | Every `Err` leaves the Pool unchanged | kani, tla, lean, prolog | Kani `h_step_<op>_tx`, `h_version_max_<op>`, `h_full_*`; Lean `stepProps` (every call, every state); TLC TraceCheck; MC-2 | proved (model); tested on 212 traces; bounded proof (Kani) |
+| TX-SUBMIT | `submit`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | Kani `h_step_submit_tx`, `_post`, `h_full_255`, `h_full_256`; REF-5, REF-5L, MC-2 on every replayed submit; TLC `StepProperty` (time, capacity and unit guards, effect); C-2 guard order | tested on 212 traces; model-checked in part; bounded proof (Kani) |
+| TX-DISPATCH | `dispatch`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | Kani `h_step_dispatch_tx`, `_post`; REF-5, REF-5L, MC-2; TLC `StepProperty`; C-2 | tested on 212 traces; model-checked in part; bounded proof (Kani) |
+| TX-ACK | `acknowledge`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | Kani `h_step_ack_tx`, `_post`; REF-5, REF-5L, MC-2; C-2, C-3 | tested on 212 traces; bounded proof (Kani) |
+| TX-CANCEL | `cancel`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | Kani `h_step_cancel_tx`, `_post`; REF-5, REF-5L, MC-2; C-2 | tested on 212 traces; bounded proof (Kani) |
+| TX-SETTLE | `settle`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | Kani `h_step_settle_tx`, `_post`; REF-5, REF-5L, MC-2; C-2 | tested on 212 traces; bounded proof (Kani) |
+| TX-PAUSE | `set_paused`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | Kani `h_step_pause_tx`, `_post`; REF-5, REF-5L, MC-2; C-2 | tested on 212 traces; bounded proof (Kani) |
+| TX-OBSERVE | `observe`: exact result in guard order, exact post-state, frame | kani, tla, lean, prolog | Kani `h_step_observe_tx`, `_post`; REF-5, REF-5L, MC-2; C-2 | tested on 212 traces; bounded proof (Kani) |
+| TX-NOOP | Idempotent Ok paths change nothing, version included | kani, tla, lean, prolog | Kani `h_step_<op>_tx`, `h_version_max_<op>`; Lean `stepProps`; TLC TraceCheck; MC-2 | proved (model); tested; bounded proof (Kani) |
+| TX-VER | Every other Ok increments the version by exactly 1 | kani, tla, lean, prolog | Kani `h_step_<op>_tx`, `h_version_max_<op>` (F-5); Lean `stepProps`; TLC `StepProperty`; MC-2 | proved (model); model-checked; tested; bounded proof (Kani) |
 
 ### 5.3 Step properties
 
 | ID | Statement | Layer(s) | Evidence | Status |
 |---|---|---|---|---|
-| AUTH-1 | Effective submit and dispatch ⇒ caller = actor; cancel ⇒ actor or owner; settle ⇒ executor; pause and observe ⇒ owner | kani, tla, lean, prolog | Lean `exec_auth` (every Ok, no-ops included); TLC `StepProperty`; MC-2 | proved (model); model-checked; tested; Kani pending. F-4: actor = executor is accepted |
-| STALE-1 | Submit Ok ⇒ request version = version; versions never repeat, so an accepted request cannot replay | kani, tla, lean, prolog | Lean `stale1_no_replay`, `version_mono_run`; TLC `StepProperty`; MC-2 | proved (model); model-checked; tested; Kani pending |
-| ADM-1 | Submit Ok ⇒ energy(post) ≤ energy(pre) | kani, tla, lean, prolog | Lean `stepProps`; TLC `StepProperty`; MC-2 | proved (model); model-checked; tested; Kani pending |
-| ADM-2 | Submit Ok in a violating state ⇒ energy(post + completion) < energy(pre) | kani, tla, lean, prolog | Lean `stepProps`; TLC `StepProperty`; MC-2 | proved (model); model-checked; tested; Kani pending |
-| HARD-STEP | Every Ok except observe: PV_i(post) ≤ PV_i(pre) for every metric | kani, tla, lean, prolog | Lean `stepProps`; TLC `StepProperty`; MC-2 | proved (model); model-checked; tested; Kani pending |
-| DEP-1 | Submit Ok ⇒ prerequisites met by Completed units | kani, tla, lean, prolog | Lean `dep1`; TLC `StepProperty`; MC-2 | proved (model); model-checked; tested; Kani pending |
-| LIFE-1 | Status graph Reserved → Dispatched or Cancelled, Dispatched → Active or Unknown, Unknown → Active, in flight → Completed or Cancelled; terminals absorbing; append-only; id, recipe, units and expiry immutable | kani, tla, lean, prolog | Lean `stepProps`; TLC `StepProperty`; C-3; MC-2 | proved (model); model-checked; tested; Kani pending |
-| ASYNC-1 | Acknowledge never changes values; Active and Unknown keep the reservation | kani, tla, lean, prolog | Lean `stepProps`; TLC `StepProperty`; MC-2; RT-CALLBACK | proved (model); model-checked; tested; Kani pending |
-| TERM-1 | The same terminal repeated is an Ok no-op; the opposite terminal is `InvalidState` (settle; cancel of a Completed record gives `Pending`, §4.3) | kani, tla, lean, prolog | Lean `term1`, `term1_cancel`; TLC invariant (error view); MC-2 | proved (model); model-checked; tested; Kani pending |
-| OBS-1 | Observe Ok ⇒ no open record, config unchanged | kani, tla, lean, prolog | Lean `obs1`; TLC `StepProperty`; MC-2 | proved (model); model-checked; tested; Kani pending |
-| PAUSE-1 | Paused ⇒ submit and dispatch have no effect; settle, ack, cancel and observe are unaffected | kani, tla, lean, prolog | Lean `pause1_blocks`, `pause1_transparent`; TLC `StepProperty` and the `WitStep_Paused*` witnesses; MC-2 | proved (model); model-checked; tested; Kani pending |
+| AUTH-1 | Effective submit and dispatch ⇒ caller = actor; cancel ⇒ actor or owner; settle ⇒ executor; pause and observe ⇒ owner | kani, tla, lean, prolog | Kani `h_step_<op>_tx`; Lean `exec_auth` (every Ok, no-ops included); TLC `StepProperty`; MC-2 | proved (model); model-checked; tested; bounded proof (Kani). F-4: actor = executor is accepted |
+| STALE-1 | Submit Ok ⇒ request version = version; versions never repeat, so an accepted request cannot replay | kani, tla, lean, prolog | Kani `h_step_submit_tx`, `h_bmc_from_init_s_submit` (no replay along 2-operation traces); Lean `stale1_no_replay`, `version_mono_run`; TLC `StepProperty`; MC-2 | proved (model); model-checked; tested; bounded proof (Kani) |
+| ADM-1 | Submit Ok ⇒ energy(post) ≤ energy(pre) | kani, tla, lean, prolog | Kani `h_step_submit_tx`; Lean `stepProps`; TLC `StepProperty`; MC-2 | proved (model); model-checked; tested; bounded proof (Kani) |
+| ADM-2 | Submit Ok in a violating state ⇒ energy(post + completion) < energy(pre) | kani, tla, lean, prolog | Kani `h_step_submit_tx`; Lean `stepProps`; TLC `StepProperty`; MC-2 | proved (model); model-checked; tested; bounded proof (Kani) |
+| HARD-STEP | Every Ok except observe: PV_i(post) ≤ PV_i(pre) for every metric | kani, tla, lean, prolog | Kani `h_step_<op>_post`; Lean `stepProps`; TLC `StepProperty`; MC-2 | proved (model); model-checked; tested; bounded proof (Kani) |
+| DEP-1 | Submit Ok ⇒ prerequisites met by Completed units | kani, tla, lean, prolog | Kani `h_step_submit_tx`; Lean `dep1`; TLC `StepProperty`; MC-2 | proved (model); model-checked; tested; bounded proof (Kani) |
+| LIFE-1 | Status graph Reserved → Dispatched or Cancelled, Dispatched → Active or Unknown, Unknown → Active, in flight → Completed or Cancelled; terminals absorbing; append-only; id, recipe, units and expiry immutable | kani, tla, lean, prolog | Kani `h_step_<op>_post`; Lean `stepProps`; TLC `StepProperty`; C-3; MC-2 | proved (model); model-checked; tested; bounded proof (Kani) |
+| ASYNC-1 | Acknowledge never changes values; Active and Unknown keep the reservation | kani, tla, lean, prolog | Kani `h_step_<op>_post`; Lean `stepProps`; TLC `StepProperty`; MC-2; RT-CALLBACK | proved (model); model-checked; tested; bounded proof (Kani) |
+| TERM-1 | The same terminal repeated is an Ok no-op; the opposite terminal is `InvalidState` (settle; cancel of a Completed record gives `Pending`, §4.3) | kani, tla, lean, prolog | Kani `h_step_<op>_post`; Lean `term1`, `term1_cancel`; TLC invariant (error view); MC-2 | proved (model); model-checked; tested; bounded proof (Kani) |
+| OBS-1 | Observe Ok ⇒ no open record, config unchanged | kani, tla, lean, prolog | Kani `h_step_observe_tx`; Lean `obs1`; TLC `StepProperty`; MC-2 | proved (model); model-checked; tested; bounded proof (Kani) |
+| PAUSE-1 | Paused ⇒ submit and dispatch have no effect; settle, ack, cancel and observe are unaffected | kani, tla, lean, prolog | Kani `h_step_<op>_tx`, `_post`; Lean `pause1_blocks`, `pause1_transparent`; TLC `StepProperty` and the `WitStep_Paused*` witnesses; MC-2 | proved (model); model-checked; tested; bounded proof (Kani) |
 
 ### 5.4 Invariants
 
@@ -329,26 +343,26 @@ with `inv_init`, `inv_step` and `reach_inv`.
 
 | ID | Statement | Layer(s) | Evidence | Status |
 |---|---|---|---|---|
-| INV-WF | Values have length n and are bounded; `records[j].id = j`; recipe in range; 1 ≤ units ≤ max_units; at most 256 records; config never changes | tla, lean, kani, prolog | Lean `reach_inv`; TLC MC_Safety and every trace state; MC-1, MC-2 | proved (model); model-checked; tested; Kani pending |
-| INV-LEDGER | values = base + Σ reservations of records since k0 not Cancelled + Σ completions of Completed records since k0 | tla, lean, kani, prolog | Lean `reach_inv`; TLC; MC-1, MC-2 | proved (model); model-checked; tested; Kani pending |
-| INV-HARD | The envelope over the open records is computable and EV_i ≤ B_i | tla, lean, kani, prolog | Lean `reach_inv`; TLC; MC-1, MC-2 | proved (model); model-checked; tested; Kani pending |
-| INV-HEALTHY | B = 0 ⇒ every subset of open completions lands in bounds | tla, lean, kani, prolog | Lean `healthy`; TLC; MC-1, MC-2 | proved (model); model-checked; tested; Kani pending |
-| INV-DEP | Every record's prerequisites are met by Completed records of lower index | tla, lean, kani, prolog | Lean `reach_inv`; TLC; MC-1, MC-2 | proved (model); model-checked; tested; Kani pending |
-| INV-VER | The version equals the number of effective transitions | tla, lean, kani, prolog | Lean `reach_inv`; TLC; MC-2 per edge | proved (model); model-checked; tested; Kani pending |
+| INV-WF | Values have length n and are bounded; `records[j].id = j`; recipe in range; 1 ≤ units ≤ max_units; at most 256 records; config never changes | tla, lean, kani, prolog | Lean `reach_inv`; TLC MC_Safety and every trace state; MC-1, MC-2; Kani induction: `h_init_inv*`, `h_step_<op>_inv`, `_inv_0`, `_inv_1`, `_inv_3` | proved (model); model-checked; tested; bounded proof (Kani, at most 3 records) |
+| INV-LEDGER | values = base + Σ reservations of records since k0 not Cancelled + Σ completions of Completed records since k0 | tla, lean, kani, prolog | Lean `reach_inv`; TLC; MC-1, MC-2; Kani induction: `h_init_inv*`, `h_step_<op>_inv`, `_inv_0`, `_inv_1`, `_inv_3` | proved (model); model-checked; tested; bounded proof (Kani, at most 3 records) |
+| INV-HARD | The envelope over the open records is computable and EV_i ≤ B_i | tla, lean, kani, prolog | Lean `reach_inv`; TLC; MC-1, MC-2; Kani induction: `h_init_inv*`, `h_step_<op>_inv`, `_inv_0`, `_inv_1`, `_inv_3` | proved (model); model-checked; tested; bounded proof (Kani, at most 3 records) |
+| INV-HEALTHY | B = 0 ⇒ every subset of open completions lands in bounds | tla, lean, kani, prolog | Lean `healthy`; TLC; MC-1, MC-2; Kani induction: `h_init_inv*`, `h_step_<op>_inv`, `_inv_0`, `_inv_1`, `_inv_3` | proved (model); model-checked; tested; bounded proof (Kani, at most 3 records) |
+| INV-DEP | Every record's prerequisites are met by Completed records of lower index | tla, lean, kani, prolog | Lean `reach_inv`; TLC; MC-1, MC-2; Kani induction: `h_init_inv*`, `h_step_<op>_inv`, `_inv_0`, `_inv_1`, `_inv_3` | proved (model); model-checked; tested; bounded proof (Kani, at most 3 records) |
+| INV-VER | The version equals the number of effective transitions | tla, lean, kani, prolog | Lean `reach_inv`; TLC; MC-2 per edge; Kani `h_bmc_from_init_*` (2-operation traces from `Pool::new`) | proved (model); model-checked; tested; bounded proof (Kani, 2-operation traces) |
 
 ### 5.5 Reads
 
 | ID | Statement | Layer(s) | Evidence | Status |
 |---|---|---|---|---|
-| RD-PREVIEW | `preview.allowed` ⇔ `candidate` Ok; allowed and version < u32::MAX ⇒ submit Ok; no mutation, no panic | kani, near-tests, prolog | Prolog `test_reads` (COV-2): the real core's `preview` (allowed, reason, candidate, energies) on 36,797 requests at 1,246 trace states (`reads.txt`) equals the model's; the generator checks that `submit` agrees with each of those previews on the real core; Prolog `preview_allowed` over a request grid (model); near-tests: the shell's `preview` equals the core's after every SH-8 host call (the shell half) | partial: tested (shell half; core half by differential against the model); Kani pending |
-| RD-BEST | `best_quantity` is sound and minimal as documented | kani, prolog | Prolog `test_reads` (COV-2): the real core's `best_quantity` on the same 36,797 requests equals the model's `best_quantity/4`; Prolog `best_quantity` against brute force on small cases (model) | partial: tested by differential against the model; Kani pending |
+| RD-PREVIEW | `preview.allowed` ⇔ `candidate` Ok; allowed and version < u32::MAX ⇒ submit Ok; no mutation, no panic | kani, near-tests, prolog | Kani `h_preview`, `h_preview_post`; Prolog `test_reads` (COV-2): the real core's `preview` (allowed, reason, candidate, energies) on 36,797 requests at 1,246 trace states (`reads.txt`) equals the model's; the generator checks that `submit` agrees with each of those previews on the real core; Prolog `preview_allowed` over a request grid (model); near-tests: the shell's `preview` equals the core's after every SH-8 host call (the shell half) | bounded proof (Kani, core half); tested (shell half; core half also by differential against the model) |
+| RD-BEST | `best_quantity` is sound and minimal as documented | kani, prolog | Kani `h_best` with `h_preview`, `h_step_submit_*` and `h_energy` (a composition, §6); Prolog `test_reads` (COV-2): the real core's `best_quantity` on the same 36,797 requests equals the model's `best_quantity/4`; Prolog `best_quantity` against brute force on small cases (model) | bounded proof (Kani, a composition); tested by differential against the model |
 
 ### 5.6 Liveness
 
 | ID | Statement | Layer(s) | Evidence | Status |
 |---|---|---|---|---|
-| LIVE-1 | INV, B = 0 and version < u32::MAX ⇒ `settle(executor, id, true)` is Ok for every Dispatched, Active or Unknown record | lean, tla, prolog | Lean `live1` at every size; canary `Live1NoPremise.lean` fails to compile; TLC invariant in MC_Safety; Prolog on every trace state | proved (model); model-checked; tested |
-| LIVE-2 | Every dispatched record eventually becomes terminal under executor fairness | tla, prolog | TLA-LIVE-F1 and TLA-LIVE-F2 violated; TLA-LIVE-1 holds on the completion path; MC-1 (dead records in `wedge`, release-blocked in `reliance`, none in `healthy`); traces 0 (F-1) and 209 (F-2) on the real core; RT-WEDGE | fails: F-1, F-2 |
+| LIVE-1 | INV, B = 0 and version < u32::MAX ⇒ `settle(executor, id, true)` is Ok for every Dispatched, Active or Unknown record | lean, tla, prolog | Lean `live1` at every size; canary `Live1NoPremise.lean` fails to compile; TLC invariant in MC_Safety; Prolog on every trace state; Kani `h_live1` (3 records) | proved (model); model-checked; tested; bounded proof (Kani, 3 records) |
+| LIVE-2 | Every dispatched record eventually becomes terminal under executor fairness | tla, prolog | TLA-LIVE-F1 and TLA-LIVE-F2 violated; TLA-LIVE-1 holds on the completion path; MC-1 (dead records in `wedge`, release-blocked in `reliance`, none in `healthy`); traces 0 (F-1) and 209 (F-2) on the real core; RT-WEDGE; Kani `h_wedge` reaches F-1 from `Pool::new` | fails: F-1, F-2 |
 
 ### 5.7 Contract shell
 
@@ -433,9 +447,9 @@ Every row ran on both builds (§9.2).
 
 | ID | Statement | Layer(s) | Evidence | Status |
 |---|---|---|---|---|
-| REF-1 | Guard exactness: the core's error is the TLA+ error operator's, so Ok exactly when the action is enabled | kani | `h_ref_*` (planned, §17.2) | pending (Kani layer) |
-| REF-2 | Effect exactness: on Ok, the abstraction of the post-state is the TLA+ action's post-state | kani | `h_ref_*` (planned) | pending (Kani layer) |
-| REF-3 | Rejected and idempotent calls stutter in the model | kani | `h_ref_*` (planned) | pending (Kani layer) |
+| REF-1 | Guard exactness: the core's error is the TLA+ error operator's, so Ok exactly when the action is enabled | kani | Kani `h_ref_<op>` (7) against `tla.rs`, a hand transcription of `SharedPool.tla`; 46 `ref` covers; plain mode on the 212 traces (8,804 calls); mutant 31 (§17.2) | bounded proof (Kani, step bounds) |
+| REF-2 | Effect exactness: on Ok, the abstraction of the post-state is the TLA+ action's post-state | kani | Kani `h_ref_<op>` (7), as REF-1 | bounded proof (Kani, step bounds) |
+| REF-3 | Rejected and idempotent calls stutter in the model | kani | Kani `h_ref_<op>` (7), as REF-1 | bounded proof (Kani, step bounds) |
 
 ### 5.14 Assumptions
 
@@ -452,32 +466,127 @@ The levels are those of `threat_model.pl`: high, med, low, or policy.
 | ASM-EXEC | The executor is honest: `settle(false)` only on definitive nonexecution | assumption | none; F-2: the honest report is the one that fails | policy |
 | ASM-OWNER | Observations are true | assumption | none | policy |
 | ASM-DEPLOY | No code replacement; the deployment lock is out of scope | assumption | none; NT-F3: the import surface cannot rule out an escape hatch | policy |
-| ASM-TOOLS | Scryer, TLC, Lean, Kani and the extractors are sound for what is used | assumption | canaries, witnesses and mutants in every runner; the Lean axiom audit | trusted (med) |
+| ASM-TOOLS | Scryer, TLC, Lean, Kani and the extractors are sound for what is used | assumption | canaries, witnesses and mutants in every runner; the Lean axiom audit; Kani: `h_canary` fails as required, 164 covers, 30 mutants killed; two Kani 0.68.0 hazards found and worked around (§6) | trusted (med) |
 | ASM-SPEC | The specs, and the Prolog transcription of the docs, mean what we intend | assumption | `[review] spec_reviewer` (empty); the Prolog author had read the code (§8) | open: no reviewer (low) |
-| ASM-MODEL | The small scopes are representative: Kani's bounds, TLC's universes and 32-bit integers, MC-1's universes | assumption | Lean at every size (model); traces at 256 records and ±1,000,000 | trusted (med) |
-| ASM-LEAN-TLA | The Lean and TLA+ models transcribe the code | assumption | REF-5, REF-5L, MC-2, C-2; REF-1..3 pending | trusted (med); tested on 212 traces |
+| ASM-MODEL | The small scopes are representative: Kani's bounds, TLC's universes and 32-bit integers, MC-1's universes | assumption | Lean at every size (model); traces at 256 records and ±1,000,000; Kani's bounds, stated per harness (§6), with energy over the whole value range | trusted (med) |
+| ASM-LEAN-TLA | The Lean and TLA+ models transcribe the code | assumption | REF-1..3 (TLA+, Kani, within the step bounds), REF-5, REF-5L, MC-2, C-2 | trusted (med); tested on 212 traces; bounded proof per step for TLA+ (REF-1..3) |
 | ASM-COMPILE | `overflow-checks = true` in the release profile | assumption | `tools/scripts/check-pin.sh` (`release_overflow_checks = true`) | trusted (high); checked |
 
 ---
 
 ## 6. Kani on the real core
 
-<!-- KANI: filled when the Kani layer lands -->
+Results, bounds, deviations and run log: `kani/RESULTS.md`. Kani 0.68.0
+with CBMC 6.11.0, on the pin (v1.0.0's code). Runs A to N, 2026-11-12 and
+2026-11-13, one harness at a time on a shared 10-core, 64 GB macOS arm64
+machine.
 
-**Plan.** `projects/shared-pool/kani/` is a standalone crate whose only
-dependency is `pool-core` from the mirror (Kani 0.68.0, CBMC 6.11.0).
-Harness bodies are dual-mode, as in near-approval §6.1. Under Kani they
-are symbolic (`kani::any`, `assume`), which is the proof. In plain
-`cargo test` they run on random inputs: not a proof, but it takes seconds
-and gates CI without Kani. There is one harness per transition contract
-(TX-SUBMIT to TX-OBSERVE), checking TX-0, TX-NOOP, TX-VER and the step
-properties on the same step. CFG, NUM and ROB harnesses cover `validate`,
-`add` and `energy`; RD harnesses cover `preview` and `best_quantity`.
-Every outcome has a cover that must be SATISFIED, the F-1 wedge included.
-`h_canary` asserts a false property and must FAIL. Core mutants must be
-killed under Kani and in plain mode. REF-1..3 reuse the step harnesses to
-tie each TLA+ step to the real core (§17.2). Bounds, run times and results
-will go in `kani/RESULTS.md`.
+**Design.** `projects/shared-pool/kani/` is a standalone crate whose only
+dependency is `pool-core` from the mirror, with `default-features = false`.
+Kani checks the code that is deployed, not a transcription. `src/spec.rs`
+is an executable specification written from the brief, not from the code:
+each call's exact result in guard order, its exact post-state and frame,
+`envelope`, `energy`, `validate`, and the invariants with their ghost
+(`base`, `k0`, effective steps). Harness bodies are dual-mode, as in
+near-approval §6.1: symbolic under Kani, which is the proof, and random in
+plain `cargo test --release`, which is a test that takes seconds. Each
+step harness is four CBMC runs, so that each fits in memory: `_tx` (exact
+result, TX-0, TX-NOOP, TX-VER), `_post` (exact post-state and the step
+properties), `_inv` (INV preservation) and `_cov` (the covers).
+`src/tla.rs` transcribes `tla/SharedPool.tla` for REF-1..3 (§17.2).
+
+**Results.** 89 of 89 harnesses as required: 88 `ok`, and `h_canary`
+FAILED on its own assertion only. 164 of 164 covers SATISFIED, each in
+some harness of its family; they include every exit of every step and the
+findings. Plain mode: 27 of 27 tests. Mutants: 31 (30 of the core, one of
+`tla.rs`); the 30 that must be killed fail plain mode and the Kani harness
+each names, and mutant 20, which is equivalent, survives both. No property
+failed: within the bounds the code agrees with the specification on every
+result, post-state and read. Kani found no new defect. `run.sh all` was
+not run end to end in one invocation (its Kani part is about 7.5 hours);
+each result is the harness's last run on the final sources.
+
+| Group | Harnesses | Shows |
+|---|---|---|
+| Configuration | `h_validate`, `h_init`, `h_init_inv`, `h_init_inv_2` | CFG-2: `validate` equals the specification on raw configurations. CFG-1, as a composition: `new` is Ok iff `validate` is, and its pool satisfies INV. F-4. |
+| Numerics | `h_energy`, `h_energy_exact`, `h_energy_max` | NUM-1: `energy_terms` and `energy` are Ok on bounded values and exact (64 terms: 2.56·10^17) |
+| Steps | `h_step_<op>_{tx,post,inv,cov}` (28) | TX-*, NUM-2, ROB-1 and the §5.3 step properties from 2-record states; INV preserved |
+| Induction | `h_step_<op>_inv_{0,1,3}` (21) | INV preserved from 0, 1 and 3 records as well |
+| Traces | `h_bmc_from_init_po`, `h_bmc_from_init_s_<op>` (8) | Exact post-states along 2-operation traces from `Pool::new`; INV-VER; STALE-1's no-replay |
+| Limits | `h_version_max_<op>` (7), `h_full_255`, `h_full_256`, `h_slot_cycle_0`, `h_slot_cycle_2` | TX-VER and TX-NOOP at u32::MAX (F-5); `Full` exactly from 256 records; F-3's submit, cancel, submit cycle |
+| Reads | `h_preview`, `h_preview_post`, `h_best` | RD-PREVIEW; RD-BEST as a composition with `h_preview`, `h_step_submit_*` and `h_energy` |
+| Liveness, findings | `h_live1`, `h_wedge`, `h_wedge_healthy` | LIVE-1 with up to two other open records; F-1 from `Pool::new`; F-2 from healthy INV states |
+| Refinement | `h_ref_<op>` (7) | REF-1..3 (§17.2) |
+| Canary | `h_canary` | Asserts that no submit is ever accepted; must FAIL |
+
+**Bounds.** Every result holds for every input within these bounds, and
+says nothing outside them.
+- **Steps, REF-1..3, `h_preview`, `h_version_max_*`:** 1 metric, 1 term,
+  2 recipes (recipe 1 may require recipe 0), and an INV pre-state with
+  exactly 2 records in any statuses. Values, bounds and targets anchored
+  at −1,000,000, 0 and 1,000,000, each ±4; deltas −3..3; `max_units` 1..3;
+  weights 1, 2 or 1,000. Accounts `o_`, `a1`, `x1` and `z_` in every role
+  and as every caller. Times, versions, expiries and the paused flag free.
+  Arguments the code only compares (recipe, units, ids) narrow.
+- **INV:** true initially and preserved from exactly 0, 1, 2 and 3
+  records, so INV-WF to INV-DEP hold in every reachable state with at most
+  3 records. INV-VER only along 2-operation traces. `h_live1`: 3 records.
+- **`h_energy`:** 2 metrics, 2 terms, any value in ±1,000,000, any weight.
+  `h_energy_max`: 64 terms, concrete.
+- **`h_validate`, `h_init`:** raw configurations of up to 2 metrics, 2
+  terms, 3 recipes and 2 requirements per recipe, strings of 0 or 2 bytes,
+  each field in range, at an edge or out of range.
+- **`h_full_*`:** 255 and 256 Cancelled records.
+- **Runner:** flags `--no-memory-safety-checks --no-assertion-reach-checks
+  -Z stubbing`, unwinding assertions on; 1,800 s per harness (7,200 s for
+  `h_step_*_inv_3`); memory cap 40 GB. Peaks reached 39.0 GB (`h_wedge`),
+  and 33 harnesses peaked above 14 GB. The harness times sum to 26,921 s
+  (7.5 h).
+
+**Deviations.** `RESULTS.md` lists 26 deviations from the plan. All but
+two came from CBMC running out of memory or time. None weakens an
+assertion: each narrows the inputs (stated in the bounds), replaces a
+library function by a model that can only make a harness fail, rewrites a
+specification function into an equal one, or splits a property into
+harnesses whose conclusions combine. The main ones are a fixed-capacity
+model of `Vec::with_capacity_in` and `Vec::reserve` (1); fixed shapes and
+record counts (7); PAUSE-1 for the transparent operations at the
+specification level (18); fixed roles for F-1, and INV states for F-2
+(19); traces rebuilt with constant shapes after each operation (20);
+`h_full_255`'s records as one constant array (21); and a free `validate`
+in `h_init` and free `candidate` and `energy` in `h_best`, each pinned
+down by other harnesses (23, 24).
+
+**Findings on the real core.** Each core finding has a cover that must be
+SATISFIED, but they show different things. F-1: a trace from `Pool::new`
+(`h_wedge`). F-4: a configuration that `validate` accepts (`h_validate`).
+F-2, F-2b and F-5: from constructed states (`h_wedge_healthy`, the cancel
+and settle covers, `h_version_max_*`); Kani does not show that those
+states are reachable from `Pool::new`. F-3: one submit, cancel, submit
+cycle from `Pool::new` and from quiet 2-record states, and the exact limit
+at 255 and 256 records; not the 256 cycles as one trace. F-6: its guards
+fire; the scenario as a whole is not reached.
+
+**Tool issues** (Kani 0.68.0). Two soundness hazards were found and worked
+around. A static that a harness writes can share storage with a constant
+of equal bytes: `h_best`'s stub changed `RawVec`'s zero capacity, and the
+harness failed. The models' statics now carry a distinct tag. A scan of
+every harness's goto program for named statics read outside their own
+functions found no other case. A reference to a field of a local array of structs, at an
+index CBMC does not fold, read unconstrained values in the function it
+was passed to, and three `h_ref_*` harnesses failed. `tla.rs`'s lookups
+now return copies. A third issue is harmless: with `--stop-on-fail`,
+Kani's JSON parser panics, so the mutant runs read CBMC's text output.
+
+**What is not shown.** Steps over more metrics, terms or recipes, or from
+4 or more records (other than a submit at 255 or 256 Cancelled records);
+values strictly between the anchors and the extremes, outside energy; the
+reachability of F-2, F-2b, F-3 and F-5 from `Pool::new`; RD-BEST and CFG-1
+other than as compositions; LIVE-2 (TLA+'s); REF-1..3 outside the step
+bounds, and the agreement of `tla.rs` with the `.tla` other than on the
+traces; memory safety of std (the core forbids `unsafe`); the shell, the
+executor and NEAR (§9). Plain mode, the traces and Lean at every size
+cover parts of this, as tests or for the model.
 
 ---
 
@@ -514,9 +623,9 @@ equivalence harness each. Lemmas for INV-HARD and ADM-2 go over
 `Seq<int>`. That is at least near-approval's path A (8-13 days), likely
 more for the arithmetic.
 
-**Revisit** after PR #1 merges, upstream decides on F-1 and F-2, and Kani
-is green, and only if "formally verified" will be claimed for the code
-rather than the model.
+**Revisit** after upstream decides on F-1 and F-2 (PR #4, v1.1, proposes
+fixes; not verified here), and only if "formally verified" will be
+claimed for the code rather than the model.
 
 ---
 
@@ -751,11 +860,14 @@ a `preview`. Prolog `test_reads` compares every line with the model (§8).
 ### 10.2 What the traces do not establish
 
 - **Equivalence.** 8,804 equal calls are evidence that the models
-  transcribe the code, not a proof (ASM-LEAN-TLA). REF-1..3 (Kani,
-  pending) will add a bounded proof per step.
+  transcribe the code, not a proof (ASM-LEAN-TLA). REF-1..3 (Kani, §17.2)
+  add a bounded proof per step for TLA+, within the step bounds; Lean and
+  Prolog have only the traces.
 - **Exits no trace reaches:** the version-overflow bump (the highest state
   version is 513); `settle(true)`'s add and envelope `Arithmetic`;
-  submit's recovery add; release's envelope `Arithmetic`.
+  submit's recovery add; release's envelope `Arithmetic`. Kani's `_tx`
+  parts assert the exact result of every exit, these included, within the
+  step bounds (§6).
 - **Not told apart:** exits of one kind (submit's two `Energy` exits).
   Of the core findings only F-5 has no trace (the version-overflow bump
   above).
@@ -767,7 +879,8 @@ a `preview`. Prolog `test_reads` compares every line with the model (§8).
 |---|---|
 | docs ↔ code facts | C-1..C-4 (`extract.py`) |
 | docs ↔ TLA+ guard order and edges | C-2, C-3 |
-| Prolog `step/4`, TLA+, Lean ↔ real core | MC-2, REF-5, REF-5L (traces); REF-1..3 for TLA+ (Kani, pending) |
+| brief ↔ real core | Kani: `spec.rs`, written from the brief, equals the core within the bounds (§6) |
+| Prolog `step/4`, TLA+, Lean ↔ real core | MC-2, REF-5, REF-5L (traces); REF-1..3 for TLA+ (Kani, within the step bounds) |
 | Prolog reads ↔ real core `preview`, `best_quantity` | COV-2 (`reads.txt`, `test_reads`) |
 | Lean guard lists ↔ TLA+ `GuardOrder` | LEAN-GUARD, compared by hand |
 | real core ↔ shell (host, both wasm builds) | SH-8 |
@@ -796,7 +909,7 @@ formalver/
     ├── strategy.md  status.toml  wasm-surface.expected
     ├── source-mirror/                   # submodule → shared-pool-controls @ pinned_commit
     ├── conformance/{src,traces}/        # generator; traces/core.txt checked in
-    ├── kani/                            # §6, being built
+    ├── kani/{src,mutants}/              # §6; run.sh, RESULTS.md
     ├── tla/                             # §17; *.tla, *.cfg, mutants/, run.sh, trace2tla.py
     ├── lean/{PoolLean,canary,mutants}/  # §18; run.sh
     ├── prolog/{requirements,model,verification,extracted,tests,mutants}/  # §8
@@ -818,13 +931,13 @@ Specific to this project:
 | Topic | Convention |
 |---|---|
 | `release_overflow_checks = true` | In `[project]`. `check-pin.sh` fails unless upstream keeps `overflow-checks = true` (ASM-COMPILE). |
-| Unmerged pin | While `pinned_commit` is not on upstream `main`, no property goes past `in-progress`. The `pinned_commit` comment says it is a PR head. |
+| Pin and version | `pinned_commit` is PR #1's head, on upstream `main` since PR #1 merged. The `pinned_commit` comment names the verified version, v1.0.0 (`6f61616`), whose `crates/core/src/lib.rs`, `crates/contract` and `crates/executor` are byte-identical to the pin (§13). |
 | Properties | The 83 non-ASM rows of §5, under `[modules.<m>.properties]`, one module per §5 subsection: `config_numerics` (§5.1), `transitions` (§5.2), `step_properties` (§5.3), `invariants` (§5.4), `reads` (§5.5), `liveness` (§5.6), `contract_shell` (§5.7), `executor` (§5.8), `runtime` (§5.9), `requirements` (§5.10), `tla_model` (§5.11), `lean_model` (§5.12) and `kani_refinement` (§5.13). IDs equal `traceability.pl`'s. `layer` is the first layer of the row's *Layer(s)* cell. `cross` holds the row's other layers, plus any other layer whose files carry the ID's `PROP:` tag. |
-| Kani pending | Every property with `layer = "kani"` stays `unverified` until the Kani layer lands (§6), even where TLA+, Lean or Prolog already check it. Those results are in `cross` and `harness`. The §5.4 invariants list `tla` first, so TLC is their primary layer and they are `in-progress`. |
+| Kani rows | Every property with `layer = "kani"` carries the Kani result (§6): `in-progress` (no spec reviewer, and Kani's ceiling is `verified-with-assumptions`), `bounded-proof` evidence, the harnesses first in `harness`, and the bounds in `kani_bound`. The other layers' results stay in `cross` and `harness`. What Kani does not show is not claimed for it: LIVE-2, and the reachability of F-2, F-2b, F-3 and F-5 from `Pool::new`. The §5.4 invariants list `tla` first, so TLC is their primary layer; their Kani induction is in `harness` and `kani_bound`, as is LIVE-1's `h_live1`. |
 | Layer names | `near-tests/` carries `unit` (`shell.rs`, `executor.rs`, `wedge.rs`) and `difftest` (`store_diff.rs`, `traces.rs`). The surface check is `wasm-check`. The conformance generator is not a layer: each replay is recorded under the layer that runs it (REF-5 `tla`, REF-5L `lean`, MC-2 `prolog`, SH-8 `difftest`). REF-5 is `model-check`, a TLC run. REF-5L is a replay, test-class evidence (§5.12 says tested), recorded as `model-check` because `lean` allows no `test`; its `harness` says so. |
 | False properties | LIVE-2 stays `unverified` with `finding = "F-1, F-2"`. SH-5 is `in-progress` with `finding = "NT-F1"`: it holds on the `--cfg near` build that §1 scopes, and is false on `scripts/build.sh`. Every row whose §5 Statement or Status cell names a finding carries `finding` too: the witnesses below, and the caveats on AUTH-1, SH-3 and SH-10. status-lint ignores the key; it is for readers. |
 | Finding witnesses | TLA-LIVE-F1, TLA-LIVE-F2, LEAN-WIT, RT-WEDGE and C-5's known findings pass while their finding reproduces. When upstream fixes one, its witness fails as stale. Invert it into the property it guarded; do not delete it. |
-| `[assumptions.<ID>]` | The 14 rows of §5.14. `statement` is §5.14's; `level` is `threat_model.pl`'s, the same as §5.14's. `checked_by` lists properties only: those of `assumption_checked_by/2` and of §5.14's *Evidence* cell that have a result. Pending ones (REF-1..3 for ASM-LEAN-TLA) are named in `observed`, as is a check that is not a property (`check-pin.sh`, the wasm surface). `source` cites the NEAR pages near-approval read, or the upstream docs as `spec:<line>`. |
+| `[assumptions.<ID>]` | The 14 rows of §5.14. `statement` is §5.14's; `level` is `threat_model.pl`'s, the same as §5.14's. `checked_by` lists properties only: those of `assumption_checked_by/2` and of §5.14's *Evidence* cell that have a result. A check that is not a property (`check-pin.sh`, the wasm surface) is named in `observed`. `source` cites the NEAR pages near-approval read, or the upstream docs as `spec:<line>`. |
 | Property `assumptions` | The ASMs the row's claim rests on: its tools and models (TOOLS, SPEC, MODEL, LEAN-TLA), the runtime behaviour it relies on, and the environment it assumes (TIME for MC-1 and LIVE-2, which cites MC-1; an honest executor, EXEC, for LIVE-2, TLA-LIVE-F2 and MC-1's release-blocked states). Where a §3.2 threat's residual is an ASM, every property that mitigates the threat lists it: EXEC on ASYNC-1, RT-CALLBACK, SH-3 and INV-LEDGER (T-UNKNOWN), OWNER on OBS-1 and INV-WF (T-OBS). The in-bounds observations of LIVE-1, TLA-LIVE-1 and TLA-LIVE-F2 are premises of those claims, not OWNER. No property lists DEPLOY: T-REDEPLOY's only mitigation is the assumption itself, and no §5 row checks a deployment (§9.3). |
 
 ---
@@ -834,26 +947,43 @@ Specific to this project:
 | # | Deliverable | State |
 |---|---|---|
 | M0 | Submodule at the PR #1 head; `status.toml` with 16 `[source_hashes]` and `release_overflow_checks`; conformance generator and traces | Done |
-| M1 | Kani on the real core (§6) | Being built |
-| M1.5 | TLA+ (§17) | Done, except TLA-IND (open) and REF-1..3 (wait for M1) |
+| M1 | Kani on the real core (§6) | Done: 89 harnesses, 164 covers, 31 mutants, REF-1..3. Not in CI yet. |
+| M1.5 | TLA+ (§17) | Done, except TLA-IND (open). REF-1..3 done with M1 (§17.2). |
 | M1.6 | Lean (§18) | Done |
 | M3 | Shell: `near-tests/`, wasm surface | Done |
 | M4 | Prolog (§8) | Done |
 | M5 | Verus | Deferred (§7) |
 | M6 | Sandbox | Done, on one shard |
 | M7 | Deployment | Out of scope |
-| CI | `.github/workflows/shared-pool.yml` (§14) | Green on PR #31 (run 43194245726); Kani jobs added with the layer |
+| CI | `.github/workflows/shared-pool.yml` (§14) | Green on PR #31 (run 43194245726) for every layer but Kani |
+
+**Pin decision (2026-11-13).** PR #1 merged (`b9e994f`), and upstream
+marked the contract v1.0.0 in `6f61616`. `git diff a4bb5c3 6f61616 --
+crates/core/src/lib.rs crates/contract crates/executor` is empty; the
+version number is only in the root `Cargo.toml`. The pin stays at
+`a4bb5c3`. Moving it would renumber the conformance traces (v1.0.0's
+`fixtures.rs` adds a `station` fixture first) and change the wasm hashes,
+with no change in the verified code. The results are labelled "verified:
+shared-pool-controls v1.0.0 (contract code byte-identical to the pin
+`a4bb5c3`)". The label names the code the layers checked; no
+`status.toml` row is `verified` until a spec reviewer signs (§12). A CI
+check is to fetch upstream `6f61616` and fail unless the three paths are
+byte-identical to the pin (§14). Upstream PR #4 (v1.1) proposes fixes for
+the findings; v1.1 is not verified here.
 
 **Next, in order.**
-1. Land the Kani layer: harnesses, covers (F-1 among them), canary,
-   mutants, REF-1..3.
-2. Report F-1..F-6, NT-F1..NT-F4 and the two doc divergences on PR #1.
-3. When PR #1 merges, re-pin to the merge commit: regenerate the traces,
-   recompute the hashes, rerun every layer, and update the findings.
+1. Add the `plain` and `kani` jobs and the v1.0.0 byte-identity check to
+   CI (§14).
+2. Report F-1..F-6, NT-F1..NT-F4 and the two doc divergences upstream.
+3. When v1.1 (PR #4) merges, re-pin to it: regenerate the traces,
+   recompute the hashes, rerun every layer, invert the finding witnesses
+   (§12), and update the findings.
 4. A named reviewer who wrote neither `pool-core` nor the models signs off
    the specs (`[review] spec_reviewer`).
 
-Closed from this list: pointing C-6 at §5 instead of the brief (§5); a
+Closed from this list: the Kani layer with REF-1..3 (§6, §17.2);
+re-pinning to PR #1's merge, replaced by the byte-identity decision above;
+pointing C-6 at §5 instead of the brief (§5); a
 conformance trace of F-2's `Bounds` form on the `risk` fixture (trace
 209; traces 210 and 211 add F-4 and F-6), which TLA+, Lean, Prolog and the
 shell all replay; and the §5 properties and assumptions in `status.toml`
@@ -871,7 +1001,7 @@ the path filters include it again. `sandbox` runs only on
 
 | Job | Runs | Fails on |
 |---|---|---|
-| `pin` | `tools/scripts/check-pin.sh shared-pool` | gitlink ≠ `pinned_commit`; `[source_hashes]` drift; no `overflow-checks = true`. Every job but `status-lint` needs it. |
+| `pin` | `tools/scripts/check-pin.sh shared-pool`; to be added, the v1.0.0 byte-identity check (§13) | gitlink ≠ `pinned_commit`; `[source_hashes]` drift; no `overflow-checks = true`; once added, the three contract paths differ from upstream `6f61616`. Every job but `status-lint` needs it. |
 | `status-lint` | `tools/scripts/check-status.sh shared-pool` | evidence not allowed for its layer; a status without its artifact; a status above its ceiling |
 | `conformance` | `cargo run --release --locked -- --check traces/core.txt`, then `-- --reads-check traces/reads.txt` | the checked-in traces or reads differ from the generator's output; a read class not reached; `preview` and `submit` disagree |
 | `tla` | `tla/run.sh safety liveness trace` (about 10 min), then `run.sh mutants` | a check failing; a witness or required violation passing; a mutant surviving |
@@ -879,7 +1009,8 @@ the path filters include it again. `sandbox` runs only on
 | `prolog` | `prolog/run.sh` (about 9 min) | a suite failing; a loader warning; extraction drift; a canary passing; a mutant surviving |
 | `near-unit` | `near-tests/run.sh all`: the PROP-tag check, tests, surface, and the 21 mutants (about 9 min) | a tag problem (`check-tags.py`); a test failing; lockfile drift; a surface diff (SURF-2 stays expected-fail); a mutant surviving |
 | `sandbox` | `sandbox/run.sh` (about 7 min warm) | any failure; lockfile drift |
-| `plain`, `kani` | Not in the workflow yet; added when the Kani layer lands. The harness bodies in random mode, and the Kani harnesses (§6). | any failure; an unsatisfied cover; `h_canary` passing |
+| `plain` (not in the workflow yet) | `kani/run.sh plain`: the harness bodies with a random source, 27 tests (seconds; not proof) | a test failing; a cover that a body evaluates never firing |
+| `kani` (not in the workflow yet) | `kani/run.sh kani` in groups of harnesses sized to the runner's memory and time (§6: peaks up to 39 GB, 7.5 h one at a time), with the covers checked by family across all groups; `kani/run.sh mutants` and `mutants --kani` | a harness failing or out of time or memory; a family's cover satisfied in none of its harnesses; `h_canary` passing, or failing on anything but its own assertion; a mutant whose result differs from its header (`killed-by`, `must-survive`) |
 
 ---
 
@@ -887,12 +1018,14 @@ the path filters include it again. `sandbox` runs only on
 
 | Risk | Mitigation |
 |---|---|
-| The pin is a PR head. A force push can make it unreachable, and the merge can differ from it. | Re-pin at merge (§13). `pin` fails loudly if the commit cannot be fetched. |
+| The pin is not the v1.0.0 commit itself. | Its contract code is byte-identical to v1.0.0's (§13), and a CI check is to fail if that stops being true (§14). The pin is on upstream `main`; `pin` fails loudly if the commit cannot be fetched. |
 | A fix for F-1 or F-2 changes admission or release. | Every model follows the code's guard order, and the traces regenerate from the core. Witnesses flip and must be inverted (§12). |
-| Three hand-written models share a transcription error. | All replay the same real-core traces; C-2 compares guard orders; every layer has mutants; REF-1..3. |
+| Three hand-written models share a transcription error. | All replay the same real-core traces; C-2 compares guard orders; every layer has mutants; REF-1..3 tie TLA+ to the code per step, within the step bounds. |
 | The Prolog author read the code (ASM-SPEC). | Doc citations on every fact; a named independent reviewer. |
-| Kani is slow on `Vec`-heavy state. | Small bounds per function; plain mode in CI; one harness per transition. |
-| TLC's 32-bit integers | Overflow aborts a run, so no run passes silently. Lean covers large values, and Kani will once it lands. |
+| Kani is slow on `Vec`-heavy state: 7.5 h for the 89 harnesses, one at a time, with peaks up to 39 GB. | Fixed small shapes, step parts, per-loop unwinding (§6); plain mode runs in seconds; the `kani` job split into groups on a runner with enough memory (§14). |
+| Kani's bounds are small: 1 metric, 1 term, 2 recipes and 2 records per step. | Plain mode at larger shapes, Lean at every size, the traces at 256 records and ±1,000,000 (ASM-MODEL). |
+| Kani or CBMC is unsound for a construct the harnesses use. Two hazards were found in Kani 0.68.0. | Canary, covers and mutants; both hazards worked around and documented (`kani/RESULTS.md`, Tool issues), with a scan of every goto program for the first (ASM-TOOLS). |
+| TLC's 32-bit integers | Overflow aborts a run, so no run passes silently. Lean covers large values, and Kani's `h_energy` the core's energy over the whole value range. |
 | One-shard sandbox | RT-RACE records what one shard cannot show. The models treat ack and settle as independent steps. |
 | The import surface cannot exclude code replacement (NT-F3). | Source review and dynamic absence. Deployment stays out of scope. |
 | TLC memory on a GitHub-hosted runner. | Closed: at `TLA_HEAP=5g` the `tla` job passed safety (2,306,738 states, 1,300 s), liveness, trace and all 31 mutants on PR #31's first run. Peak RSS not recorded. |
@@ -903,8 +1036,8 @@ the path filters include it again. `sandbox` runs only on
 
 | # | Question |
 |---|---|
-| OQ-1 | Re-pin to the merge commit when PR #1 merges. If the PR is abandoned, do we keep verifying a commit that is not on `main`? |
-| OQ-2 | F-1 and F-2 are upstream's call. Options: refuse a hedge whose completion re-violates a metric its own reservation cured; allow a nonexecution release after a completed sibling relied on it; or stop counting unexecuted reservations as headroom. Each layer's witness flips with the fix. |
+| OQ-1 | PR #1 merged and the pin stays at `a4bb5c3`, byte-identical to v1.0.0 in the contract code (§13). When PR #4 (v1.1) merges, re-pin to it at once, or keep v1.0.0 as the verified version until v1.1 has been through every layer? |
+| OQ-2 | F-1 and F-2 are upstream's call. Options: refuse a hedge whose completion re-violates a metric its own reservation cured; allow a nonexecution release after a completed sibling relied on it; or stop counting unexecuted reservations as headroom. Each layer's witness flips with the fix. Upstream PR #4 (v1.1) proposes fixes; they are not verified here. |
 | OQ-3 | NT-F1: build with cargo-near or `--cfg near`, and have upstream's sandbox tests assert failure messages. |
 | OQ-4 | NT-F3: is source review plus dynamic absence enough for the 15 linked host functions, or is a static call graph of the wasm needed? |
 | OQ-5 | F-4: should `validate` reject actor = executor, and an actor or executor that is the owner? |
@@ -913,15 +1046,17 @@ the path filters include it again. `sandbox` runs only on
 | OQ-8 | L-1b: confirm with upstream that a reservation that cured a violation is meant to be uncancellable. |
 | OQ-9 | Docs: update spec:39 and api:26 for the no-op acknowledgment, and api:34 for non-string results (NT-F4); state a minimum prepaid gas per method in api.md (none is given). Measured at the maximum-size state (§9.2, RES-1): `dispatch` needs at least 70 Tgas, `reconcile` 46 Tgas and the executor's `finish` 43 Tgas; 70 Tgas leaves under 1 Tgas spare for `dispatch`, so the documented figure needs headroom. |
 | OQ-10 | Who reviews the specs? |
+| OQ-11 | Kani in CI: which runner, and how to group the harnesses? 63 of the 89 peaked above 7.9 GB, a default hosted runner's memory, and 31 above 16 GB (§14). |
 
 ---
 
 ## 17. TLA+ over every event sequence
 
-Kani, once it lands, will prove one step of the real core within bounds.
-That says nothing about liveness or safety at depth. The TLA+ model is checked over all event
-sequences in small universes, and tied to the real core by the traces
-(REF-5) and, once Kani lands, step by step (REF-1..3). Results:
+Kani proves one step of the real core within bounds (§6). That says
+nothing about liveness or safety at depth. The TLA+ model is checked over
+all event sequences in small universes, and tied to the real core by the
+traces (REF-5) and, within the step bounds, step by step (REF-1..3,
+§17.2). Results:
 `tla/RESULTS.md`. TLC 2.19 (tla2tools 1.7.4), OpenJDK 23.0.2, 4 workers;
 final runs ended 2026-11-12.
 
@@ -939,17 +1074,40 @@ final runs ended 2026-11-12.
 
 ### 17.2 The refinement link
 
-<!-- KANI: filled when the Kani layer lands -->
+REF-1..3 are bounded proofs on the real core (`kani/RESULTS.md`, REF-1..3
+and deviation 26). `kani/src/tla.rs` transcribes `SharedPool.tla`
+operator by operator from the `.tla` text, not from `spec.rs` or the
+code: the state image, the abstraction α (a `Pool` and its ghost `base`
+and `k0`, mapped to the TLA+ variables), the error operators `SubmitErr`
+to `ObserveErr` in `GuardOrder`'s order, and the actions. The
+`h_ref_<op>` harnesses use the step harnesses' generators, so they share
+their bounds: every INV pre-state with 1 metric, 1 term, 2 recipes and
+exactly 2 records, and every operation of the step domains (§6). For each
+call they assert:
 
-**Plan.** The Kani crate will hold α (a `Pool` mapped to the TLA+
-variables), plus the error operators and actions transcribed in Rust.
-REF-1 (guard exactness): the core's error equals the TLA+ error
-operator's, so the core is Ok exactly when the action is enabled. REF-2
-(effect exactness): α of the post-state equals the action's post-state.
-REF-3: a rejected or idempotent call leaves α unchanged. The `h_ref_*`
-harnesses reuse the step harnesses' generators, so they share the same
-bounds. Until they land, REF-5 is the only link from this model to the
-code.
+- **REF-1 (guard exactness):** the core's error is the error operator's
+  value on α(pre), and the core is Ok exactly when the operator gives
+  "Ok" (the action is enabled) or "Noop" (an idempotent call).
+- **REF-2 (effect exactness):** when the operator gives "Ok", α(post) is
+  the action's post-state, configuration and ghost included; submit
+  returns the new record's index.
+- **REF-3 (stutter):** every other call leaves α unchanged.
+
+Run M (`kani/run.sh ref`, exit 0) and its rerun N: 7 of 7 `ok`, 55 to 351
+s each, at most 12.4 GB (N's exact peak).
+The 46 `ref` covers, every operator value the step domain reaches, are
+SATISFIED; `Full` needs 256 records and is reached only on the traces.
+Plain mode runs the same check on every sample of the step tests and on
+every call of the 212 traces (`h_ref_traces`, 8,804 calls: "Ok" 2,053
+times, "Noop" 494, and each of the 15 errors the traces contain). Mutant
+31, an error in `tla.rs`'s `ReleaseErr`, is killed by `h_ref_cancel`.
+
+**Limits.** The proofs hold within the step bounds only; other shapes and
+record counts are tested, in plain mode and on the traces. `tla.rs` is a
+hand transcription of the `.tla`. It meets TLC only on the traces, where
+both agree with the core (REF-5), and so with each other. The history
+variables `steps` and `last` are not mapped, and `Init` is linked by
+CFG-1 and the traces, not by a REF harness.
 
 ### 17.3 What is checked
 
@@ -976,6 +1134,8 @@ check names its fairness assumption:
 - **F-2b** was found here, then checked on the pinned core and added to
   the generator as trace 208.
 - **REF-5:** 9,016 of 9,016 states (212 initial + 8,804 steps), in 8 s.
+- **REF-1..3 (Kani):** 7 of 7 `h_ref_*` harnesses `ok`, 46 of 46 covers
+  SATISFIED, within the step bounds (§17.2).
 - **Mutants:** 31 of 31 killed (28 by the trace check, 2 by liveness, 1 by
   `liveness-f2`): 150 s locally on the 209-trace set, and 4 min 10 s on
   the 212 traces in CI (GitHub Actions run 43194245726 (PR #31, 2026-11-12, ubuntu-latest, `TLA_HEAP=5g`)). Mutants 10, 13, 23, 24, 25 and 26
@@ -995,7 +1155,7 @@ check names its fairness assumption:
   versions of u32::MAX in the traces are mapped to −1; they still give
   `Stale`, because the highest state version is 513. `w·r²` is exact only
   below 2^31, while the core's energy reaches 4·10^15, so energy at large
-  residuals (NUM-1) is Kani's job.
+  residuals (NUM-1) is Kani's (`h_energy`, `h_energy_max`, §6).
 - **Scaled constants.** MaxRecords is 3 in MC_Safety, 2 in MC_Liveness,
   and 256 in TraceCheck. `MAX_VALUE`, `MAX_UNITS`, `MAX_WEIGHT` and the
   86,400 s window keep their real values.
@@ -1079,14 +1239,17 @@ vacuous.
   no disagreement on 212 traces. That is evidence, not proof.
 - **Numbers.** The model computes exactly in `Int` and `Nat`; fixed-width
   overflow in the code is NUM-1 and NUM-2 (Kani). The code's `energy`
-  `Arithmetic` error is not modelled (claimed unreachable). The envelope's
+  `Arithmetic` error is not modelled (claimed unreachable; Kani's NUM-1
+  shows `energy` Ok on bounded values of 2 metrics and 2 terms, and at the
+  64-term worst case). The envelope's
   fail-on-first partial sums are modelled by the final sums: argued, not
   proved.
 - **Types.** Times, units and versions are unbounded `Nat`. u64
   `saturating_add` and the u32 version overflow are exact. `max_age`'s
   u32 type and all strings are not modelled.
 - **Panics (ROB-1).** Not modelled. `Inv` shows every index the guards
-  read is in range, but not that the Rust never panics.
+  read is in range, but not that the Rust never panics; Kani checks that
+  on the real core within its bounds.
 - **Not stated in Lean:** RD-PREVIEW, RD-BEST and the shell. (The
   Prolog layer tests the two reads of the real core against its model,
   COV-2, §8.) LIVE-2
