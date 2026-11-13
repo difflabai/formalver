@@ -13,7 +13,18 @@ most --lanes jobs run at once, and only while their measured peaks
 (kani/RESULTS.md) sum to at most --budget-gb; the longest start first.
 Memory is sampled every 3 s: the run.sh process tree and its largest cbmc
 process. run.sh is used as it is; KANI_MAX_GB stays its default (40) unless
-set in the environment.
+set in the environment. The mutant jobs run with RUSTUP_TOOLCHAIN set to
+tools/versions.env's RUST_TOOLCHAIN (their plain mode), as CI's
+kani-mutants jobs do; the harness jobs without it, as CI's kani jobs.
+
+The fingerprint does not see the environment, so the run refuses to start
+when a variable that changes what run.sh runs or how cargo builds is set
+(KANI, KANI_FLAGS, KANI_MOD, RUSTFLAGS, CARGO_ENCODED_RUSTFLAGS,
+RUSTUP_TOOLCHAIN, RUSTC, RUSTC_WRAPPER, RUSTC_WORKSPACE_WRAPPER,
+CARGO_BUILD_*, CARGO_PROFILE_*, CARGO_TARGET_*_RUSTFLAGS), or when a cargo
+configuration file outside the Kani tree (CARGO_HOME's, or a .cargo/ above
+the run directory or TMPDIR) sets rustflags, rustc or a wrapper, or a
+profile. env.txt records the other KANI_* variables and those files.
 
 usage: run-local.py [--out DIR] [--rev REV] [--lanes N] [--budget-gb GB]
                     [--record] [--dry-run]
@@ -31,9 +42,10 @@ run.sh's result, a mutant's expect/plain/kani with "!" if run.sh flagged it
 UNEXPECTED), logs/<job>/ (stdout.txt, covers.tsv, the Kani and plain logs).
 About 4 hours for the 36 harnesses and 16 mutants on a 10-core, 64 GB Mac
 with the defaults. Needs Kani and its CBMC at tools/versions.env's versions
-(cargo install --locked kani-verifier --version <KANI>; cargo kani setup)
-and the source-mirror submodule (git submodule update --init
-projects/shared-pool/source-mirror).
+(cargo install --locked kani-verifier --version <KANI>; cargo kani setup),
+the Rust toolchain RUST_TOOLCHAIN (rustup toolchain install <RUST_TOOLCHAIN>
+--profile minimal) and the source-mirror submodule (git submodule update
+--init projects/shared-pool/source-mirror).
 """
 import argparse
 import datetime
@@ -51,6 +63,16 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
 SP = "projects/shared-pool"
 CHECK = os.path.join(ROOT, "tools/scripts/check-kani-record.py")
 RECORD = os.path.join(HERE, "record.py")
+# Variables that change what run.sh runs (KANI, KANI_FLAGS, KANI_MOD) or how
+# cargo and rustc build (a verdict), which the fingerprint does not see.
+REFUSED_ENV = re.compile(r"^(KANI|KANI_FLAGS|KANI_MOD|RUSTFLAGS|CARGO_ENCODED_RUSTFLAGS|RUSTUP_TOOLCHAIN|RUSTC"
+                         r"|RUSTC_WRAPPER|RUSTC_WORKSPACE_WRAPPER|CARGO_BUILD_\w+|CARGO_PROFILE_\w+"
+                         r"|CARGO_TARGET_\w+_RUSTFLAGS)$")
+# Set per job by this script.
+OWN_ENV = {"KANI_LOG_DIR", "KANI_DEFER_COVERS", "KANI_TIMEOUT", "KANI_CBMC", "KEEP_LOGS"}
+# A cargo configuration key or table that changes how cargo builds.
+CARGO_BUILD_KEYS = re.compile(r"^\s*(rustflags|rustc|rustc-wrapper|rustc-workspace-wrapper)\s*=|^\s*\[profile[.\]]",
+                              re.M)
 
 
 def sh(*args, **kw):
@@ -107,6 +129,25 @@ def jobs_from_workflow():
     # Longest first; the scheduler takes the first job that fits the budget.
     jobs.sort(key=lambda j: -j["est"])
     return jobs
+
+
+def cargo_configs(*dirs):
+    """The cargo configuration files above dirs (their .cargo/config[.toml]) and in CARGO_HOME."""
+    out = []
+    for d in dirs:
+        d = os.path.abspath(d)
+        while True:
+            out += [os.path.join(d, ".cargo", n) for n in ("config", "config.toml")]
+            if os.path.dirname(d) == d:
+                break
+            d = os.path.dirname(d)
+    home = os.environ.get("CARGO_HOME") or os.path.expanduser("~/.cargo")
+    out += [os.path.join(home, n) for n in ("config", "config.toml")]
+    seen = []
+    for p in out:
+        if os.path.isfile(p) and p not in seen:
+            seen.append(p)
+    return seen
 
 
 def make_lane(lane, commit, core):
@@ -183,6 +224,7 @@ def main():
     versions = sh("git", "-C", ROOT, "show", commit + ":tools/versions.env")
     kani_v = re.search(r"^KANI=(\S+)", versions, re.M).group(1)
     cbmc_v = re.search(r"^CBMC=(\S+)", versions, re.M).group(1)
+    rust_v = re.search(r"^RUST_TOOLCHAIN=(\S+)", versions, re.M).group(1)
     jobs = jobs_from_workflow()
     if not jobs:
         sys.exit("run-local.py: no kani-large or kani-mutants-large entries in the workflow")
@@ -192,11 +234,34 @@ def main():
             print("  %-28s %-8s %5d s  %5.1f GB  %5.0f s  run.sh %s" % (j["name"], j["kind"], j["timeout"], j["peak"],
                                                                      j["est"], " ".join(j["args"])))
         return 0
-    inputs = [l.split("\t")[0] for l in sh(sys.executable, "-I", CHECK, "fingerprint", commit).splitlines()]
     if sh("git", "-C", ROOT, "diff", "--name-only", commit, "--",
-          *[n for n in inputs if ":" not in n and n != "fingerprint"] + ["tools/versions.env"]).strip():
+          *sh(sys.executable, "-I", CHECK, "pathspecs").splitlines()).strip():
         print("run-local.py: note: the work tree's Kani inputs differ from %s; the run uses %s's" % (commit[:12],
               commit[:12]), file=sys.stderr)
+
+    # The environment and cargo configuration: nothing the fingerprint does
+    # not see may change a verdict.
+    refused = sorted(k for k, v in os.environ.items() if REFUSED_ENV.match(k) and v != "")
+    if refused:
+        sys.exit("run-local.py: %s set in the environment, which changes what run.sh runs or how cargo builds; "
+                 "the record's fingerprint does not see the environment: unset it and start again"
+                 % ", ".join(refused))
+    started = now()
+    out = os.path.abspath(a.out or os.path.join(ROOT, SP, "kani/target/local-run",
+                                                "run-" + started.strftime("%Y%m%dT%H%MZ")))
+    if os.path.exists(out):
+        sys.exit("run-local.py: %s exists" % out)
+    configs = cargo_configs(out, os.environ.get("TMPDIR") or "/tmp")
+    bad = []
+    for p in configs:
+        with open(p) as f:
+            if CARGO_BUILD_KEYS.search(f.read()):
+                bad.append(p)
+    if bad:
+        sys.exit("run-local.py: %s set rustflags, rustc or a wrapper, or a profile, for the run's builds; the record's "
+                 "fingerprint does not see them: move them aside and start again" % ", ".join(bad))
+    kani_env = " ".join("%s=%s" % (k, os.environ[k]) for k in sorted(os.environ)
+                        if k.startswith("KANI_") and k not in OWN_ENV) or "none"
 
     # Tools: the pinned Kani and its own CBMC (run.sh reads loop ids with it).
     kani_line = sh("cargo", "kani", "--version").splitlines()[0].strip()
@@ -207,28 +272,31 @@ def main():
     cbmc_line = sh(cbmc, "--version").strip()
     if cbmc_line.split()[:1] != [cbmc_v]:
         sys.exit("run-local.py: %s is %r, not CBMC %s" % (cbmc, cbmc_line, cbmc_v))
+    # The mutants' plain mode: RUST_TOOLCHAIN, as CI's kani-mutants jobs.
+    r = subprocess.run(["rustc", "--version"], capture_output=True, text=True,
+                       env=dict(os.environ, RUSTUP_TOOLCHAIN=rust_v))
+    rustc = r.stdout.strip()
+    if r.returncode != 0 or not rustc.startswith("rustc %s " % rust_v):
+        sys.exit("run-local.py: the mutant jobs' plain mode needs Rust %s (tools/versions.env RUST_TOOLCHAIN), as "
+                 "in CI: rustup toolchain install %s --profile minimal (rustc: %s)"
+                 % (rust_v, rust_v, (rustc or r.stderr.strip())[:200]))
     smr = os.path.join(ROOT, SP, "source-mirror")
     if subprocess.run(["git", "-C", smr, "cat-file", "-e", core + "^{commit}"], capture_output=True).returncode:
         sys.exit("run-local.py: the source-mirror submodule lacks %s: git submodule update --init %s/source-mirror"
                  % (core, SP))
 
-    started = now()
-    out = os.path.abspath(a.out or os.path.join(ROOT, SP, "kani/target/local-run",
-                                                "run-" + started.strftime("%Y%m%dT%H%MZ")))
-    if os.path.exists(out):
-        sys.exit("run-local.py: %s exists" % out)
     os.makedirs(os.path.join(out, "logs"))
     lanes = ["lane%d" % i for i in range(1, a.lanes + 1)]
     for lane in lanes:
         make_lane(os.path.join(out, "lanes", lane), commit, core)
-    rustc = subprocess.run(["rustc", "--version"], capture_output=True, text=True,
-                           cwd=os.path.join(out, "lanes", lanes[0], SP, "kani")).stdout.strip()
     with open(os.path.join(out, "env.txt"), "w") as f:
         f.write("commit %s\nkani-tree %s\ncore-pin %s\nkani %s\nCBMC %s\ncbmc %s\nrustc %s\nhost %s\n"
-                "lanes %d\nbudget-gb %g\nkani-max-gb %s\nrunner projects/shared-pool/kani/local/run-local.py\n"
-                "started %s\n"
-                % (commit, kani_tree, core, kani_line, cbmc_v, cbmc_line, rustc or "?", host(), a.lanes,
-                   a.budget_gb, os.environ.get("KANI_MAX_GB") or "40 (run.sh's default)", iso(started)))
+                "lanes %d\nbudget-gb %g\nkani-max-gb %s\nkani-env %s\ncargo-config %s\n"
+                "runner projects/shared-pool/kani/local/run-local.py\nstarted %s\n"
+                % (commit, kani_tree, core, kani_line, cbmc_v, cbmc_line,
+                   rustc + " (RUSTUP_TOOLCHAIN of the mutant jobs' plain mode, as in CI)", host(), a.lanes,
+                   a.budget_gb, os.environ.get("KANI_MAX_GB") or "40 (run.sh's default)", kani_env,
+                   " ".join(configs) or "none", iso(started)))
     with open(os.path.join(out, "jobs.json"), "w") as f:
         json.dump(jobs, f, indent=1)
 
@@ -269,6 +337,8 @@ def main():
             os.makedirs(d, exist_ok=True)
             env = dict(os.environ, KANI_LOG_DIR=d, KANI_DEFER_COVERS="1", KANI_TIMEOUT=str(pick["timeout"]),
                        KEEP_LOGS=d, KANI_CBMC=cbmc)
+            if pick["kind"] == "mutant":
+                env["RUSTUP_TOOLCHAIN"] = rust_v
             lane_dir = os.path.join(out, "lanes", lane)
             so = open(os.path.join(d, "stdout.txt"), "w")
             pick["proc"] = subprocess.Popen(["bash", os.path.join(lane_dir, SP, "kani/run.sh")] + pick["args"],

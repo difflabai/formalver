@@ -4,16 +4,21 @@
 The Kani harnesses and mutants whose measured peak is above what a hosted
 runner holds in memory (the kani-large and kani-mutants-large jobs of
 .github/workflows/shared-pool.yml) run on a local machine
-(kani/local/run-local.py), and kani/local/record.py records the run. Without
-KANI_RUNNER, CI runs only the rest (the kani and kani-mutants jobs) and
-checks the record instead of re-running the large part:
+(kani/local/run-local.py), and kani/local/record.py records the run. CI
+runs only the rest (the kani and kani-mutants jobs) and checks the record
+instead of re-running the large part:
 
-  check-kani-record.py [--stale-ok]
+  check-kani-record.py [--stale-ok-harnesses] [--stale-ok-mutants] [--stale-ok]
       fails unless
-      - the record's fingerprint of the Kani inputs (INPUT_PATHS' git object
-        ids at HEAD, versions.env's KANI and CBMC) is this commit's
-        ("re-run the local Kani record: ..."; --stale-ok: a warning, for a
-        run whose kani-large jobs verified the large part on KANI_RUNNER);
+      - the record's fingerprint of the Kani inputs (fingerprint below) is
+        this commit's ("re-run the local Kani record: ..."). A stale record
+        is only a warning when this run verifies everything it records:
+        --stale-ok-harnesses when the kani-large jobs run (on KANI_RUNNER),
+        --stale-ok-mutants when the kani-mutants-large jobs run, --stale-ok
+        both;
+      - the fingerprint is the hash of the record's input lines and, when
+        the record's commit is in this clone, that commit's (a shallow
+        clone without it skips this);
       - every recorded harness is ok and every recorded mutant as its patch
         expects (killed/killed/killed; survive/survived/survived for a
         `# must-survive` patch), its results and covers unedited (digest);
@@ -22,11 +27,12 @@ checks the record instead of re-running the large part:
         harnesses; the same for mutants/*.patch with the recorded mutants,
         kani-mutants and kani-mutants-large;
       - every kani and kani-mutants entry peaked at IN_MEMORY_GB or less;
-      - RESULTS.md's local-record block, if it has one, is
-        `record.py table`.
+      - RESULTS.md has the local-record block, and it is `record.py table`.
   check-kani-record.py fingerprint [REV]   the inputs and fingerprint at REV
                                            (default HEAD), as record.py
                                            writes them
+  check-kani-record.py pathspecs           the inputs as git pathspecs (for
+                                           git diff)
   check-kani-record.py matrix JOB          JOB's matrix entries in the
                                            workflow (name, gb, timeout)
   check-kani-record.py harnesses           the recorded harnesses
@@ -37,12 +43,15 @@ checks the record instead of re-running the large part:
 The fingerprint reads git objects only, so it works in a shallow checkout
 without the source-mirror submodule (the gitlink is the core's commit).
 Lists (run.sh list, mutants/*.patch, the workflow) are read from the work
-tree; in CI that is HEAD.
+tree; in CI that is HEAD. The record is attested by whoever ran and
+committed it: the check shows that it is consistent and belongs to these
+inputs, not that the run took place as recorded.
 
 env: KANI_RECORD_DIR (default projects/shared-pool/kani/local),
      KANI_RECORD_WORKFLOW (default .github/workflows/shared-pool.yml),
      KANI_RESULTS_MD (default projects/shared-pool/kani/RESULTS.md),
-     KANI_RECORD_ROOT (the repository; default this script's).
+     KANI_RECORD_ROOT (the repository; default this script's),
+     KANI_RECORD_REV (the commit the check compares with; default HEAD).
 Exit 0 iff every check passes; 2 on a usage error.
 """
 import hashlib
@@ -59,12 +68,18 @@ WORKFLOW = os.environ.get("KANI_RECORD_WORKFLOW") or os.path.join(ROOT, ".github
 RESULTS_MD = os.environ.get("KANI_RESULTS_MD") or os.path.join(ROOT, SP, "kani/RESULTS.md")
 RECORD_PY = os.path.join(ROOT, SP, "kani/local/record.py")
 
-# What a Kani verdict depends on: the harnesses and their runner, the
-# mutants, the pinned core (a gitlink: its commit id), the conformance traces
-# plain mode replays (a mutant's plain verdict), and the tool versions; and
-# kani/.gitignore, to be safe (the archive run-local.py runs from has it).
-# Not the record itself (kani/local) or the Markdown; of versions.env, only
-# KANI and CBMC (the rest pins other layers' tools).
+# What a Kani verdict depends on. First the Kani crate, by default-include:
+# every file under kani/ but the record itself (kani/local/) and the
+# Markdown, hashed as one line (KANI_ALL), so that a new file there
+# (.cargo/config.toml, rust-toolchain.toml, build.rs) changes the
+# fingerprint too. The named paths of the crate are in that line and also
+# have their own, which say what changed. Then the pinned core (a gitlink:
+# its commit id), the conformance traces plain mode replays (a mutant's
+# plain verdict), and the tool versions: of versions.env only KANI and CBMC
+# (the rest pins other layers' tools; RUST_TOOLCHAIN, plain mode's, is not
+# in it: CI's mutants job reruns every mutant's plain mode on every run).
+KANI_DIR = SP + "/kani"
+KANI_ALL = KANI_DIR + "/(all but local, *.md)"
 INPUT_PATHS = [
     SP + "/kani/src",
     SP + "/kani/Cargo.toml",
@@ -88,6 +103,9 @@ RERUN = ("re-run the local Kani record: projects/shared-pool/kani/local/run-loca
          "(about 4 hours on a 64 GB machine; projects/shared-pool/kani/local/README.md), and commit kani/local")
 
 
+REV = os.environ.get("KANI_RECORD_REV") or "HEAD"
+
+
 class Fail(Exception):
     pass
 
@@ -99,6 +117,22 @@ def run(args, cwd=None):
     return r.stdout
 
 
+def kani_all(rev):
+    """sha256 of rev's kani/ tree, file by file (mode, type, object id, path), less local/ and *.md."""
+    r = subprocess.run(["git", "-C", ROOT, "ls-tree", "-r", "-z", "%s:%s" % (rev, KANI_DIR)], capture_output=True)
+    if r.returncode != 0:
+        raise Fail("%s:%s is not in the repository" % (rev, KANI_DIR))
+    h = hashlib.sha256()
+    for entry in r.stdout.split(b"\0"):
+        if not entry:
+            continue
+        meta, path = entry.split(b"\t", 1)
+        if path.startswith(b"local/") or path.endswith(b".md"):
+            continue
+        h.update(meta + b"\t" + path + b"\n")
+    return h.hexdigest()
+
+
 def fingerprint(rev="HEAD"):
     """[(name, value)], sha256 hex of their lines."""
     lines = []
@@ -108,6 +142,7 @@ def fingerprint(rev="HEAD"):
         if r.returncode != 0:
             raise Fail("%s:%s is not in the repository" % (rev, p))
         lines.append((p, r.stdout.strip()))
+    lines.append((KANI_ALL, kani_all(rev)))
     env = run(["git", "-C", ROOT, "show", "%s:tools/versions.env" % rev])
     for k in INPUT_VERSIONS:
         m = re.search(r"^%s=(\S+)\s*$" % k, env, re.M)
@@ -115,6 +150,17 @@ def fingerprint(rev="HEAD"):
             raise Fail("%s:tools/versions.env has no %s" % (rev, k))
         lines.append(("tools/versions.env:" + k, m.group(1)))
     return lines, digest_lines(lines)
+
+
+def pathspecs():
+    """The inputs as git pathspecs: the files fingerprint reads, and versions.env whole."""
+    return ([KANI_DIR, ":(exclude)%s/local" % KANI_DIR, ":(exclude)%s/*.md" % KANI_DIR]
+            + [p for p in INPUT_PATHS if not p.startswith(KANI_DIR + "/")] + ["tools/versions.env"])
+
+
+def is_commit(c):
+    return bool(re.fullmatch(r"[0-9a-f]{40}", c)) and subprocess.run(
+        ["git", "-C", ROOT, "cat-file", "-e", c + "^{commit}"], capture_output=True).returncode == 0
 
 
 def digest_lines(lines):
@@ -224,8 +270,8 @@ def words(xs):
     return " ".join(sorted(xs))
 
 
-def check(stale_ok):
-    errs, warns, notes = [], [], []
+def check(stale_ok_harnesses, stale_ok_mutants):
+    errs, warns = [], []
     prov, inputs, jobs, covers = read_record()
     rec_h = [j["name"] for j in jobs if j["kind"] == "harness"]
     rec_m = [j["name"] for j in jobs if j["kind"] == "mutant"]
@@ -238,19 +284,50 @@ def check(stale_ok):
     if prov.get("digest") != digest_files(os.path.join(RECORD, "jobs.tsv"), os.path.join(RECORD, "covers.tsv")):
         errs.append("jobs.tsv or covers.tsv is not what record.py wrote (digest in provenance.txt): "
                     "write the record with kani/local/record.py")
+    # ... and its fingerprint is its commit's, where this clone has that
+    # commit (a shallow CI checkout may not: skipped).
+    commit = prov.get("commit", "")
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        errs.append("provenance.txt: commit %r is not a full commit id: write the record with kani/local/record.py"
+                    % commit)
+    elif is_commit(commit):
+        try:
+            commit_fp = fingerprint(commit)[1]
+        except Fail:
+            commit_fp = None
+        if commit_fp != prov.get("fingerprint"):
+            errs.append("provenance.txt: the fingerprint is not commit %s's (recomputed here), so the record is not "
+                        "that commit's run: write the record with kani/local/record.py" % commit[:12])
+    else:
+        commit = None
 
-    # Fingerprint: the record's inputs are this commit's.
-    head, head_fp = fingerprint("HEAD")
+    # Fingerprint: the record's inputs are this commit's. A stale record is
+    # a warning only if this run verifies all it records (kani-large its
+    # harnesses, kani-mutants-large its mutants).
+    head, head_fp = fingerprint(REV)
     if prov.get("fingerprint") != head_fp:
         have = dict(inputs)
         changed = [n for n, v in head if have.get(n) != v] or ["the input list"]
-        msg = ("the local Kani record (commit %s) is for other Kani inputs than this commit's: %s changed; %s"
-               % (prov.get("commit", "?")[:12], ", ".join(changed), RERUN))
-        (warns if stale_ok else errs).append(msg)
-    dirty = subprocess.run(["git", "-C", ROOT, "diff", "--quiet", "HEAD", "--"] + INPUT_PATHS + ["tools/versions.env"],
-                           capture_output=True)
-    if dirty.returncode == 1:
-        warns.append("uncommitted changes to the Kani inputs: the fingerprint is HEAD's and does not see them")
+        files = []
+        if commit:
+            files = run(["git", "-C", ROOT, "diff", "--no-renames", "--name-only", commit, REV, "--"]
+                        + pathspecs()).split()
+        msg = ("the local Kani record (commit %s) is for other Kani inputs than this commit's: %s changed%s; "
+               % (prov.get("commit", "?")[:12], ", ".join(changed),
+                  " (%s%s)" % (", ".join(files[:8]), ", ..." if len(files) > 8 else "") if files else ""))
+        unverified = []
+        if rec_h and not stale_ok_harnesses:
+            unverified.append("its %d harnesses (no kani-large jobs)" % len(rec_h))
+        if rec_m and not stale_ok_mutants:
+            unverified.append("its %d mutants (no kani-mutants-large jobs)" % len(rec_m))
+        if unverified:
+            errs.append(msg + "nothing in this run verifies " + " or ".join(unverified) + "; " + RERUN)
+        else:
+            warns.append(msg + "this run's kani-large and kani-mutants-large jobs verify what it records; " + RERUN)
+    if REV == "HEAD":
+        dirty = subprocess.run(["git", "-C", ROOT, "diff", "--quiet", "HEAD", "--"] + pathspecs(), capture_output=True)
+        if dirty.returncode == 1:
+            warns.append("uncommitted changes to the Kani inputs: the fingerprint is HEAD's and does not see them")
 
     # Results: every harness ok, every mutant as its patch expects.
     patches = mutant_patches()
@@ -326,21 +403,24 @@ def check(stale_ok):
                 errs.append("%s entry %r peaked at %d GB, above %d GB: it does not fit ubuntu-latest in memory; "
                             "move it to %s-large and the local record" % (job, e["name"], e["gb"], IN_MEMORY_GB, job))
 
-    # RESULTS.md's block, if any, is the record's table.
-    if os.path.exists(RESULTS_MD):
+    # RESULTS.md has the block, and it is the record's table: the
+    # human-readable record goes with the data.
+    md = os.path.relpath(RESULTS_MD, ROOT)
+    block = "kani/local/record.py table, between %s ...--> and %s" % (BEGIN, END)
+    if not os.path.exists(RESULTS_MD):
+        errs.append("%s does not exist; it must hold the record's table (%s)" % (md, block))
+    else:
         with open(RESULTS_MD) as f:
             text = f.read()
-        if BEGIN in text:
-            m = re.search(re.escape(BEGIN) + r"[^\n]*\n(.*?)^" + re.escape(END), text, re.S | re.M)
-            if not m:
-                errs.append("%s: a local-record block opens but does not close (%s)" % (RESULTS_MD, END))
-            else:
-                table = run([sys.executable, "-I", RECORD_PY, "table"])
-                if m.group(1).strip() != table.strip():
-                    errs.append("%s: the local-record block is not the record's table: "
-                                "kani/local/record.py table, between the markers" % os.path.relpath(RESULTS_MD, ROOT))
+        m = re.search(re.escape(BEGIN) + r"[^\n]*\n(.*?)^" + re.escape(END), text, re.S | re.M)
+        if BEGIN not in text:
+            errs.append("%s has no local-record block: %s" % (md, block))
+        elif not m:
+            errs.append("%s: a local-record block opens but does not close (%s)" % (md, END))
         else:
-            notes.append("%s has no local-record block" % os.path.relpath(RESULTS_MD, ROOT))
+            table = run([sys.executable, "-I", RECORD_PY, "table"])
+            if m.group(1).strip() != table.strip():
+                errs.append("%s: the local-record block is not the record's table: %s" % (md, block))
 
     gh = bool(os.environ.get("GITHUB_ACTIONS"))
     for w in warns:
@@ -349,26 +429,31 @@ def check(stale_ok):
         print(("::error title=local Kani record::" if gh else "error: ") + e)
     if errs:
         return 1
-    ok_m = len(rec_m)
     print("local Kani record ok: commit %s, %s; %d harnesses ok, %d mutants as expected; with the kani groups "
-          "%d harnesses of run.sh list once each, with kani-mutants %d mutants once each%s"
+          "%d harnesses of run.sh list once each, with kani-mutants %d mutants once each"
           % (prov.get("commit", "?")[:12], "fingerprint " + head_fp[:12] if prov.get("fingerprint") == head_fp
-             else "STALE (warning above)", len(rec_h), ok_m, len(want), len(patches),
-             "".join("; " + n for n in notes)))
+             else "STALE (warning above)", len(rec_h), len(rec_m), len(want), len(patches)))
     return 0
+
+
+STALE_OK = ("--stale-ok", "--stale-ok-harnesses", "--stale-ok-mutants")
 
 
 def main(argv):
     args = argv[1:]
-    is_check = not args or args == ["--stale-ok"] or args == ["check"]
+    is_check = args in ([], ["check"]) or (len(set(args)) == len(args) and all(a in STALE_OK for a in args))
     try:
         if is_check:
-            return check("--stale-ok" in args)
+            return check("--stale-ok" in args or "--stale-ok-harnesses" in args,
+                         "--stale-ok" in args or "--stale-ok-mutants" in args)
         if args[0] == "fingerprint" and len(args) <= 2:
             lines, fp = fingerprint(args[1] if len(args) == 2 else "HEAD")
             for n, v in lines:
                 print("%s\t%s" % (n, v))
             print("fingerprint\t%s" % fp)
+            return 0
+        if args == ["pathspecs"]:
+            print("\n".join(pathspecs()))
             return 0
         if args[0] == "matrix" and len(args) == 2:
             wf = matrices()
@@ -391,7 +476,7 @@ def main(argv):
         print(("::error title=local Kani record::" if os.environ.get("GITHUB_ACTIONS") else "error: ") + str(e),
               file=sys.stdout if is_check else sys.stderr)
         return 1
-    print(__doc__.split("\n\n")[1], file=sys.stderr)
+    print(__doc__.split("\n\n")[2], file=sys.stderr)
     return 2
 
 

@@ -127,12 +127,14 @@ jobs:
           # results depend on changed: the Kani crate (not its Markdown, not
           # the local runner and recorder kani/local/*.py; the local record's
           # data, which the covers job merges with the groups' covers), the
-          # pinned core (the gitlink, .gitmodules), the tool versions, the
-          # scripts the Kani jobs call, or this workflow. plain, mutants and
+          # pinned core (the gitlink, .gitmodules), the conformance traces
+          # (a mutant's plain mode replays them), the tool versions, the
+          # scripts the Kani jobs call, or this workflow: every input of the
+          # local record's fingerprint among them. plain, mutants and
           # kani-record (minutes) run on every change. A manual run follows
           # the `kani` input; a base commit that cannot be read runs the
           # matrix.
-          re='^(projects/shared-pool/kani/|projects/shared-pool/source-mirror$|\.gitmodules$|tools/versions\.env$|tools/scripts/(ci-submodule|check-covers)\.sh$|tools/scripts/check-kani-record\.py$|\.github/workflows/shared-pool\.yml$)'
+          re='^(projects/shared-pool/kani/|projects/shared-pool/source-mirror$|projects/shared-pool/conformance/traces/core\.txt$|\.gitmodules$|tools/versions\.env$|tools/scripts/(ci-submodule|check-covers)\.sh$|tools/scripts/check-kani-record\.py$|\.github/workflows/shared-pool\.yml$)'
           kani=true
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
             kani=${KANI_INPUT:-true}
@@ -147,13 +149,16 @@ jobs:
           fi
           echo "kani=$kani" | tee -a "$GITHUB_OUTPUT"
           # The large groups and mutants (peaks above 13 GB) run here only
-          # on KANI_RUNNER (kani-large, kani-mutants-large): when it is set
-          # and this run is not routed to ubuntu-latest. Otherwise
-          # kani-record checks their local record (kani/local).
+          # on KANI_RUNNER (kani-large when kani is true, kani-mutants-large
+          # with the `mutants` input): when it is set, is not ubuntu-latest
+          # (on whose swap they failed or crawled), and this run is not
+          # routed to ubuntu-latest. kani-record checks their local record
+          # (kani/local) on every run, and excuses a stale one only for what
+          # those jobs verify in the same run.
           large=false
-          if [ -n "$KANI_RUNNER" ] && [ "$KANI_JOB_RUNNER" = "$KANI_RUNNER" ]; then large=true; fi
+          if [ -n "$KANI_RUNNER" ] && [ "$KANI_RUNNER" != ubuntu-latest ] && [ "$KANI_JOB_RUNNER" = "$KANI_RUNNER" ]; then large=true; fi
           echo "large=$large" | tee -a "$GITHUB_OUTPUT"
-          echo "### Large Kani groups: $([ "$large" = true ] && echo "on KANI_RUNNER ($KANI_RUNNER)" || echo "from the local record (kani/local)")" >>"$GITHUB_STEP_SUMMARY"
+          echo "### Large Kani groups: $([ "$large" = true ] && [ "$kani" = true ] && echo "kani-large on KANI_RUNNER ($KANI_RUNNER)" || echo "from the local record (kani/local)")" >>"$GITHUB_STEP_SUMMARY"
       - name: Check out shared-pool-controls at the pin
         run: tools/scripts/ci-submodule.sh projects/shared-pool/source-mirror
       - name: Python >= 3.11 (tomllib)
@@ -265,29 +270,33 @@ jobs:
   #   run.sh and KANI_TIMEOUT, two at a time on the 64 GB Mac, and
   #   kani/local/record.py writes the record to kani/local
   #   (kani/local/README.md): the run's commit, a fingerprint of the Kani
-  #   inputs (the git object ids of kani/src, Cargo.toml, Cargo.lock,
-  #   mutants, run.sh, .gitignore, the source-mirror gitlink and
-  #   conformance/traces/core.txt, and versions.env's KANI and CBMC), each
+  #   inputs (every file under kani/ but kani/local and the Markdown, with
+  #   the git object ids of kani/src, Cargo.toml, Cargo.lock, mutants,
+  #   run.sh and .gitignore on their own lines; the source-mirror gitlink
+  #   and conformance/traces/core.txt; versions.env's KANI and CBMC), each
   #   harness's and mutant's result, time, peak and limit, and the
   #   harnesses' covers.
   # kani-large and kani-mutants-large run only when the KANI_RUNNER
   # repository variable names a runner with at least 49 GB (1.25 times
-  # h_wedge's peak) and this run is not routed (see above `jobs:`): the pin
-  # job's `large` output. Otherwise the kani-record job stands in for them
-  # (tools/scripts/check-kani-record.py): it fails when the record's
-  # fingerprint is not this commit's ("re-run the local Kani record"), a
-  # recorded harness is not ok or a recorded mutant not as its patch
-  # expects, or the record and the kani groups do not cover `run.sh list`
-  # exactly once (kani-large's groups must be the recorded harnesses; the
-  # same for the mutants), and the covers job counts the recorded
-  # harnesses and their covers with the groups'. With KANI_RUNNER,
-  # kani-record still runs, and a stale record is only a warning.
+  # h_wedge's peak), not ubuntu-latest, and this run is not routed (see
+  # above `jobs:`): the pin job's `large` output. The kani-record job
+  # (tools/scripts/check-kani-record.py) checks the record on every run: it
+  # fails when the record's fingerprint is not this commit's ("re-run the
+  # local Kani record"), a recorded harness is not ok or a recorded mutant
+  # not as its patch expects, or the record and the kani groups do not
+  # cover `run.sh list` exactly once (kani-large's groups must be the
+  # recorded harnesses; the same for the mutants). The covers job counts
+  # the recorded harnesses and their covers with the groups'. A stale
+  # record is only a warning when this run verifies everything it records:
+  # kani-large its harnesses and kani-mutants-large (manual, `mutants`)
+  # its mutants, both on KANI_RUNNER.
   # The Kani jobs take KANI_RUNNER, then CI_RUNNER, then ubuntu-latest, as
   # near-approval's do; routed runs always get ubuntu-latest (and the local
   # record). A group that runs out of time fails (TIMEOUT in the job's
   # output and logs). Nothing is skipped: a group passes only if every
   # harness in it does. A runner whose memory plus swap is below a group's
-  # peak fails that group at once (the runner-size step).
+  # peak fails that group at once (the runner-size step), and so does, in
+  # kani-large and kani-mutants-large, a hosted runner whose memory is.
   #
   # Per group: gb is the largest measured peak, rounded up. KANI_MAX_GB is
   # 1.5 times gb: a harness that needs half as much again as it did has
@@ -524,11 +533,11 @@ jobs:
   kani-large:
     # The groups that peaked above 13 GB, run as the kani job runs its
     # own, on KANI_RUNNER only: the pin job's `large` output is true when
-    # KANI_RUNNER is set and this run is not routed, so the runs-on below
-    # resolves to it. Without it kani-record checks these groups' local
-    # record instead (see above `plain:`). No swap step: on hosted swap
-    # these groups failed or crawled; KANI_RUNNER must hold them in memory
-    # (the runner-size step).
+    # KANI_RUNNER is set, is not ubuntu-latest, and this run is not routed,
+    # so the runs-on below resolves to it. Without it kani-record checks
+    # these groups' local record instead (see above `plain:`). No swap
+    # step: on hosted swap these groups failed or crawled, so a hosted
+    # KANI_RUNNER must hold them in memory (the runner-size step).
     needs: pin
     if: needs.pin.outputs.kani == 'true' && needs.pin.outputs.large == 'true'
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.KANI_RUNNER || vars.CI_RUNNER || 'ubuntu-latest' }}
@@ -588,6 +597,8 @@ jobs:
           cbmc_bin="${KANI_HOME:-$HOME/.kani}/kani-$KANI/bin/cbmc"
           "$cbmc_bin" --version | grep -q "^$CBMC" || { echo "CBMC is not $CBMC"; "$cbmc_bin" --version; exit 1; }
       - name: Runner size against the measured peak
+        env:
+          RUNNER_KIND: ${{ runner.environment }}
         run: |
           if [ "$RUNNER_OS" = macOS ]; then
             ram=$(( $(sysctl -n hw.memsize) / 1073741824 )); swap=
@@ -597,6 +608,12 @@ jobs:
           fi
           echo "::notice::runner has $(getconf _NPROCESSORS_ONLN) CPUs, $ram GB memory, ${swap:-dynamic} GB swap; this job's harnesses peaked at $GB GB (kani/RESULTS.md)"
           if [ "$ram" -lt "$GB" ]; then
+            # The large entries do not run on a hosted runner's swap: there
+            # they failed or crawled (CI runs 43469880167, 43488691444).
+            if [ "$RUNNER_KIND" = github-hosted ]; then
+              echo "::error::this job's harnesses peaked at $GB GB and this hosted runner has $ram GB of memory: set KANI_RUNNER to a runner with at least $(( (GB * 5 + 3) / 4 )) GB, or unset it so that kani-record checks the local record (strategy.md section 14)"
+              exit 1
+            fi
             if [ -n "$swap" ] && [ $(( ram + swap )) -lt "$GB" ]; then
               echo "::error::this job's harnesses peaked at $GB GB and the runner has $ram GB of memory and $swap GB of swap: set KANI_RUNNER to a runner with at least $(( (GB * 5 + 3) / 4 )) GB (strategy.md section 14)"
               exit 1
@@ -655,9 +672,10 @@ jobs:
     # mutants (kani/local; see above `plain:`), on every run:
     # tools/scripts/check-kani-record.py after its self-test. Seconds; no
     # submodule (the fingerprint reads git objects: the gitlink is the
-    # core's commit). With KANI_RUNNER (the pin job's `large`) kani-large
-    # verifies those groups in this run, so a stale record is a warning
-    # there, not a failure.
+    # core's commit). A stale record fails, unless this run verifies all
+    # it records on KANI_RUNNER: kani-large its harnesses (the pin job's
+    # `kani` and `large`), kani-mutants-large its mutants (`mutants` and
+    # `large`). Then it is a warning.
     needs: pin
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
@@ -669,13 +687,14 @@ jobs:
         run: tools/scripts/test-check-kani-record.sh
       - name: The local record is this commit's, ok, and splits the harnesses and mutants with the groups
         env:
-          LARGE: ${{ needs.pin.outputs.large }}
+          # Whether kani-large and kani-mutants-large run (their `if:`).
+          LARGE_HARNESSES: ${{ needs.pin.outputs.kani == 'true' && needs.pin.outputs.large == 'true' }}
+          LARGE_MUTANTS: ${{ inputs.mutants == true && needs.pin.outputs.large == 'true' }}
         run: |
-          if [ "$LARGE" = true ]; then
-            tools/scripts/check-kani-record.py --stale-ok
-          else
-            tools/scripts/check-kani-record.py
-          fi
+          args=()
+          if [ "$LARGE_HARNESSES" = true ]; then args+=(--stale-ok-harnesses); fi
+          if [ "$LARGE_MUTANTS" = true ]; then args+=(--stale-ok-mutants); fi
+          tools/scripts/check-kani-record.py ${args[@]+"${args[@]}"}
 
   covers:
     # Every harness of kani/run.sh in exactly one kani or kani-large group,
@@ -688,7 +707,9 @@ jobs:
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
     env:
-      LARGE: ${{ needs.pin.outputs.large }}
+      # Whether kani-large ran (its `if:`): then its logs hold the large
+      # groups' harnesses and covers, else the local record does.
+      LARGE: ${{ needs.pin.outputs.kani == 'true' && needs.pin.outputs.large == 'true' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -871,7 +892,8 @@ jobs:
     # The 16 mutants whose killed-by (or checked-by) harness peaked above
     # 13 GB, run as kani-mutants runs its own, on KANI_RUNNER only (the pin
     # job's `large`; see kani-large); without it kani-record checks their
-    # local record. Manual runs with `mutants` only.
+    # local record. Manual runs with `mutants` only. No swap step, and a
+    # hosted runner must hold them in memory (the runner-size step).
     needs: pin
     if: inputs.mutants && needs.pin.outputs.large == 'true'
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.KANI_RUNNER || vars.CI_RUNNER || 'ubuntu-latest' }}
@@ -934,6 +956,8 @@ jobs:
           cbmc_bin="${KANI_HOME:-$HOME/.kani}/kani-$KANI/bin/cbmc"
           "$cbmc_bin" --version | grep -q "^$CBMC" || { echo "CBMC is not $CBMC"; "$cbmc_bin" --version; exit 1; }
       - name: Runner size against the measured peak
+        env:
+          RUNNER_KIND: ${{ runner.environment }}
         run: |
           if [ "$RUNNER_OS" = macOS ]; then
             ram=$(( $(sysctl -n hw.memsize) / 1073741824 )); swap=
@@ -943,6 +967,12 @@ jobs:
           fi
           echo "::notice::runner has $(getconf _NPROCESSORS_ONLN) CPUs, $ram GB memory, ${swap:-dynamic} GB swap; this job's harnesses peaked at $GB GB (kani/RESULTS.md)"
           if [ "$ram" -lt "$GB" ]; then
+            # The large entries do not run on a hosted runner's swap: there
+            # they failed or crawled (CI runs 43469880167, 43488691444).
+            if [ "$RUNNER_KIND" = github-hosted ]; then
+              echo "::error::this job's harnesses peaked at $GB GB and this hosted runner has $ram GB of memory: set KANI_RUNNER to a runner with at least $(( (GB * 5 + 3) / 4 )) GB, or unset it so that kani-record checks the local record (strategy.md section 14)"
+              exit 1
+            fi
             if [ -n "$swap" ] && [ $(( ram + swap )) -lt "$GB" ]; then
               echo "::error::this job's harnesses peaked at $GB GB and the runner has $ram GB of memory and $swap GB of swap: set KANI_RUNNER to a runner with at least $(( (GB * 5 + 3) / 4 )) GB (strategy.md section 14)"
               exit 1

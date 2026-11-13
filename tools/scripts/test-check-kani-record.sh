@@ -4,7 +4,9 @@
 # records and passes the check; an incomplete, failed or foreign run is
 # refused and leaves the record alone; and each kind of stale, wrong or
 # inconsistent record, and each workflow matrix that does not split the
-# harnesses and mutants with the record, fails the check.
+# harnesses and mutants with the record, fails the check. Commits with
+# other Kani inputs are made in a scratch object directory over the
+# repository's (no object, ref or index of the repository is written).
 #
 # usage: tools/scripts/test-check-kani-record.sh
 set -uo pipefail
@@ -111,12 +113,23 @@ expect() {
   fi
 }
 
-# run_record <run dir> <record dir> [RESULTS.md]
-run_record() { KANI_RECORD_DIR="$2" KANI_RESULTS_MD="${3:-$t/none.md}" "$record" "$1"; }
-# run_check <record dir> [workflow] [RESULTS.md] [args...]
+begin='<!-- kani-local-record: begin (kani/local/record.py writes this block; do not edit) -->'
+end='<!-- kani-local-record: end -->'
+# run_record <run dir> <record dir> [RESULTS.md, default: one with an old block]
+run_record() {
+  local r=${3:-$t/rr.md}
+  [ -n "${3:-}" ] || printf 'before\n%s\nold table\n%s\nafter\n' "$begin" "$end" >"$r"
+  KANI_RECORD_DIR="$2" KANI_RESULTS_MD="$r" "$record" "$1"
+}
+# run_check <record dir> [workflow] [RESULTS.md, default: the record's own
+# table in a block] [args...]
 run_check() {
-  local d=$1 w=${2:-$wf} r=${3:-$t/none.md}
+  local d=$1 w=${2:-$wf} r=${3:-}
   shift 3 2>/dev/null || shift $#
+  if [ -z "$r" ]; then
+    r="$t/auto.md"
+    { echo "$begin"; KANI_RECORD_DIR="$d" "$record" table 2>/dev/null; echo "$end"; } >"$r"
+  fi
   KANI_RECORD_DIR="$d" KANI_RECORD_WORKFLOW="$w" KANI_RESULTS_MD="$r" "$check" "$@"
 }
 
@@ -150,6 +163,16 @@ refuse "foreign kani tree" "kani-tree" "s = re.sub(r'(?m)^kani-tree .*$', 'kani-
 refuse "other Kani version" "is not Kani" "s = re.sub(r'(?m)^kani .*$', 'kani Kani Rust Verifier 0.0.1 (cargo plugin)', s)" env.txt
 refuse "other CBMC version" "is not CBMC" "s = re.sub(r'(?m)^cbmc .*$', 'cbmc 1.0.0 (cbmc-1.0.0)', s)" env.txt
 refuse "unknown commit" "not in this repository" "s = re.sub(r'(?m)^commit .*$', 'commit ' + 'f' * 40, s)" env.txt
+# A mutant whose Kani leg left no log is not recorded from its header.
+rm -rf "$t/bad" "$t/rec2"; cp -R "$t/run" "$t/bad"; cp -R "$t/good" "$t/rec2"
+find "$t/bad/logs/mutant-25" -name '25-*.h_*.log' -exec rm {} +
+expect 1 "a mutant without its Kani log" "mutant-25 .*no log of its Kani leg" run_record "$t/bad" "$t/rec2"
+cmp -s "$t/good/jobs.tsv" "$t/rec2/jobs.tsv" || { echo "FAIL: a mutant without its Kani log: the record changed"; fail=1; }
+# RESULTS.md without the block: refused, nothing written.
+printf 'no block here\n' >"$t/noblock.md"
+expect 1 "RESULTS.md without a block" "has no local-record block" run_record "$t/run" "$t/rec2" "$t/noblock.md"
+cmp -s "$t/good/jobs.tsv" "$t/rec2/jobs.tsv" && [ "$(cat "$t/noblock.md")" = "no block here" ] ||
+  { echo "FAIL: RESULTS.md without a block: the record or RESULTS.md changed"; fail=1; }
 # Complete and ok, but not the workflow's large jobs: the check refuses it.
 rm -rf "$t/bad" "$t/rec2"; cp -R "$t/run" "$t/bad"; cp -R "$t/good" "$t/rec2"
 edit "$t/bad/results.tsv" "s = re.sub(r'(?m)^h_wedge\t.*\n', '', s)"
@@ -162,6 +185,59 @@ expect 1 "a missing run directory" "no env.txt" run_record "$t/nowhere" "$t/rec2
 bad() { rm -rf "$t/r"; cp -R "$t/good" "$t/r"; }
 expect 1 "no record" "no local Kani record" run_check "$t/empty"
 
+# Commits with other Kani inputs, in the scratch object directory: HEAD plus
+# kani/.cargo/config.toml (a new file, which can set rustflags), HEAD with
+# kani/run.sh changed, and HEAD with only the Markdown and kani/local
+# changed. at <commit> <command...>: the check compares with that commit.
+objs="$t/objects"; mkdir -p "$objs"
+alt="$(cd "$root" && cd "$(git rev-parse --git-common-dir)" && pwd)/objects"
+sgit() {
+  GIT_OBJECT_DIRECTORY="$objs" GIT_ALTERNATE_OBJECT_DIRECTORIES="$alt" GIT_INDEX_FILE="$t/index" \
+    GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid \
+    git -C "$root" "$@"
+}
+commit_with() { # commit_with <path> <content> [<path> <content>...]: its id
+  local b
+  sgit read-tree HEAD || return 1
+  while [ $# -ge 2 ]; do
+    b=$(printf '%s\n' "$2" | sgit hash-object -w --stdin) && sgit update-index --add --cacheinfo "100644,$b,$1" || return 1
+    shift 2
+  done
+  sgit commit-tree "$(sgit write-tree)" -p HEAD -m test
+}
+at() { local rev=$1; shift; KANI_RECORD_REV=$rev GIT_OBJECT_DIRECTORY=$objs GIT_ALTERNATE_OBJECT_DIRECTORIES=$alt "$@"; }
+k=projects/shared-pool/kani
+c_cfg=$(commit_with "$k/.cargo/config.toml" '[build]
+rustflags = ["-C", "overflow-checks=off"]')
+c_run=$(commit_with "$k/run.sh" "$(git -C "$root" show "HEAD:$k/run.sh")
+# changed")
+c_doc=$(commit_with "$k/RESULTS.md" "$(git -C "$root" show "HEAD:$k/RESULTS.md")
+more prose" "$k/local/provenance.txt" "another record")
+if [ -z "$c_cfg" ] || [ -z "$c_run" ] || [ -z "$c_doc" ] || [ -n "$(git -C "$root" cat-file -t "$c_cfg" 2>/dev/null)" ]; then
+  echo "FAIL: could not make the scratch commits (or they reached the repository's objects)"; fail=1
+fi
+cfg_changed='kani/\(all but local, \*\.md\) changed \(projects/shared-pool/kani/\.cargo/config\.toml\)'
+expect 1 "a new file under kani/ (.cargo/config.toml): stale" "$cfg_changed; nothing in this run verifies.*re-run the local Kani record" \
+  at "$c_cfg" run_check "$t/good"
+expect 0 "stale with --stale-ok (kani-large and kani-mutants-large run)" "warning: .*$cfg_changed.*re-run the local Kani record" \
+  at "$c_cfg" run_check "$t/good" "" "" --stale-ok
+expect 0 "stale with --stale-ok-harnesses --stale-ok-mutants" "warning: .*$cfg_changed" \
+  at "$c_cfg" run_check "$t/good" "" "" --stale-ok-harnesses --stale-ok-mutants
+expect 1 "stale with --stale-ok-harnesses only (no kani-mutants-large)" "verifies its [0-9]+ mutants \(no kani-mutants-large jobs\)" \
+  at "$c_cfg" run_check "$t/good" "" "" --stale-ok-harnesses
+expect 1 "stale with --stale-ok-mutants only (no kani-large)" "verifies its [0-9]+ harnesses \(no kani-large jobs\);" \
+  at "$c_cfg" run_check "$t/good" "" "" --stale-ok-mutants
+expect 1 "kani/run.sh changed: stale" "kani/run.sh, projects/shared-pool/kani/\(all but local, \*\.md\) changed \(projects/shared-pool/kani/run\.sh\)" \
+  at "$c_run" run_check "$t/good"
+expect 0 "only the Markdown and kani/local changed: current" "local Kani record ok: .*fingerprint [0-9a-f]{12};" \
+  at "$c_doc" run_check "$t/good"
+expect 2 "an unknown flag" "" run_check "$t/good" "" "" --stale-ok-everything
+
+# Provenance that is not its commit's: HEAD's input lines and fingerprint
+# under another commit, and input lines changed with a recomputed
+# fingerprint. A commit this clone lacks (a shallow checkout) is skipped.
+bad; edit "$t/r/provenance.txt" "s = re.sub(r'(?m)^commit\t.*$', 'commit\t$c_cfg', s)"
+expect 1 "another commit's provenance" "the fingerprint is not commit [0-9a-f]{12}'s" at HEAD run_check "$t/r"
 bad; edit "$t/r/provenance.txt" "s = re.sub(r'(?m)^(input\tprojects/shared-pool/kani/run.sh\t).*$', r'\g<1>' + '1' * 40, s)"
 py -c "
 import hashlib, re, sys
@@ -169,8 +245,11 @@ p = sys.argv[1]; s = open(p).read()
 lines = re.findall(r'(?m)^input\t(.*)$', s)
 fp = hashlib.sha256(''.join(l + '\n' for l in lines).encode()).hexdigest()
 open(p, 'w').write(re.sub(r'(?m)^fingerprint\t.*$', 'fingerprint\t' + fp, s))" "$t/r/provenance.txt"
-expect 1 "stale fingerprint" "kani/run.sh changed.*re-run the local Kani record" run_check "$t/r"
-expect 0 "stale fingerprint with --stale-ok" "warning: .*re-run the local Kani record" run_check "$t/r" "$wf" "$t/none.md" --stale-ok
+expect 1 "input lines changed and re-hashed by hand" "the fingerprint is not commit [0-9a-f]{12}'s" run_check "$t/r"
+bad; edit "$t/r/provenance.txt" "s = re.sub(r'(?m)^commit\t.*$', 'commit\t' + 'e' * 40, s)"
+expect 0 "a commit this clone lacks (shallow checkout)" "local Kani record ok: commit eeeeeeeeeeee" run_check "$t/r"
+bad; edit "$t/r/provenance.txt" "s = re.sub(r'(?m)^commit\t.*$', 'commit\tHEAD', s)"
+expect 1 "a commit that is not a full id" "commit 'HEAD' is not a full commit id" run_check "$t/r"
 bad; edit "$t/r/provenance.txt" "s = re.sub(r'(?m)^(input\ttools/versions.env:CBMC\t).*$', r'\g<1>9.9.9', s)"
 expect 1 "fingerprint edited by hand" "not the hash of its input lines" run_check "$t/r"
 bad; edit "$t/r/jobs.tsv" "s = s.replace('\th_wedge\tok\t', '\th_wedge\tFAILED\t')"
@@ -212,6 +291,8 @@ expect 1 "no kani-large job" "no matrix entries for the kani-large job" run_chec
 expect 0 "RESULTS.md block current" "" run_check "$t/good" "$wf" "$t/results.md"
 cp "$t/results.md" "$t/stale.md"; edit "$t/stale.md" "s = s.replace('| \`h_wedge\` | ok |', '| \`h_wedge\` | ok?? |')"
 expect 1 "RESULTS.md block stale" "not the record's table" run_check "$t/good" "$wf" "$t/stale.md"
+expect 1 "RESULTS.md without the block" "has no local-record block" run_check "$t/good" "$wf" "$t/noblock.md"
+expect 1 "no RESULTS.md" "none.md does not exist" run_check "$t/good" "$wf" "$t/none.md"
 
 # Subcommands the covers job uses.
 want=$("$check" matrix kani-large | cut -f1 | tr ' ' '\n' | sort)
@@ -222,27 +303,37 @@ awk -F'\t' 'NF != 3 {bad=1} END {exit bad}' "$t/covers.tsv" && [ "$(wc -l <"$t/c
   "$here/check-covers.sh" "$t/covers.tsv" >/dev/null ||
   { echo "FAIL: covers: not run.sh's covers.tsv format, or check-covers.sh rejects it"; fail=1; }
 
-# The fingerprint: each input's git object id, and versions.env's KANI and
-# CBMC, in a repository with only those paths; one input changed changes it.
+# The fingerprint: each named input's git object id, the kani/ tree less
+# local/ and the Markdown, and versions.env's KANI and CBMC, in a repository
+# with only those paths. One input changed changes its line(s) and the
+# fingerprint only; a new file under kani/ changes the kani/ line; the
+# Markdown and kani/local change nothing.
 g="$t/repo"
 mkdir -p "$g/projects/shared-pool/kani/src" "$g/projects/shared-pool/kani/mutants" "$g/projects/shared-pool/conformance/traces" "$g/tools"
 ( cd "$g" && git init -q && git config user.email t@example.invalid && git config user.name t &&
   echo a >projects/shared-pool/kani/src/lib.rs && echo m >projects/shared-pool/kani/mutants/01-x.patch &&
   echo r >projects/shared-pool/kani/run.sh && echo c >projects/shared-pool/kani/Cargo.toml &&
   echo l >projects/shared-pool/kani/Cargo.lock && echo /target >projects/shared-pool/kani/.gitignore && echo t >projects/shared-pool/conformance/traces/core.txt &&
+  echo results >projects/shared-pool/kani/RESULTS.md &&
   printf 'RUST_TOOLCHAIN=1\nKANI=0.68.0\nCBMC=6.11.0\n' >tools/versions.env &&
   git add -A && git update-index --add --cacheinfo "160000,$(printf '%040d' 1),projects/shared-pool/source-mirror" &&
   git commit -qm one && echo r2 >projects/shared-pool/kani/run.sh && git commit -qm two projects/shared-pool/kani/run.sh &&
-  sed -i.bak 's/^KANI=.*/KANI=0.69.0/' tools/versions.env && rm tools/versions.env.bak && git commit -qm three tools/versions.env ) ||
+  sed -i.bak 's/^KANI=.*/KANI=0.69.0/' tools/versions.env && rm tools/versions.env.bak && git commit -qm three tools/versions.env &&
+  mkdir projects/shared-pool/kani/.cargo && echo '[build]' >projects/shared-pool/kani/.cargo/config.toml &&
+  git add projects/shared-pool/kani/.cargo && git commit -qm four &&
+  echo more >>projects/shared-pool/kani/RESULTS.md && mkdir projects/shared-pool/kani/local &&
+  echo record >projects/shared-pool/kani/local/provenance.txt && git add projects/shared-pool/kani && git commit -qm five ) ||
   { echo "FAIL: could not build the fingerprint repository"; fail=1; }
 fp() { KANI_RECORD_ROOT="$g" "$check" fingerprint "$1"; }
-tab=$(printf '\t')
-d12=$(diff <(fp HEAD~2) <(fp HEAD~1) | grep -c '^[<>]')
-d23=$(diff <(fp HEAD~1) <(fp HEAD) | grep '^>' | cut -f1)
-if [ "$d12" != 4 ] || [ "$d23" != "$(printf '> tools/versions.env:KANI\n> fingerprint')" ] ||
-   [ "$(fp HEAD~2 | grep -c .)" != 11 ] || ! fp HEAD | grep -qx "projects/shared-pool/source-mirror$tab$(printf '%040d' 1)"; then
-  echo "FAIL: fingerprint: one changed input must change its line and the fingerprint only"
-  fp HEAD~2 | sed 's/^/  /'; fail=1
+changed() { diff <(fp "$1") <(fp "$2") | grep '^>' | cut -f1 | tr '\n' ' '; }
+all='projects/shared-pool/kani/(all but local, *.md)'
+if [ "$(changed HEAD~4 HEAD~3)" != "> projects/shared-pool/kani/run.sh > $all > fingerprint " ] ||
+   [ "$(changed HEAD~3 HEAD~2)" != "> tools/versions.env:KANI > fingerprint " ] ||
+   [ "$(changed HEAD~2 HEAD~1)" != "> $all > fingerprint " ] || [ -n "$(changed HEAD~1 HEAD)" ] ||
+   [ "$(fp HEAD~4 | grep -c .)" != 12 ] || ! fp HEAD | grep -qx "projects/shared-pool/source-mirror$(printf '\t')$(printf '%040d' 1)"; then
+  echo "FAIL: fingerprint: one changed input must change its line(s) and the fingerprint only"
+  for n in 4 3 2 1; do echo "  HEAD~$n to HEAD~$((n - 1)): $(changed "HEAD~$n" "HEAD~$((n - 1))")"; done
+  fp HEAD~4 | sed 's/^/  /'; fail=1
 fi
 expect 1 "fingerprint of a missing input" "is not in the repository" env KANI_RECORD_ROOT="$t" "$check" fingerprint HEAD
 

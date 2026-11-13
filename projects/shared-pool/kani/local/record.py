@@ -3,12 +3,13 @@
 
 usage: record.py RUN_DIR   check a run of run-local.py (complete; every job
                            exit 0; every harness ok; every mutant as its patch
-                           expects; the run's commit has HEAD's Kani inputs and
-                           Kani/CBMC versions) and write provenance.txt,
-                           jobs.tsv and covers.tsv into this directory; if
-                           kani/RESULTS.md has a local-record block, rewrite it
-                           with the new table. Refuses (exit 1, the record
-                           untouched) otherwise, or if
+                           expects, with the log of its Kani leg; the run's
+                           commit has HEAD's Kani inputs and Kani/CBMC
+                           versions) and write provenance.txt, jobs.tsv and
+                           covers.tsv into this directory, and the new table
+                           into kani/RESULTS.md's local-record block. Refuses
+                           (exit 1, the record and RESULTS.md untouched)
+                           otherwise, if RESULTS.md has no such block, or if
                            tools/scripts/check-kani-record.py fails on the new
                            record.
        record.py table     print the record's Markdown: provenance, the
@@ -181,10 +182,16 @@ def read_run(run):
                 problems.append("%s (%s): expect/plain/kani %s%s, want %s"
                                 % (name, full, got, " UNEXPECTED" if "UNEXPECTED" in rest else "", "/".join(exp)))
                 continue
+            # Its Kani leg ran: run.sh keeps a log per harness (KEEP_LOGS).
             ran = [h for h in header if os.path.exists(os.path.join(d, "%s.%s.log" % (full, h)))]
+            if not ran:
+                problems.append("%s (%s): no log of its Kani leg in logs/%s (%s)"
+                                % (name, full, name, ", ".join("%s.%s.log" % (full, h) for h in header)
+                                   or "its patch names no killed-by or checked-by harness"))
+                continue
             rows.append(dict(kind="mutant", name=full, result=got, seconds=r["secs"], job_seconds=r["secs"],
                              cbmc_peak_gb=r["peak_cbmc_gb"], tree_peak_gb=r["peak_tree_gb"],
-                             limit_s=str(j["timeout"]), covers="-", kani_harnesses=",".join(ran or header),
+                             limit_s=str(j["timeout"]), covers="-", kani_harnesses=",".join(ran),
                              started_utc=r["start_utc"]))
         else:
             problems.append("%s: kind %r" % (name, j["kind"]))
@@ -249,13 +256,15 @@ def provenance(env, rows):
     tail = [
         ("kani", env.get("kani", "")),
         ("cbmc", cbmc),
-        ("rustc", env.get("rustc") or "not recorded (the host's default toolchain; plain mode only)"),
+        ("rustc", env.get("rustc") or "not recorded (the host's default toolchain, for the mutants' plain mode)"),
         ("host", env["host"]),
         ("started", env["started"]),
         ("finished", env["finished"]),
         ("parallel", "%s jobs at a time, their measured peaks summing to at most %s GB"
          % (env.get("lanes"), env.get("budget-gb"))),
         ("kani_max_gb", env.get("kani-max-gb") or "40 (run.sh's default)"),
+        ("kani_env", env.get("kani-env") or "not recorded (the run's other KANI_* variables)"),
+        ("cargo_config", env.get("cargo-config") or "not recorded (cargo configuration outside the Kani tree)"),
         ("runner", env.get("runner") or "sched.py, the prototype of kani/local/run-local.py (same jobs, lanes "
                                          "and sampling)"),
         ("jobs", "%d harnesses, %d mutants" % (nh, len(rows) - nh)),
@@ -359,11 +368,12 @@ def write(run):
         write_record(tmp, meta, inputs, fp, tail, rows, covers)
         tbl = table(tmp)
         new_results = results_with_block(tbl)
-        check_env = dict(os.environ, KANI_RECORD_DIR=tmp)
-        if new_results is not None:
-            with open(os.path.join(tmp, "RESULTS.md"), "w") as f:
-                f.write(new_results)
-            check_env["KANI_RESULTS_MD"] = os.path.join(tmp, "RESULTS.md")
+        if new_results is None:
+            raise Refuse("%s has no local-record block (the check requires one): put\n  %s\n  %s\n"
+                         "into it, and record.py fills it" % (os.path.relpath(RESULTS_MD), BEGIN, END))
+        with open(os.path.join(tmp, "RESULTS.md"), "w") as f:
+            f.write(new_results)
+        check_env = dict(os.environ, KANI_RECORD_DIR=tmp, KANI_RESULTS_MD=os.path.join(tmp, "RESULTS.md"))
         # The check's RESULTS.md block compares with `record.py table` of
         # KANI_RECORD_DIR, which this process's children inherit.
         r = subprocess.run([sys.executable, "-I", CHECK], env=check_env, capture_output=True, text=True)
@@ -372,20 +382,15 @@ def write(run):
         os.makedirs(RECORD, exist_ok=True)
         for f in ("jobs.tsv", "covers.tsv", "provenance.txt"):
             shutil.copyfile(os.path.join(tmp, f), os.path.join(RECORD, f))
-        if new_results is not None:
-            with open(RESULTS_MD, "w") as f:
-                f.write(new_results)
+        with open(RESULTS_MD, "w") as f:
+            f.write(new_results)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     nh = sum(1 for r in rows if r["kind"] == "harness")
     print("recorded %d harnesses and %d mutants of %s (commit %s, fingerprint %s) in %s"
           % (nh, len(rows) - nh, run, meta[0][1][:12], fp[:12], os.path.relpath(RECORD)))
     print(r.stdout.strip())
-    if new_results is not None:
-        print("rewrote the local-record block of %s" % os.path.relpath(RESULTS_MD))
-    else:
-        print("%s has no local-record block: put `record.py table` between\n  %s\n  %s"
-              % (os.path.relpath(RESULTS_MD), BEGIN, END))
+    print("rewrote the local-record block of %s" % os.path.relpath(RESULTS_MD))
     return 0
 
 
