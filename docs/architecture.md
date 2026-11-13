@@ -135,10 +135,14 @@ checked-in mutant killed. [`shared-pool.yml`](../.github/workflows/shared-pool.y
 calls these scripts directly. near-approval runs most layers through shared
 scripts instead (`tools/scripts/run-{kani,tla,lean,prolog}.sh near-approval`).
 For Kani, `plain` and `mutants` run plain mode on every run. When a change
-reaches the Kani layer, `kani` runs the 89 harnesses in 29 groups sized by
-the peaks in `kani/RESULTS.md`, and `covers` checks their covers together.
-36 harnesses peaked above 13 GB, up to 39 GB: their groups need a runner
-larger than GitHub's hosted one (`KANI_RUNNER`).
+reaches the Kani layer, `kani` runs the 53 harnesses that peaked at 13 GB
+or less (`kani/RESULTS.md`), in 8 groups, on GitHub's 16 GB hosted runner.
+The other 36 harnesses peaked at up to 39 GB; on that runner's swap they
+ran slowly, and some never finished. They and 16 Kani mutants were run
+locally on a 64 GB machine and recorded in `kani/local`, with a
+fingerprint of the Kani inputs. `kani-record` checks the record on every
+run, and `covers` checks the groups' covers and the record's together. A
+larger runner named by `KANI_RUNNER` runs the large groups in CI instead.
 
 **What near-approval has and shared-pool does not, yet.**
 - A cutoff (CUT-1): near-approval argues its Kani bounds suffice at every
@@ -259,5 +263,7 @@ bounded proof, and a Lean result never as a proof of the code (strategy §12).
 
 shared-pool's `status.toml` records 83 properties and 14 assumptions; none
 is past `in-progress`, and none may be until a spec reviewer signs. Its Kani
-rows also carry `kani_bound`, the bounds the bounded proof holds within.
+rows also carry `kani_bound`, the bounds the bounded proof holds within,
+and `kani_run`, which says whether CI reruns each harness or the local
+record holds it.
 Its strategy §12 adopts near-approval's conventions.

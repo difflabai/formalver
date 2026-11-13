@@ -86,10 +86,11 @@ env:
   CARGO_TERM_COLOR: always
 
 # Runner labels work as in near-approval.yml: each job takes CI_RUNNER and
-# falls back to ubuntu-latest; the kani and kani-mutants jobs take
-# KANI_RUNNER ahead of CI_RUNNER, as near-approval's kani job does. The
-# clause that opens each runs-on sends Dependabot and automated-agent runs
-# to ubuntu-latest. Keep every copy byte-identical with near-approval.yml's.
+# falls back to ubuntu-latest; the jobs that run CBMC (kani, kani-large,
+# kani-mutants, kani-mutants-large) take KANI_RUNNER ahead of CI_RUNNER,
+# as near-approval's kani job does. The clause that opens each runs-on
+# sends Dependabot and automated-agent runs to ubuntu-latest. Keep every
+# copy byte-identical with near-approval.yml's.
 # A self-hosted runner keeps HOME between jobs and has no sudo: no step runs
 # `rustup default`, caches are for hosted runners only, and the swap step
 # runs on hosted Linux only.

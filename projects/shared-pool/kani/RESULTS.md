@@ -44,7 +44,11 @@ failed on the final sources. Two tool hazards found and worked around:
 Kani 0.68.0 can give a written static and an equal constant the same
 storage, and a reference into a local array of structs at an index CBMC
 does not fold, passed to another function, read unconstrained values
-there ("Tool issues").
+there ("Tool issues"). These are this machine's runs (A to N). CI
+reruns the 53 harnesses that fit GitHub's hosted runner in memory; the
+other 36 harnesses and 16 mutants were run again locally at commit
+`89f99d6` and recorded, and CI checks that record instead of running
+them ("CI and the local record", "Local record").
 
 **REF-1..3** (run M, `run.sh ref`: 7 of 7 `ok`, "covers: 46 checked, all
 satisfied", exit 0). For every INV state and operation of the step bounds
@@ -88,17 +92,33 @@ that harness satisfies, so a family's own cover left unsatisfied fails
 the run, and the "0 of N" rows (`h_preview_post`, the `_tx`/`_post`/`_inv`
 parts, the non-submit `h_bmc_from_init_s_*`) do not.
 
-**CI, first run on GitHub's hosted runner** (run 43469880167,
-2026-11-13; `ubuntu-latest`, 4 CPUs, 15 GB, a swap file of 1.25 times
-each group's peak; the 29 groups of `.github/workflows/shared-pool.yml`).
-85 of the 89 harnesses verified as required, with the results of the
-table (`h_canary` FAILED on its own assertion only), in 0.9 to 4.3 times
-the time above. Four did not finish: `h_energy_max` (out of time at
-1,800 s), `h_validate` (2,400 s) and `h_bmc_from_init_s_submit`
-(3,600 s) on swap, and `h_bmc_from_init_po`, whose runner shut down
-after 33 minutes. For those four the results here are this machine's
-only. strategy.md section 14 has the numbers and the change to the
-workflow (twice the swap, the job's time on swap).
+**CI and the local record.** The peaks in "Kani results" split the
+work by what GitHub's hosted runner (`ubuntu-latest`: 4 CPUs, 16 GB,
+15.6 GB usable) holds in memory:
+- The workflow's `kani` job runs the 53 harnesses that peaked at 13 GB
+  or less, in 8 groups, whenever a change reaches the Kani layer.
+  `kani-mutants` (manual runs) runs the 15 mutants sized at 13 GB or
+  less by their named harness's peak.
+- The other 36 harnesses (21 groups, `kani-large`) and 16 mutants
+  (`kani-mutants-large`) do not fit. They were run on a local machine at
+  `89f99d6` and recorded ("Local record"). CI's `kani-record` job checks
+  that record on every run instead of running them again, and the
+  `covers` job counts the record's harnesses and covers with the
+  groups'. They run in CI only when the `KANI_RUNNER` repository
+  variable names a runner with at least 49 GB.
+
+Before the split, all 29 groups ran on the hosted runner, the large ones
+on swap. In run 43469880167 (2026-11-13, memory plus swap at 1.25 times
+each group's peak), 85 of the 89 harnesses verified as required, with
+the results of the table (`h_canary` FAILED on its own assertion only),
+in 0.9 to 4.3 times the table's times. `h_energy_max` (1,800 s),
+`h_validate` (2,400 s) and `h_bmc_from_init_s_submit` (3,600 s) ran out
+of time on swap, and `h_bmc_from_init_po`'s runner shut down after 33
+minutes. In run 43488691444 (commit `89f99d6`: memory plus swap at twice
+each group's peak, and on swap each harness's share of the job's time),
+27 of the 29 groups passed (87 harnesses). `h_bmc_from_init_s_submit`'s runner lost contact after
+52 minutes on swap, and `h_bmc_from_init_po` ran for over 3 hours before
+the run was cancelled. strategy.md section 14 has the workflow.
 
 ## Layout
 
@@ -115,6 +135,7 @@ workflow (twice the swap, the job's time on swap).
 | `src/model.rs` | The fixed-capacity `Vec::with_capacity_in` and `Vec::reserve` models (deviation 1), `h_init`'s free `Config::validate` (deviation 23), `h_best`'s free `Pool::candidate` and `Pool::energy` (deviation 24), and the tagged statics they record into ("Tool issues"). |
 | `mutants/*.patch` | 31 mutants: 30 of the core, 1 of `tla.rs` (`# applies-to: kani`; `# killed-by:` / `# must-survive` + `# checked-by:` headers). |
 | `run.sh` | The runner (per-harness timeout 1800 s, 7200 s for the `h_step_*_inv_3` parts; memory cap `KANI_MAX_GB`, per-loop unwinding, cover check, mutants). |
+| `local/` | The local record ("Local record"): `provenance.txt`, `jobs.tsv` and `covers.tsv` of the run at `89f99d6` of the 36 harnesses and 16 mutants too large for CI's hosted runner; `run-local.py` (runs them with `run.sh` and, with `--record`, records them), `record.py` (checks a finished run, writes the record and this file's block); `README.md` (format, fingerprint, commands). |
 
 ## Kani results
 
@@ -123,7 +144,11 @@ and 7200 s for `h_step_*_inv_3`, memory cap 40 GB, flags
 `--no-memory-safety-checks --no-assertion-reach-checks -Z stubbing`,
 unwinding assertions on). Times are wall clock per harness including
 compilation; peak is CBMC's resident memory (sampled every 3 s). Clauses are
-the CNF CBMC hands to CaDiCaL.
+the CNF CBMC hands to CaDiCaL. These peaks size CI's groups: a harness
+that peaked at 13 GB or less runs in the `kani` job, the others are in the
+local record ("CI and the local record"). The table is the reference
+measurement and is kept as measured; the local record's own times and
+peaks for the 36 larger harnesses are in "Local record".
 
 | Harness | Result | Time (s) | Peak (GB) | Clauses (M) | Covers SATISFIED (this harness) | Run |
 |---|---|---:|---:|---:|---|---|
@@ -257,6 +282,63 @@ bounds of loops that earlier passes had unrolled further (unwinding
 assertions are always on, so those passes stand). The failed and stopped
 attempts are in the cost ladder. Logs: `target/kani-logs*/<harness>.log`
 (not committed).
+
+## Local record
+
+The 36 harnesses of the workflow's `kani-large` groups (each peaked
+above 13 GB in "Kani results") and the 16 mutants of
+`kani-mutants-large` were run again at commit `89f99d6` of this
+repository (Kani tree `da291ce`, core pin `a4bb5c3`) on a 10-core, 64 GB
+Apple M1 Max, with Kani 0.68.0 and CBMC 6.11.0. The mutants are 01, 03,
+05, 06, 10, 11, 12, 15, 16, 18, 19, 21, 23, 25, 28 and 30: those whose
+named harness peaked above 13 GB, and mutant 21, which takes
+`h_full_256` past the record limit and is sized as `h_full_255`. Each
+job ran `run.sh` unchanged in a `git archive` copy of the commit's Kani
+inputs, with its CI matrix timeout as `KANI_TIMEOUT`,
+`KANI_DEFER_COVERS=1` and `run.sh`'s default memory cap of 40 GB, two
+jobs at a time. `kani/local/record.py` checked the finished run (every
+job exited 0, every harness `ok`, every mutant as its patch expects, the
+commit's Kani inputs the same as HEAD's) and wrote the record to
+`kani/local/` (`provenance.txt`, `jobs.tsv`, `covers.tsv`; format and
+commands in `kani/local/README.md`) and the block below.
+
+On every run, CI's `kani-record` job (`tools/scripts/check-kani-record.py`)
+checks that:
+- the record's fingerprint of the Kani inputs is the commit's. The
+  inputs are the git object ids of `kani/src`, `Cargo.toml`,
+  `Cargo.lock`, `mutants`, `run.sh` and `.gitignore`, the core's gitlink
+  and `conformance/traces/core.txt`, and `tools/versions.env`'s `KANI`
+  and `CBMC`;
+- `jobs.tsv` and `covers.tsv` match the digest in `provenance.txt`;
+- every recorded harness is `ok` and every recorded mutant as its patch
+  expects;
+- the `kani` groups and the record together are `run.sh list`, each
+  harness once, and `kani-mutants` and the record are `mutants/*.patch`,
+  each mutant once;
+- the block below is `record.py table`.
+
+A change to any Kani input fails that job until
+`kani/local/run-local.py --record` has been run at the new commit and
+the record committed. The `covers` job checks the record's covers with
+the groups'. CI cannot check that the run took place as recorded: the
+record, like the tables above, rests on the word of whoever ran it.
+Anyone with a 64 GB machine can repeat it with `run-local.py --record`
+and compare.
+
+The block's times and peaks are this run's, with two jobs at a time, so
+they need not equal the one-at-a-time measurements in "Kani results",
+which size the groups. A mutant's time is its whole job, plain mode
+included. Its plain mode used the host's default Rust toolchain
+(`provenance.txt`, `rustc`). CI's `mutants` job reruns every mutant's
+plain mode with `tools/versions.env`'s toolchain on every run.
+
+<!-- kani-local-record: begin (kani/local/record.py writes this block; do not edit) -->
+**PLACEHOLDER, not a result: the local record is not written yet.** The
+run at `89f99d6` is still in progress. When it has finished,
+`kani/local/record.py <run dir>` replaces this block with the record's
+provenance, its harness table and its mutant table.
+`check-kani-record.py` fails while this placeholder stands.
+<!-- kani-local-record: end -->
 
 ## Bounds
 
@@ -508,6 +590,12 @@ Plain mode over all 30: `run.sh mutants` in run J (266 s). With REF-1..3
 Kani harness): 30 killed, mutant 20 survived; `run.sh mutants --kani
 '31*'` (112 s): mutant 31 killed by `h_ref_cancel` ("REF-1 guard
 exactness", 15.96M clauses, one SAT call of 27 s).
+
+In CI ("CI and the local record"), the `mutants` job reruns all 31 in
+plain mode on every run. `kani-mutants` (manual runs) reruns under Kani
+the 15 sized at 13 GB or less by their named harness's peak. The other
+16 were run again at `89f99d6`, in plain mode and under Kani, and their
+rows are in the local record's mutant table ("Local record").
 
 | Mutant | What it changes | Expected | Plain | Kani (harness) |
 |---|---|---|---|---|

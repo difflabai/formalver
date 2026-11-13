@@ -10,10 +10,10 @@ CI checks the record instead of running them again.
 
 The split is in `.github/workflows/shared-pool.yml`:
 
-| Hosted runner (every Kani run) | Local record (or `KANI_RUNNER`) |
+| Hosted runner | Local record (or `KANI_RUNNER`) |
 |---|---|
-| `kani`: 53 harnesses in 8 groups, peaks of 13 GB or less | `kani-large`: 36 harnesses in 21 groups |
-| `kani-mutants`: 15 mutants | `kani-mutants-large`: 16 mutants |
+| `kani` (when a change reaches the Kani layer): 53 harnesses in 8 groups, peaks of 13 GB or less | `kani-large`: 36 harnesses in 21 groups |
+| `kani-mutants` (manual runs): 15 mutants | `kani-mutants-large`: 16 mutants |
 
 ## Files
 
