@@ -5,7 +5,7 @@
 # first_id + WINDOW, so only SettleVouch (StepExec) can kill it.
 --- a/Executor.tla
 +++ b/Executor.tla
-@@ -108,7 +108,7 @@
+@@ -117,7 +117,7 @@
  (* C:492-521 settle(executor, id, completed): the first failing guard,    *)
  (* "Noop" for the repeated terminal outcome (Ok, no change), or "Ok".     *)
  SettleErr(i, c) ==

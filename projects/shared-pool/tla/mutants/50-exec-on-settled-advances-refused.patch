@@ -5,7 +5,7 @@
 # (StepExec, at the refused settle) and by InvNewest.
 --- a/Executor.tla
 +++ b/Executor.tla
-@@ -122,7 +122,7 @@
+@@ -131,7 +131,7 @@
  (* E:153-160 on_settled(id): private, needs one promise result (E:155),   *)
  (* advance(id) unless the settle failed (E:157-159). As <<newest, jobs>>. *)
  Settled(i, ok) ==

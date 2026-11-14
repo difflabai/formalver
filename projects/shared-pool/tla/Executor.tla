@@ -27,6 +27,15 @@
 (* here each is free, so the model has every behaviour of the core and     *)
 (* more. A settle passes the bounds and version checks (LIVE-ALL,          *)
 (* INV-VERCAP, core layers). Every record's executor is this executor.     *)
+(* So this lock never refuses the settle of an in-flight record. The real  *)
+(* one can: Unauthorized (another executor's recipe, docs/api.md:42), or   *)
+(* Bounds or Arithmetic, which LIVE-ALL and INV-VERCAP exclude in every    *)
+(* reachable core state. Such a refusal writes nothing at the lock, and    *)
+(* on_settled then writes nothing (E:157), so receipt timing covers it:    *)
+(* the receipt is never delivered, or, for a confirmation, it is delivered *)
+(* while the record is Reserved (InvalidState) and the record is           *)
+(* dispatched afterwards. The equivalence is argued; a one-off run with    *)
+(* that refusal added held every invariant (w9b notes).                    *)
 (*                                                                         *)
 (* LockSideSettle is every way a record closes at the lock without the     *)
 (* executor contract's notify: on_result applying an execute result or a   *)
@@ -314,9 +323,9 @@ LiveCb   == {i \in cbQ : i > newest}
 Above == {j \in DOMAIN jobs : j > newest}
 View == <<firstId, recs, jobs, newest, LiveExec, LiveSet, LiveCb, made>>
 ViewRefused == <<View, refused \cap Above>>
-(* Cross-check of the quotient (not in run.sh): every variable but ev,    *)
-(* which only step properties read. At W = 2, NIds = MaxId = 4 it gives   *)
-(* the same verdicts as ViewRefused (w9b notes).                          *)
+(* Cross-check of the quotient: every variable but ev, which only step    *)
+(* properties read. At W = 2, NIds = MaxId = 4 it gives the same verdicts *)
+(* as ViewRefused (run.sh executor-w2-fullview, opt-in, about 4 min).     *)
 ViewFull == <<firstId, recs, jobs, newest, execQ, setQ, cbQ, made, refused>>
 
 -----------------------------------------------------------------------------

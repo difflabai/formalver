@@ -4,7 +4,7 @@
 # killed by InvJobWindow.
 --- a/Executor.tla
 +++ b/Executor.tla
-@@ -117,7 +117,7 @@
+@@ -126,7 +126,7 @@
  
  (* E:173-177 advance(id): newest = max(newest, id), then keep the jobs    *)
  (* with id + WINDOW > newest.                                             *)

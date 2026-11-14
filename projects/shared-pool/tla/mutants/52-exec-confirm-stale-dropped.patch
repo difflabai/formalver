@@ -4,7 +4,7 @@
 # InvJobWindow.
 --- a/Executor.tla
 +++ b/Executor.tla
-@@ -238,7 +238,7 @@
+@@ -247,7 +247,7 @@
  (* (E:136-141), then notify sends settle(id, false) (E:142).              *)
  Confirm(i) ==
      /\ i \notin DOMAIN jobs
