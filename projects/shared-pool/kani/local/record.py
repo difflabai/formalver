@@ -9,9 +9,10 @@ usage: record.py RUN_DIR   check a run of run-local.py (complete; every job
                            covers.tsv into this directory, and the new table
                            into kani/RESULTS.md's local-record block. Refuses
                            (exit 1, the record and RESULTS.md untouched)
-                           otherwise, if RESULTS.md has no such block, or if
+                           otherwise, if RESULTS.md has no such block, if
                            tools/scripts/check-kani-record.py fails on the new
-                           record.
+                           record, or if the run is a measurement
+                           (run-local.py --all), not a record's run.
        record.py table     print the record's Markdown: provenance, the
                            harness table and the mutant table (RESULTS.md's
                            local-record block)
@@ -361,6 +362,11 @@ def results_with_block(tbl):
 
 def write(run):
     run = os.path.abspath(run)
+    env_txt = os.path.join(run, "env.txt")
+    if os.path.exists(env_txt) and read_env(env_txt).get("mode", "").startswith("measurement"):
+        raise Refuse("%s is a measurement (run-local.py --all: every harness and mutant, to size the matrices), not "
+                     "a record's run: record the kani-large and kani-mutants-large jobs with run-local.py --record"
+                     % run)
     env, rows, covers = read_run(run)
     meta, inputs, fp, tail = provenance(env, rows)
     tmp = tempfile.mkdtemp(prefix="kani-record.")

@@ -31,12 +31,16 @@ it on top of the lane's copy of the commit's. Then pass --out outside the
 repository. env.txt records the other KANI_* variables and those files.
 
 usage: run-local.py [--out DIR] [--rev REV] [--lanes N] [--budget-gb GB]
-                    [--record] [--dry-run]
+                    [--record] [--dry-run] [--all [--only JOB,...]]
   --out DIR      output (default kani/target/local-run/run-<UTC time>)
   --rev REV      the commit to run (default HEAD)
   --record       when every job passed, run record.py DIR (writes kani/local;
                  then commit it)
   --dry-run      print the jobs and exit
+  --all          a measurement of every harness and mutant, not a record
+                 (below)
+  --only JOBS    with --all: only these jobs (comma-separated harness names
+                 and mutant-NN)
 
 Output, as record.py reads it: env.txt (commit, kani-tree, core-pin, tool
 versions, host, lanes, budget, start and end), jobs.json, progress.log
@@ -50,16 +54,45 @@ with the defaults. Needs Kani and its CBMC at tools/versions.env's versions
 the Rust toolchain RUST_TOOLCHAIN (rustup toolchain install <RUST_TOOLCHAIN>
 --profile minimal) and the source-mirror submodule (git submodule update
 --init projects/shared-pool/source-mirror).
+
+A measurement (--all) is not a record: it sizes the matrices (their 13 GB
+split and timeouts) before a record is made. Its jobs are every harness of
+the commit's `run.sh list` and every one of its mutants/*.patch, not the
+matrices'. Each job's peak and time are estimated from the best source,
+named in jobs.json and estimates.tsv: W7's measurements of the v1.1.0
+Kani layer (V11_MEASURED); then, for a harness whose name is unchanged,
+v1.0.0's kani/RESULTS.md, its peak times 1.25 (v1.1.0 measured up to 1.53
+times v1.0.0's, h_init); a mutant from the harnesses its Kani leg is
+expected to run (its first killed-by, or every checked-by of a
+`# must-survive` patch) plus 240 s of plain mode and build; otherwise
+unknown: 40 GB (KANI_MAX_GB, the most run.sh lets a job use), so that it
+runs alone or beside a job estimated at 10 GB or less, and 1800 s. A
+job's limit (KANI_TIMEOUT) is 3 times its estimate, at least 1800 s, and
+at least 7200 s for run.sh's 7200 s tier and for an unknown; a mutant's
+is the largest of its harnesses'. KANI_MAX_GB stays 40 (another value is
+refused). The run holds /tmp/sp-heavy.lock (SP_HEAVY_LOCK) from its start
+to its exit, failures and signals included, so that no other heavy job
+overlaps it: while another process holds it, the run waits (checking
+every 30 s), and it removes only a lock it took. --record is refused; the
+output is outside the repository (default
+~/shared-pool-kani-measure/all-<commit>-<UTC time>), env.txt says `mode
+measurement`, and record.py refuses it. The lanes, the environment and
+cargo checks, the sampling and results.tsv are the record's. --dry-run
+prints the jobs, their estimates and the estimated hours.
 """
 import argparse
+import atexit
 import datetime
+import fnmatch
 import json
 import os
 import platform
 import re
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -77,6 +110,51 @@ OWN_ENV = {"KANI_LOG_DIR", "KANI_DEFER_COVERS", "KANI_TIMEOUT", "KANI_CBMC", "KE
 # A cargo configuration key or table that changes how cargo builds.
 CARGO_BUILD_KEYS = re.compile(r"^\s*(rustflags|rustc|rustc-wrapper|rustc-workspace-wrapper)\s*=|^\s*\[profile[.\]]",
                               re.M)
+
+# --all, the measurement. The machine's lock for heavy jobs (Kani, CBMC):
+# taken with mkdir, released with rmdir, by whoever took it.
+LOCK = os.environ.get("SP_HEAVY_LOCK") or "/tmp/sp-heavy.lock"
+# Its estimates, best source first. W7's measurements of the v1.1.0 Kani
+# layer (.context/shared-pool/v1.1-verify/w7-notes.md, 2026-11-14): job
+# seconds (run.sh's time plus its codegen) and peak GB (the largest 3 s
+# sample of the process tree; of cbmc during the harness for run.sh ref).
+# The probes ran on 69cca54's Kani tree, run.sh ref and mutant 31 on
+# db957d4's (31's time at 6b120fd); the harness code has not changed since.
+V11_MEASURED = {
+    "h_full_256_prune": (505, 20.5, "W7 probe P1"),
+    "h_step_submit_inv": (1111, 29.7, "W7 probe P2"),
+    "h_init": (512, 33.0, "W7 probe P3"),
+    "h_wedge": (624, 32.6, "W7 probe P4"),
+    "h_step_observe_tx": (166, 11.7, "W7 probe P5"),
+    "h_validate": (794, 32.9, "W7 probe h_validate"),
+    # run.sh ref: run.sh's time plus 50 s, the one codegen of its 1,222 s job.
+    "h_ref_submit": (557, 14.7, "W7 run.sh ref"),
+    "h_ref_dispatch": (117, 7.5, "W7 run.sh ref"),
+    "h_ref_ack": (107, 6.0, "W7 run.sh ref"),
+    "h_ref_cancel": (179, 11.1, "W7 run.sh ref"),
+    "h_ref_settle": (323, 14.7, "W7 run.sh ref"),
+    "h_ref_pause": (109, 6.0, "W7 run.sh ref"),
+    "h_ref_observe": (130, 8.6, "W7 run.sh ref"),
+    "mutant-31": (161, 9.8, "W7/W10 run.sh mutants --kani '31-*'"),
+}
+# Then v1.0.0's measurement: kani/RESULTS.md as of the v1.0.0 record
+# (unchanged since), its Kani results table (time, peak). v1.1.0 adds the
+# release term and completed_units: its measured peaks are 0.84 to 1.53
+# times v1.0.0's (h_wedge, h_init), so the peak is scaled.
+V10_RESULTS = ("a072a2dec788afcf0741786cdb458c3906e350fa", SP + "/kani/RESULTS.md")
+V10_PEAK_SCALE = 1.25
+# Otherwise unknown: KANI_MAX_GB, the most run.sh lets a job use (a job of
+# that estimate shares the machine only with one that fits the budget
+# beside it), and 1800 s, run.sh's default limit.
+MAX_GB = 40.0
+UNKNOWN_SECS = 1800
+# A mutant job: plain mode (cargo test --release from scratch) and the
+# mutant tree's Kani codegen, before its Kani leg (v1.0.0's local record:
+# mutant 21's job 338 s around h_full_256's 46 s).
+MUTANT_OVERHEAD = 240
+# Limits: 3 times the estimate, at least LIMIT_MIN; at least LIMIT_LONG for
+# run.sh's long tier and an unknown.
+LIMIT_MIN, LIMIT_LONG = 1800, 7200
 
 
 def sh(*args, **kw):
@@ -133,6 +211,175 @@ def jobs_from_workflow():
     # Longest first; the scheduler takes the first job that fits the budget.
     jobs.sort(key=lambda j: -j["est"])
     return jobs
+
+
+def limit(secs, at_least):
+    """3 times secs, at least at_least, in whole minutes."""
+    return max(at_least, -(-int(3 * secs) // 60) * 60)
+
+
+def jobs_all(commit):
+    """Every harness of commit's run.sh list and every mutant of its mutants/, with estimates and limits."""
+    kani = SP + "/kani"
+    tmp = tempfile.mkdtemp(prefix="run-local-list.")
+    try:
+        os.makedirs(os.path.join(tmp, "src"))
+        for p in ("run.sh", "src/proofs.rs"):
+            with open(os.path.join(tmp, p), "w") as f:
+                f.write(sh("git", "-C", ROOT, "show", "%s:%s/%s" % (commit, kani, p)))
+        harnesses = sh("bash", os.path.join(tmp, "run.sh"), "list").split()
+        with open(os.path.join(tmp, "run.sh")) as f:
+            runsh = f.read()
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    if not harnesses:
+        sys.exit("run-local.py: %s's run.sh list is empty" % commit[:12])
+    # run.sh's long tier: harness_timeout's `<globs>) echo "${KANI_TIMEOUT:-7200}"`.
+    m = re.search(r"^\s*([^\n()]+)\)\s*echo \"\$\{KANI_TIMEOUT:-%d\}\"" % LIMIT_LONG, runsh, re.M)
+    if not m:
+        sys.exit("run-local.py: no %d s tier in %s's run.sh harness_timeout" % (LIMIT_LONG, commit[:12]))
+    long_tier = [g.strip() for g in m.group(1).split("|")]
+
+    rev, path = V10_RESULTS
+    if subprocess.run(["git", "-C", ROOT, "cat-file", "-e", rev + "^{commit}"], capture_output=True).returncode:
+        rev, v10_name = commit, "RESULTS.md at %s (v1.0.0's %s is not in this clone)" % (commit[:12], rev[:7])
+    else:
+        v10_name = "v1.0.0 RESULTS.md"
+    v10 = {}
+    for m in re.finditer(r"^\| `(h_\w+)` \| (\S+) \| (\d+) \| ([\d.]+) \|", sh("git", "-C", ROOT, "show",
+                                                                               rev + ":" + path), re.M):
+        v10.setdefault(m.group(1), (int(m.group(3)), float(m.group(4))))
+
+    est = {}
+    for h in harnesses:
+        tier = any(fnmatch.fnmatchcase(h, g) for g in long_tier)
+        if h in V11_MEASURED:
+            secs, peak, src = V11_MEASURED[h]
+            basis, src = "W7", "%s: %d s, %.1f GB" % (src, secs, peak)
+        elif h in v10:
+            secs, gb = v10[h]
+            peak = min(MAX_GB, round(gb * V10_PEAK_SCALE, 1))
+            basis, src = "v1.0.0", "%s: %d s, %.1f GB; peak x%g" % (v10_name, secs, gb, V10_PEAK_SCALE)
+        else:
+            secs, peak, basis, src = UNKNOWN_SECS, MAX_GB, "unknown", "unknown"
+        lim = LIMIT_LONG if basis == "unknown" else limit(secs, LIMIT_LONG if tier else LIMIT_MIN)
+        est[h] = dict(name=h, kind="harness", peak=peak, est=secs, timeout=lim, args=["kani", h], basis=basis,
+                      source=src)
+    hest = {h: (j["est"], j["peak"], j["basis"]) for h, j in est.items()}
+
+    names = sorted(l for l in sh("git", "-C", ROOT, "ls-tree", "--name-only", "%s:%s/mutants" % (commit, kani))
+                   .splitlines() if l.endswith(".patch"))
+    jobs = [est[h] for h in harnesses]
+    for p in names:
+        nn = p.split("-", 1)[0]
+        same = [q for q in names if q.startswith(nn + "-")]
+        if len(same) != 1:
+            # run.sh mutants --kani 'NN-*' would run them all in one job.
+            sys.exit("run-local.py: mutants %s share the prefix %s-" % (" ".join(same), nn))
+        text = sh("git", "-C", ROOT, "show", "%s:%s/mutants/%s" % (commit, kani, p))
+        survive = re.search(r"^# must-survive$", text, re.M) is not None
+        hs = []
+        for m in re.finditer(r"^# (?:killed-by|checked-by): (.*)$", text, re.M):
+            hs += m.group(1).split()
+        name = "mutant-" + nn
+        for h in hs:
+            if h not in est:
+                print("run-local.py: warning: mutants/%s names %s, which is not in run.sh list" % (p, h),
+                      file=sys.stderr)
+        # The harnesses its Kani leg is expected to run: run.sh stops at
+        # the first that kills it; a must-survive patch runs them all.
+        leg = hs if survive else hs[:1]
+        lim = max([est[h]["timeout"] if h in est else LIMIT_LONG for h in hs] or [LIMIT_LONG])
+        if name in V11_MEASURED:
+            secs, peak, src = V11_MEASURED[name]
+            basis, src = "W7", "%s: %d s, %.1f GB" % (src, secs, peak)
+        else:
+            secs, peak, basis, src = mutant_estimate(leg, survive, hest)
+        jobs.append(dict(name=name, kind="mutant", peak=peak, est=secs, timeout=lim,
+                         args=["mutants", "--kani", nn + "-*"], basis=basis, source=src, patch=p[:-len(".patch")],
+                         leg=leg, survive=survive))
+    jobs.sort(key=all_order)
+    return jobs, hest
+
+
+def all_order(j):
+    """--all's order: the harnesses, then the mutants (estimated from them by then), each longest first."""
+    return (j["kind"] != "harness", -j["est"])
+
+
+def mutant_estimate(leg, survive, hest):
+    """(secs, peak, basis, source) of a mutant whose Kani leg runs leg; hest: {harness: (secs, peak, basis)}."""
+    what = "%s %s" % ("checked-by" if survive else "killed-by", " + ".join(leg) or "none")
+    known = [hest[h] for h in leg if h in hest and hest[h][2] != "unknown"]
+    if not leg or len(known) != len(leg):
+        return (MUTANT_OVERHEAD + sum(hest[h][0] if h in hest else UNKNOWN_SECS for h in leg), MAX_GB, "unknown",
+                "unknown (%s)" % what)
+    return (MUTANT_OVERHEAD + sum(k[0] for k in known), max(k[1] for k in known), "harnesses",
+            "%s [%s] + %d s plain mode and build" % (what, ", ".join(k[2] for k in known), MUTANT_OVERHEAD))
+
+
+def only_jobs(jobs, only):
+    """jobs restricted to only's comma-separated names (a harness, mutant-NN, NN or a patch name), or an error."""
+    want, bad = set(), []
+    for w in [w.strip() for w in only.split(",") if w.strip()]:
+        hit = [j["name"] for j in jobs if w in (j["name"], j.get("patch"), j["name"].replace("mutant-", "", 1))]
+        if hit:
+            want.update(hit)
+        else:
+            bad.append(w)
+    if bad or not want:
+        return None, bad
+    return [j for j in jobs if j["name"] in want], []
+
+
+def simulate(jobs, lanes, budget):
+    """The schedule's length in seconds with the estimates: the main loop's policy, without the sampling."""
+    t, pending, running = 0.0, list(jobs), []
+    while pending or running:
+        for _ in range(lanes - len(running)):
+            used = sum(p for _, p in running)
+            pick = next((j for j in pending if not running or used + j["peak"] <= budget), None)
+            if pick is None:
+                break
+            pending.remove(pick)
+            running.append((t + pick["est"], pick["peak"]))
+        t = min(e for e, _ in running)
+        running = [(e, p) for e, p in running if e > t]
+    return t
+
+
+def take_lock():
+    """Wait for and take LOCK (mkdir); release it at exit (rmdir), and only if taken. Seconds waited."""
+    def on_signal(signum, _frame):
+        print("run-local.py: stopped by signal %d" % signum, file=sys.stderr, flush=True)
+        sys.exit(128 + signum)
+
+    # Until the main loop's own handler: exit, which releases a taken lock.
+    signal.signal(signal.SIGINT, on_signal)
+    signal.signal(signal.SIGTERM, on_signal)
+    t0, said = time.monotonic(), False
+    while True:
+        try:
+            os.mkdir(LOCK)
+            break
+        except FileExistsError:
+            if not said:
+                print("run-local.py: waiting for %s (another heavy job holds it; checking every 30 s)" % LOCK,
+                      file=sys.stderr, flush=True)
+                said = True
+            time.sleep(30)
+
+    def release():
+        try:
+            os.rmdir(LOCK)
+            print("run-local.py: released %s" % LOCK, file=sys.stderr, flush=True)
+        except OSError as e:
+            print("run-local.py: warning: could not release %s: %s" % (LOCK, e), file=sys.stderr, flush=True)
+
+    atexit.register(release)
+    waited = time.monotonic() - t0
+    print("run-local.py: holding %s (waited %.0f s)" % (LOCK, waited), file=sys.stderr, flush=True)
+    return waited
 
 
 def cargo_configs(*dirs):
@@ -220,7 +467,14 @@ def main():
     ap.add_argument("--budget-gb", type=float, default=50.0)
     ap.add_argument("--record", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--all", action="store_true")
+    ap.add_argument("--only")
     a = ap.parse_args()
+    if a.all and a.record:
+        ap.error("--all is a measurement, not a record: --record is refused (record the large jobs with "
+                 "run-local.py --record once the matrices are re-split from the measurement)")
+    if a.only is not None and not a.all:
+        ap.error("--only needs --all (a record runs every job of kani-large and kani-mutants-large)")
 
     commit = sh("git", "-C", ROOT, "rev-parse", "--verify", a.rev + "^{commit}").strip()
     kani_tree = sh("git", "-C", ROOT, "rev-parse", commit + ":" + SP + "/kani").strip()
@@ -229,7 +483,33 @@ def main():
     kani_v = re.search(r"^KANI=(\S+)", versions, re.M).group(1)
     cbmc_v = re.search(r"^CBMC=(\S+)", versions, re.M).group(1)
     rust_v = re.search(r"^RUST_TOOLCHAIN=(\S+)", versions, re.M).group(1)
-    jobs = jobs_from_workflow()
+    if a.all:
+        jobs, hest = jobs_all(commit)
+        if a.only is not None:
+            jobs, bad = only_jobs(jobs, a.only)
+            if jobs is None:
+                ap.error("--only %s: %s" % (a.only, "not a job of --all: " + ", ".join(bad) if bad else "no job"))
+        if a.dry_run:
+            nh = sum(j["kind"] == "harness" for j in jobs)
+            print("commit %s; measurement (--all, not a record): %d jobs, %d harnesses of run.sh list and %d "
+                  "mutants (KANI_TIMEOUT, estimated peak GB and s, the estimate's source; in run order):"
+                  % (commit[:12], len(jobs), nh, len(jobs) - nh))
+            for j in jobs:
+                print("  %-28s %-8s %5d s  %5.1f GB  %5.0f s  %s" % (j["name"], j["kind"], j["timeout"], j["peak"],
+                                                                   j["est"], j["source"]))
+            basis = [j["basis"] for j in jobs]
+            total = sum(j["est"] for j in jobs)
+            print("sources: %d W7 (v1.1.0 measured), %d v1.0.0 RESULTS.md, %d mutants from their harnesses, "
+                  "%d unknown (%.1f h of the estimate)"
+                  % (basis.count("W7"), basis.count("v1.0.0"), basis.count("harnesses"), basis.count("unknown"),
+                     sum(j["est"] for j in jobs if j["basis"] == "unknown") / 3600))
+            print("estimate: %.1f h of jobs; / %d lanes = %.1f h; scheduled (%d lanes, budget %g GB, in this order, "
+                  "with these estimates): %.1f h"
+                  % (total / 3600, a.lanes, total / 3600 / a.lanes, a.lanes, a.budget_gb,
+                     simulate(jobs, a.lanes, a.budget_gb) / 3600))
+            return 0
+    else:
+        jobs = jobs_from_workflow()
     if not jobs:
         sys.exit("run-local.py: no kani-large or kani-mutants-large entries in the workflow")
     if a.dry_run:
@@ -250,9 +530,20 @@ def main():
         sys.exit("run-local.py: %s set in the environment, which changes what run.sh runs or how cargo builds; "
                  "the record's fingerprint does not see the environment: unset it and start again"
                  % ", ".join(refused))
+    if a.all and (os.environ.get("KANI_MAX_GB") or "40") != "40":
+        sys.exit("run-local.py: KANI_MAX_GB=%s: a measurement keeps run.sh's default, 40, as CI and the record do: "
+                 "unset it and start again" % os.environ["KANI_MAX_GB"])
     started = now()
-    out = os.path.abspath(a.out or os.path.join(ROOT, SP, "kani/target/local-run",
-                                                "run-" + started.strftime("%Y%m%dT%H%MZ")))
+    if a.all:
+        out = os.path.abspath(a.out or os.path.join(os.path.expanduser("~"), "shared-pool-kani-measure", "all-%s-%s"
+                                                    % (commit[:12], started.strftime("%Y%m%dT%H%MZ"))))
+        real, root = os.path.realpath(out), os.path.realpath(ROOT)
+        if real == root or real.startswith(root + os.sep):
+            sys.exit("run-local.py: %s is in the repository; a measurement is not a record and writes outside it: "
+                     "pass --out outside %s" % (out, ROOT))
+    else:
+        out = os.path.abspath(a.out or os.path.join(ROOT, SP, "kani/target/local-run",
+                                                    "run-" + started.strftime("%Y%m%dT%H%MZ")))
     if os.path.exists(out):
         sys.exit("run-local.py: %s exists" % out)
     configs = cargo_configs(out, os.environ.get("TMPDIR") or "/tmp")
@@ -275,6 +566,10 @@ def main():
     cargo_above = sh(sys.executable, "-I", CHECK, "cargo-configs", commit).splitlines()
     kani_env = " ".join("%s=%s" % (k, os.environ[k]) for k in sorted(os.environ)
                         if k.startswith("KANI_") and k not in OWN_ENV) or "none"
+    if a.all:
+        # From here to the exit: no other heavy job on the machine.
+        waited = take_lock()
+        started = now()
 
     # Tools: the pinned Kani and its own CBMC (run.sh reads loop ids with it).
     kani_line = sh("cargo", "kani", "--version").splitlines()[0].strip()
@@ -310,6 +605,22 @@ def main():
                    rustc + " (RUSTUP_TOOLCHAIN of the mutant jobs' plain mode, as in CI)", host(), a.lanes,
                    a.budget_gb, os.environ.get("KANI_MAX_GB") or "40 (run.sh's default)", kani_env,
                    " ".join(configs) or "none", iso(started)))
+    if a.all:
+        fp = sh(sys.executable, "-I", CHECK, "fingerprint", commit).splitlines()[-1].split("\t")[1]
+        nh = sum(j["kind"] == "harness" for j in jobs)
+        with open(os.path.join(out, "env.txt"), "a") as f:
+            f.write("mode measurement (run-local.py --all: %s; not a record)\nfingerprint %s\nlock %s (waited %.0f s)\n"
+                    "estimates V11_MEASURED, then %s (peak x%g), mutants from their harnesses + %d s, unknown "
+                    "%g GB %d s\n"
+                    % ("--only " + a.only + ": %d harnesses, %d mutants" % (nh, len(jobs) - nh)
+                       if a.only is not None else "every harness of run.sh list and every mutant",
+                       fp, LOCK, waited, V10_RESULTS[0][:12] + ":" + V10_RESULTS[1], V10_PEAK_SCALE,
+                       MUTANT_OVERHEAD, MAX_GB, UNKNOWN_SECS))
+        with open(os.path.join(out, "estimates.tsv"), "w") as f:
+            f.write("job\tkind\test_peak_gb\test_secs\tlimit_s\tsource\n")
+            for j in jobs:
+                f.write("%s\t%s\t%s\t%.0f\t%d\t%s\n" % (j["name"], j["kind"], j["peak"], j["est"], j["timeout"],
+                                                       j["source"]))
     with open(os.path.join(out, "jobs.json"), "w") as f:
         json.dump(jobs, f, indent=1)
 
@@ -332,7 +643,18 @@ def main():
 
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
-    log("%d jobs: %d harnesses, %d mutants; budget %g GB; output %s"
+    if a.all:
+        # Any exit (an error too) stops the jobs before the lock is released
+        # (atexit runs this first: it was registered last).
+        def kill_running():
+            for j in running.values():
+                try:
+                    os.killpg(j["proc"].pid, signal.SIGKILL)
+                except OSError:
+                    pass
+        atexit.register(kill_running)
+    log(("measurement (run-local.py --all, not a record): " if a.all else "")
+        + "%d jobs: %d harnesses, %d mutants; budget %g GB; output %s"
         % (len(jobs), sum(j["kind"] == "harness" for j in jobs), sum(j["kind"] == "mutant" for j in jobs),
            a.budget_gb, out))
     results = open(os.path.join(out, "results.tsv"), "a")
@@ -340,7 +662,9 @@ def main():
         for lane in lanes:
             if lane in running or not pending:
                 continue
-            used = sum(j["peak"] for j in running.values())
+            # A measurement's estimates are uncertain: a running job counts
+            # what it already uses when that is more.
+            used = sum(max(j["peak"], j["ptree"] / 1048576) if a.all else j["peak"] for j in running.values())
             # Alone, a job always fits (h_wedge's peak may be most of the budget).
             pick = next((j for j in pending if not running or used + j["peak"] <= a.budget_gb), None)
             if pick is None:
@@ -380,10 +704,23 @@ def main():
             log("done  %s rc=%d %s %.0f s peak %.1f GB cbmc / %.1f GB tree"
                 % (j["name"], rc, v, secs, j["pcbmc"] / 1048576, j["ptree"] / 1048576))
             del running[lane]
+            if a.all and j["kind"] == "harness" and rc == 0 and passed(j, v):
+                # A harness measured here is the best source for the mutants
+                # whose Kani leg runs it (they run after the harnesses).
+                hest[j["name"]] = (round(secs), round(j["ptree"] / 1048576, 1), "this run")
+                for m in pending:
+                    if m["kind"] == "mutant" and m["basis"] != "W7" and j["name"] in m["leg"]:
+                        m["est"], m["peak"], m["basis"], m["source"] = mutant_estimate(m["leg"], m["survive"], hest)
+                        log("estimate %s: %.1f GB, %.0f s (%s)" % (m["name"], m["peak"], m["est"], m["source"]))
+                pending.sort(key=all_order)
     results.close()
     with open(os.path.join(out, "env.txt"), "a") as f:
         f.write("finished %s\n" % iso(now()))
     log("ALL DONE")
+    if a.all:
+        print("run-local.py: measurement, not a record: %s; %s" % ("every job passed" if ok else
+                                                                  "SOME JOBS FAILED", os.path.join(out, "results.tsv")))
+        return 0 if ok else 1
     print("run-local.py: %s; record it with: %s %s" % ("every job passed" if ok else "SOME JOBS FAILED (results.tsv)",
                                                        os.path.relpath(RECORD), out))
     if a.record and ok:

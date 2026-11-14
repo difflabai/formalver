@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Self-test for check-kani-record.py and kani/local/record.py: a synthetic
 # finished local run of the kani-large and kani-mutants-large jobs (at HEAD)
-# records and passes the check; an incomplete, failed or foreign run is
-# refused and leaves the record alone; and each kind of stale, wrong or
-# inconsistent record, and each workflow matrix that does not split the
-# harnesses and mutants with the record, fails the check. Commits with
-# other Kani inputs are made in a scratch object directory over the
-# repository's (no object, ref or index of the repository is written).
+# records and passes the check; an incomplete, failed, foreign or
+# measurement run is refused and leaves the record alone; and each kind of
+# stale, wrong or inconsistent record, and each workflow matrix that does
+# not split the harnesses and mutants with the record, fails the check.
+# Commits with other Kani inputs are made in a scratch object directory
+# over the repository's (no object, ref or index of the repository is
+# written). Also kani/local/run-local.py's job lists (the record's, and
+# --all's measurement of every harness and mutant), --all's refusals and
+# its heavy-job lock (a scratch one), without running a job.
 #
 # usage: tools/scripts/test-check-kani-record.sh
 set -uo pipefail
@@ -180,6 +183,11 @@ edit "$t/bad/jobs.json" "import json; s = json.dumps([j for j in json.loads(s) i
 expect 1 "a run without one large harness" "h_wedge" run_record "$t/bad" "$t/rec2"
 cmp -s "$t/good/jobs.tsv" "$t/rec2/jobs.tsv" || { echo "FAIL: a run without h_wedge: the record changed"; fail=1; }
 expect 1 "a missing run directory" "no env.txt" run_record "$t/nowhere" "$t/rec2"
+# A measurement (run-local.py --all) is not a record's run.
+rm -rf "$t/bad" "$t/rec2"; cp -R "$t/run" "$t/bad"; cp -R "$t/good" "$t/rec2"
+echo 'mode measurement (run-local.py --all: every harness of run.sh list and every mutant; not a record)' >>"$t/bad/env.txt"
+expect 1 "a measurement (run-local.py --all)" "is a measurement \(run-local\.py --all" run_record "$t/bad" "$t/rec2"
+cmp -s "$t/good/jobs.tsv" "$t/rec2/jobs.tsv" || { echo "FAIL: a measurement: the record changed"; fail=1; }
 
 # --- check-kani-record.py ----------------------------------------------------
 bad() { rm -rf "$t/r"; cp -R "$t/good" "$t/r"; }
@@ -352,6 +360,49 @@ if [ "$(changed HEAD~5 HEAD~4)" != "> projects/shared-pool/kani/run.sh > $all > 
   fp HEAD~5 | sed 's/^/  /'; fail=1
 fi
 expect 1 "fingerprint of a missing input" "is not in the repository" env KANI_RECORD_ROOT="$t" "$check" fingerprint HEAD
+
+# --- run-local.py ------------------------------------------------------------
+# The record's jobs are the large matrix entries. --all, a measurement,
+# runs every harness of run.sh list and every mutant, each once, with an
+# estimate and its source; it is not a record, writes outside the
+# repository, and holds the machine's heavy-job lock while it runs (here a
+# lock in $t: KANI_CBMC=/usr/bin/false fails the tool check after it is
+# taken, so no job starts).
+rl="$root/projects/shared-pool/kani/local/run-local.py"
+kd="$root/projects/shared-pool/kani"
+names() { awk '/^  [^ ]/ {print $1}' "$t/out" | sort; }
+clean() { env -i PATH="$PATH" HOME="$HOME" TMPDIR="$t" SP_HEAVY_LOCK="$t/lock" KANI_CBMC=/usr/bin/false "$@"; }
+expect 0 "run-local.py --dry-run" "jobs \(KANI_TIMEOUT" py "$rl" --dry-run
+want=$( { "$check" matrix kani-large | cut -f1 | tr ' ' '\n'; "$check" matrix kani-mutants-large | cut -f1 | sed 's/^/mutant-/'; } | sort)
+[ "$(names)" = "$want" ] || { echo "FAIL: run-local.py --dry-run: not the kani-large harnesses and kani-mutants-large mutants"; fail=1; }
+expect 0 "run-local.py --all --dry-run" "measurement \(--all, not a record\)" py "$rl" --all --dry-run
+want=$( { bash "$kd/run.sh" list; for p in "$kd"/mutants/*.patch; do p=${p##*/}; echo "mutant-${p%%-*}"; done; } | sort)
+if [ "$(names)" != "$want" ] || [ -n "$(names | uniq -d)" ]; then
+  echo "FAIL: run-local.py --all --dry-run: not each harness of run.sh list and each mutant exactly once"
+  diff <(names) <(echo "$want") | sed 's/^/  /'; fail=1
+fi
+grep -E '^  [^ ]' "$t/out" | grep -vE ' s  (W7|v1\.0\.0 RESULTS\.md|RESULTS\.md at|killed-by|checked-by|unknown)' | grep -q . &&
+  { echo "FAIL: run-local.py --all --dry-run: an estimate without its source"; fail=1; }
+expect 2 "run-local.py --all --record" "a measurement, not a record: --record is refused" py "$rl" --all --record
+expect 2 "run-local.py --only without --all" "--only needs --all" py "$rl" --only h_wedge --dry-run
+expect 2 "run-local.py --all --only, not a job" "not a job of --all: h_nonesuch" py "$rl" --all --only h_wedge,h_nonesuch --dry-run
+expect 0 "run-local.py --all --only" "2 jobs, 1 harnesses of run.sh list and 1 mutants" py "$rl" --all --only h_wedge,01 --dry-run
+[ "$(names | tr '\n' ' ')" = "h_wedge mutant-01 " ] || { echo "FAIL: run-local.py --all --only h_wedge,01: $(names | tr '\n' ' ')"; fail=1; }
+expect 1 "run-local.py --all, output in the repository" "is in the repository; a measurement is not a record" \
+  clean python3 -I "$rl" --all --only h_full_256 --out "$kd/target/measure"
+expect 1 "run-local.py --all, a failure with the lock held" "holding $t/lock" \
+  clean python3 -I "$rl" --all --only h_full_256 --out "$t/measure"
+grep -q "released $t/lock" "$t/out" && [ ! -e "$t/lock" ] && [ ! -e "$t/measure" ] ||
+  { echo "FAIL: run-local.py --all: the lock not released on failure (or the run started)"; sed 's/^/  /' "$t/out"; fail=1; }
+# Another process's lock: --all waits for it, and leaves it when stopped.
+mkdir "$t/lock"
+clean python3 -I "$rl" --all --only h_full_256 --out "$t/measure" >"$t/wait.out" 2>&1 &
+pid=$!
+for _ in $(seq 40); do grep -q "waiting for $t/lock" "$t/wait.out" && break; sleep 0.25; done
+kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+grep -q "waiting for $t/lock" "$t/wait.out" && [ -d "$t/lock" ] && ! grep -q "holding" "$t/wait.out" ||
+  { echo "FAIL: run-local.py --all: did not wait for another's lock, or removed it"; sed 's/^/  /' "$t/wait.out"; fail=1; }
+rmdir "$t/lock"
 
 [ "$fail" = 0 ] && echo "check-kani-record: all cases pass"
 exit "$fail"
