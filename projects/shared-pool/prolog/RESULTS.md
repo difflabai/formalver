@@ -11,12 +11,11 @@ suite run as
 and python3 for `extract.py` (run with `-I`, stdlib only). Property
 catalogue: `projects/shared-pool/strategy.md` §5 (118 IDs), which C-6 reads.
 Run: `projects/shared-pool/prolog/run.sh` (optional `PROLOG_LOGS=<dir>`).
-Last full run: 2026-11-14, in a scratch copy with the candidate corpus, the
-trace-reader patch and the TLA layer's v1.1.0 `SharedPool.tla` (the
-committed file): every step passes and all 47 mutants are killed, in about
-30 minutes (suites 182 s, mutants 1,591 s summed, most of it the MC-1
-mutants). It ran in two parts: steps 1-4 with the 45 model, requirements and
-code mutants, then steps 1-4 again with the 2 reads mutants.
+Last full run: 2026-11-14, one uninterrupted run of `run.sh` (exit 0) in a
+scratch copy of the committed `prolog/`, `tla/` and `conformance/` at
+`51d4ca2` with the candidate corpus and the trace-reader patch: every step
+passes and all 47 mutants are killed, in 1,735 s, about 29 minutes (suites
+188 s, mutants 1,510 s summed, most of it the MC-1 mutants).
 
 Conformance traces (v1.1.0 corpus, generated from the real core by
 `conformance/`): `core.txt`, sha256
@@ -86,7 +85,7 @@ traces, the COV-2 reads differential and the step/4 unit tests).
 | Requirements suite (C-1..C-6 and their non-vacuity tests) | C-* | 19 tests | 13.8 s |
 | Planted faults (`test_mc2`): each step-property checker fires on a corrupted real call and stays silent on the real one (the v1.0.0 fourteen plus TERM-1 on cancel(Completed), OBS-2, WIN-1, WIN-2); in `test_model` the INV-*, WIN-1, edge and probe checkers fire on corrupted or v1.0.0 states | vacuity | pass | |
 | PROP tags | | every prolog-layer catalogue ID is tagged; no unknown tag | 48 of 118 |
-| Mutants | | 47 of 47 killed | 1,591 s summed |
+| Mutants | | 47 of 47 killed | 1,510 s summed |
 
 MC-1 bounds. The exploration state is pool + clock + ghost. Time is monotone
 (ASM-TIME) over each universe's time set: wedge {100, 200}, healthy, window1
@@ -283,4 +282,7 @@ TLA layer's v1.1.0 `GuardOrder`. The trace reader (`traces.pl`, `mc2.pl`,
 they change together with the corpus swap. Until then `test_mc2`,
 `test_reads`, and C-3's and C-5's trace legs fail (the v1.0.0 states do not
 convert to `pool/8`). With the candidate corpus and the reader patch,
-`run.sh` passes (numbers above).
+`run.sh` passes (numbers above). The RD-PREVIEW and RD-BEST evidence text in
+`requirements/traceability.pl` names the committed `reads.txt`'s numbers
+(1,246 states, 36,797 requests: the v1.0.0 file); the same patch changes it
+to 1,300 states and 39,627 requests when `reads.txt` is swapped.
