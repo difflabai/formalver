@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# Self-test for check-kani-record.py and kani/local/record.py: a synthetic
+# Self-test for check-kani-record.py, kani/local/record.py and
+# run-local.py's environment and cargo configuration checks: a synthetic
 # finished local run of the kani-large and kani-mutants-large jobs (at HEAD)
 # records and passes the check; an incomplete, failed, foreign or
 # measurement run is refused and leaves the record alone; and each kind of
-# stale, wrong or inconsistent record, and each workflow matrix that does
-# not split the harnesses and mutants with the record, fails the check.
-# Commits with other Kani inputs are made in a scratch object directory
-# over the repository's (no object, ref or index of the repository is
-# written). Also kani/local/run-local.py's job lists (the record's, and
-# --all's measurement of every harness and mutant), --all's refusals and
-# its heavy-job lock (a scratch one), without running a job.
+# stale, wrong or inconsistent record, each workflow matrix that does not
+# split the harnesses and mutants with the record, and each large timeout
+# below the limit the record ran it under, fails the check. Commits with
+# other Kani inputs are made in a scratch object directory over the
+# repository's (no object, ref or index of the repository is written).
+# Also kani/local/run-local.py's job lists (the record's, and --all's
+# measurement of every harness and mutant), --all's refusals and its
+# heavy-job lock (a scratch one), without running a job.
 #
 # usage: tools/scripts/test-check-kani-record.sh
 set -uo pipefail
@@ -304,6 +306,35 @@ w "s = s.replace('- { mutant: \"02\", gb: 5, timeout: 1800 }', '- { mutant: \"02
 expect 1 "a matrix entry in another form" "a matrix entry must read" run_check "$t/good" "$t/wf.yml"
 w "s = s.replace('  kani-large:', '  kani-huge:', 1)"
 expect 1 "no kani-large job" "no matrix entries for the kani-large job" run_check "$t/good" "$t/wf.yml"
+# Timeouts: a large entry's may not drop below the limit_s its recorded
+# run used (the record shows a pass within that, not within less); a
+# higher one is fine; under the job's --stale-ok flag (the job runs) a
+# lower one is a warning.
+w "s = s.replace('{ group: \"h_wedge\", gb: 39, timeout: 1800 }', '{ group: \"h_wedge\", gb: 39, timeout: 600 }', 1)"
+expect 1 "a kani-large timeout below the recorded limit" \
+  "error: kani-large entry 'h_wedge': timeout 600 is below the 1800 s the local record ran h_wedge under; the record does not show that it passes in 600 s: raise it back to 1800 or more, or re-run the local Kani record" \
+  run_check "$t/good" "$t/wf.yml"
+expect 0 "... with --stale-ok-harnesses: a warning" \
+  "warning: kani-large entry 'h_wedge': timeout 600 is below the 1800 s .*this run's kani-large job verifies it in 600 s" \
+  run_check "$t/good" "$t/wf.yml" "" --stale-ok-harnesses
+w "s = s.replace('\"h_init h_validate\", gb: 27, timeout: 2400 }', '\"h_init h_validate\", gb: 27, timeout: 2399 }', 1)"
+expect 1 "a two-harness kani-large group 1 s below the recorded limit" \
+  "kani-large entry 'h_init h_validate': timeout 2399 is below the 2400 s the local record ran h_init, h_validate under; the record does not show that they pass" \
+  run_check "$t/good" "$t/wf.yml"
+w "s = s.replace('{ mutant: \"25\", gb: 19, timeout: 5100 }', '{ mutant: \"25\", gb: 19, timeout: 1800 }', 1)"
+expect 1 "a kani-mutants-large timeout below the recorded limit" \
+  "error: kani-mutants-large entry '25': timeout 1800 is below the 5100 s the local record ran 25-[a-z-]+ under" \
+  run_check "$t/good" "$t/wf.yml"
+expect 1 "... with --stale-ok-harnesses only (no kani-mutants-large)" "error: kani-mutants-large entry '25': timeout 1800" \
+  run_check "$t/good" "$t/wf.yml" "" --stale-ok-harnesses
+expect 0 "... with --stale-ok-mutants: a warning" "warning: kani-mutants-large entry '25': timeout 1800 .*verifies it in 1800 s" \
+  run_check "$t/good" "$t/wf.yml" "" --stale-ok-mutants
+w "s = s.replace('{ group: \"h_wedge\", gb: 39, timeout: 1800 }', '{ group: \"h_wedge\", gb: 39, timeout: 3600 }', 1).replace('{ mutant: \"25\", gb: 19, timeout: 5100 }', '{ mutant: \"25\", gb: 19, timeout: 7200 }', 1)"
+expect 0 "large timeouts raised above the recorded limits" "local Kani record ok" run_check "$t/good" "$t/wf.yml"
+grep -q '^warning: kani-' "$t/out" && { echo "FAIL: large timeouts raised: a timeout warning"; sed 's/^/  /' "$t/out"; fail=1; }
+bad; edit "$t/r/jobs.tsv" "s = re.sub(r'(?m)^(harness\th_wedge\t(?:[^\t]*\t){5})1800\t', r'\g<1>30m\t', s)"; redigest "$t/r"
+expect 1 "a recorded limit_s that is not whole seconds" "recorded harness h_wedge: limit_s '30m' is not a whole number of seconds" \
+  run_check "$t/r"
 
 expect 0 "RESULTS.md block current" "" run_check "$t/good" "$wf" "$t/results.md"
 cp "$t/results.md" "$t/stale.md"; edit "$t/stale.md" "s = s.replace('| \`h_wedge\` | ok |', '| \`h_wedge\` | ok?? |')"
@@ -361,21 +392,67 @@ if [ "$(changed HEAD~5 HEAD~4)" != "> projects/shared-pool/kani/run.sh > $all > 
 fi
 expect 1 "fingerprint of a missing input" "is not in the repository" env KANI_RECORD_ROOT="$t" "$check" fingerprint HEAD
 
-# --- run-local.py ------------------------------------------------------------
+# --- run-local.py's refusals (--dry-run checks as a run does) ---------------
+# The environment, and the cargo configuration outside the lanes (CARGO_HOME
+# here, and a .cargo/ above the run directory), parsed as TOML: every
+# spelling of rustflags, rustc or a wrapper, a profile, or an include is
+# refused, and so is a file that does not parse; other settings are not.
+runlocal="$root/projects/shared-pool/kani/local/run-local.py"
+mkdir -p "$t/ch" "$t/tmpdir" "$t/above/.cargo"
+dry() { # dry <run dir> [VAR=value...]: a dry run in a clean environment
+  local out=$1; shift
+  env -i PATH="$PATH" HOME="$HOME" CARGO_HOME="$t/ch" TMPDIR="$t/tmpdir" "$@" python3 -I "$runlocal" --dry-run --out "$out"
+}
+ok_dry='^commit [0-9a-f]{12}; [0-9]+ jobs'
+cfg() { printf '%s\n' "$2" >"$t/ch/$1"; }
+expect 0 "run-local.py: no cargo configuration" "$ok_dry" dry "$t/lr"
+while IFS='|' read -r name keys text; do
+  cfg config.toml "$(printf '%b' "$text")"
+  expect 1 "run-local.py: $name" "ch/config\.toml \($keys\) set rustflags, rustc or a wrapper, a profile or an include" \
+    dry "$t/lr"
+done <<'CASES'
+a quoted key in [build]|build\.rustflags|[build]\n"rustflags" = ["-C", "overflow-checks=off"]
+a dotted key|build\.rustflags|build.rustflags = ["-C", "overflow-checks=off"]
+an inline table|build\.rustflags|build = { rustflags = ["-C", "overflow-checks=off"] }
+a target's rustflags|target\."cfg\(unix\)"\.rustflags|[target.'cfg(unix)']\nrustflags = ["-C", "overflow-checks=off"]
+a quoted rustc-wrapper|build\.rustc-wrapper|[build]\n'rustc-wrapper' = "sccache"
+build.rustc|build\.rustc|[build]\nrustc = "/somewhere/rustc"
+a dotted profile key|profile|profile.dev.opt-level = 0
+a profile table|profile|[profile.release]\noverflow-checks = false
+an include|include|include = "other.toml"
+CASES
+cfg config.toml '[build'
+expect 1 "run-local.py: a cargo configuration that does not parse" "unparsable cargo configuration .*ch/config\.toml" dry "$t/lr"
+cfg config.toml '[net]
+offline = true
+[build]
+jobs = 2
+[env]
+RUST_LOG = "rustflags"'
+expect 0 "run-local.py: other cargo settings" "$ok_dry" dry "$t/lr"
+rm "$t/ch/config.toml"; cfg config '[build]
+"rustflags" = ["-C", "overflow-checks=off"]'
+expect 1 "run-local.py: CARGO_HOME/config (no .toml)" "ch/config \(build\.rustflags\) set" dry "$t/lr"
+rm "$t/ch/config"; printf '[profile.dev]\noverflow-checks = false\n' >"$t/above/.cargo/config.toml"
+expect 1 "run-local.py: a .cargo/config.toml above the run directory" "above/\.cargo/config\.toml \(profile\) set" \
+  dry "$t/above/lr"
+expect 0 "run-local.py: ... not above another run directory" "$ok_dry" dry "$t/lr"
+expect 1 "run-local.py: RUSTFLAGS in the environment" "RUSTFLAGS set in the environment" dry "$t/lr" RUSTFLAGS=-Coverflow-checks=off
+
+# --- run-local.py's jobs and --all -------------------------------------------
 # The record's jobs are the large matrix entries. --all, a measurement,
 # runs every harness of run.sh list and every mutant, each once, with an
 # estimate and its source; it is not a record, writes outside the
 # repository, and holds the machine's heavy-job lock while it runs (here a
 # lock in $t: KANI_CBMC=/usr/bin/false fails the tool check after it is
 # taken, so no job starts).
-rl="$root/projects/shared-pool/kani/local/run-local.py"
 kd="$root/projects/shared-pool/kani"
 names() { awk '/^  [^ ]/ {print $1}' "$t/out" | sort; }
 clean() { env -i PATH="$PATH" HOME="$HOME" TMPDIR="$t" SP_HEAVY_LOCK="$t/lock" KANI_CBMC=/usr/bin/false "$@"; }
-expect 0 "run-local.py --dry-run" "jobs \(KANI_TIMEOUT" py "$rl" --dry-run
+expect 0 "run-local.py --dry-run" "jobs \(KANI_TIMEOUT" py "$runlocal" --dry-run
 want=$( { "$check" matrix kani-large | cut -f1 | tr ' ' '\n'; "$check" matrix kani-mutants-large | cut -f1 | sed 's/^/mutant-/'; } | sort)
 [ "$(names)" = "$want" ] || { echo "FAIL: run-local.py --dry-run: not the kani-large harnesses and kani-mutants-large mutants"; fail=1; }
-expect 0 "run-local.py --all --dry-run" "measurement \(--all, not a record\)" py "$rl" --all --dry-run
+expect 0 "run-local.py --all --dry-run" "measurement \(--all, not a record\)" py "$runlocal" --all --dry-run
 want=$( { bash "$kd/run.sh" list; for p in "$kd"/mutants/*.patch; do p=${p##*/}; echo "mutant-${p%%-*}"; done; } | sort)
 if [ "$(names)" != "$want" ] || [ -n "$(names | uniq -d)" ]; then
   echo "FAIL: run-local.py --all --dry-run: not each harness of run.sh list and each mutant exactly once"
@@ -383,20 +460,20 @@ if [ "$(names)" != "$want" ] || [ -n "$(names | uniq -d)" ]; then
 fi
 grep -E '^  [^ ]' "$t/out" | grep -vE ' s  (W7|v1\.0\.0 RESULTS\.md|RESULTS\.md at|killed-by|checked-by|unknown)' | grep -q . &&
   { echo "FAIL: run-local.py --all --dry-run: an estimate without its source"; fail=1; }
-expect 2 "run-local.py --all --record" "a measurement, not a record: --record is refused" py "$rl" --all --record
-expect 2 "run-local.py --only without --all" "--only needs --all" py "$rl" --only h_wedge --dry-run
-expect 2 "run-local.py --all --only, not a job" "not a job of --all: h_nonesuch" py "$rl" --all --only h_wedge,h_nonesuch --dry-run
-expect 0 "run-local.py --all --only" "2 jobs, 1 harnesses of run.sh list and 1 mutants" py "$rl" --all --only h_wedge,01 --dry-run
+expect 2 "run-local.py --all --record" "a measurement, not a record: --record is refused" py "$runlocal" --all --record
+expect 2 "run-local.py --only without --all" "--only needs --all" py "$runlocal" --only h_wedge --dry-run
+expect 2 "run-local.py --all --only, not a job" "not a job of --all: h_nonesuch" py "$runlocal" --all --only h_wedge,h_nonesuch --dry-run
+expect 0 "run-local.py --all --only" "2 jobs, 1 harnesses of run.sh list and 1 mutants" py "$runlocal" --all --only h_wedge,01 --dry-run
 [ "$(names | tr '\n' ' ')" = "h_wedge mutant-01 " ] || { echo "FAIL: run-local.py --all --only h_wedge,01: $(names | tr '\n' ' ')"; fail=1; }
 expect 1 "run-local.py --all, output in the repository" "is in the repository; a measurement is not a record" \
-  clean python3 -I "$rl" --all --only h_full_256 --out "$kd/target/measure"
+  clean python3 -I "$runlocal" --all --only h_full_256 --out "$kd/target/measure"
 expect 1 "run-local.py --all, a failure with the lock held" "holding $t/lock" \
-  clean python3 -I "$rl" --all --only h_full_256 --out "$t/measure"
+  clean python3 -I "$runlocal" --all --only h_full_256 --out "$t/measure"
 grep -q "released $t/lock" "$t/out" && [ ! -e "$t/lock" ] && [ ! -e "$t/measure" ] ||
   { echo "FAIL: run-local.py --all: the lock not released on failure (or the run started)"; sed 's/^/  /' "$t/out"; fail=1; }
 # Another process's lock: --all waits for it, and leaves it when stopped.
 mkdir "$t/lock"
-clean python3 -I "$rl" --all --only h_full_256 --out "$t/measure" >"$t/wait.out" 2>&1 &
+clean python3 -I "$runlocal" --all --only h_full_256 --out "$t/measure" >"$t/wait.out" 2>&1 &
 pid=$!
 for _ in $(seq 40); do grep -q "waiting for $t/lock" "$t/wait.out" && break; sleep 0.25; done
 kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null

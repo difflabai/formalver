@@ -1226,8 +1226,9 @@ each job's result, time, peak and limit. The inputs are every file under
 above `kani/` (none at the record's commit; `run-local.py` copies it into
 its lanes); and `tools/versions.env`'s `KANI` and `CBMC`. `run-local.py`
 refuses to run when the environment or a cargo configuration file
-outside its lanes sets something that changes a verdict but not the
-fingerprint (`KANI_FLAGS`, `RUSTFLAGS`, a profile, and the like). The
+outside its lanes (parsed as TOML, so any spelling of a key counts) sets
+something that changes a verdict but not the fingerprint (`KANI_FLAGS`,
+`RUSTFLAGS`, a profile, and the like). The
 current record is the run at `89f99d6` on a 10-core, 64 GB Apple M1 Max
 (`kani/RESULTS.md`, Local record, which renders it).
 
@@ -1243,6 +1244,9 @@ submodule: the self-test `tools/scripts/test-check-kani-record.sh`, then
   patch expects;
 - the `kani` groups and the record do not cover `run.sh list` exactly
   once, or `kani-mutants` and the record `mutants/*.patch`;
+- a `kani-large` or `kani-mutants-large` timeout is below the limit the
+  record ran that job under (the workflow is not in the fingerprint; a
+  warning when this run's large jobs verify it);
 - a hosted entry peaked above 13 GB;
 - `kani/RESULTS.md` has no block, or its block is not the record's table.
 
@@ -1313,7 +1317,7 @@ local record.
 | `mutants` | `kani/run.sh mutants`: the 31 mutants in plain mode (about 4 min); 30 min limit | a must-kill mutant passing plain mode; mutant 20 (`must-survive`) failing it |
 | `kani` | `kani/run.sh kani <group>` with `KANI_DEFER_COVERS=1`, a matrix of the 8 groups (53 harnesses) that peaked at 13 GB or less, on the hosted runner unless `KANI_RUNNER` or `CI_RUNNER` is set (see above); per group `KANI_TIMEOUT` and `KANI_MAX_GB`; logs uploaded | a harness failing, out of time or out of memory; `h_canary` passing, or failing on anything but its own assertion; a runner whose memory plus swap is below the group's peak; a runner that shuts down |
 | `kani-large` | as `kani`, for the 21 groups (36 harnesses) that peaked above 13 GB; only when `KANI_RUNNER` is set, is not `ubuntu-latest`, and the run is not routed (the `pin` job's `large`); no swap step | as `kani`; a hosted runner with less memory than the group's peak |
-| `kani-record` | every change: `tools/scripts/test-check-kani-record.sh`, then `tools/scripts/check-kani-record.py` on the local record in `kani/local` (see above; `--stale-ok-harnesses` when `kani-large` runs, `--stale-ok-mutants` when `kani-mutants-large` runs) | the record's fingerprint not the commit's ("re-run the local Kani record"), unless this run's large jobs verify all it records; data not matching the digest, or a fingerprint not its input lines' or its commit's; a recorded harness not `ok` or a recorded mutant not as its patch expects; `kani` plus the record not `run.sh list` once each, or `kani-mutants` plus the record not `mutants/*.patch` once each; a hosted entry above 13 GB; a missing or stale `kani/RESULTS.md` block |
+| `kani-record` | every change: `tools/scripts/test-check-kani-record.sh`, then `tools/scripts/check-kani-record.py` on the local record in `kani/local` (see above; `--stale-ok-harnesses` when `kani-large` runs, `--stale-ok-mutants` when `kani-mutants-large` runs) | the record's fingerprint not the commit's ("re-run the local Kani record"), unless this run's large jobs verify all it records; data not matching the digest, or a fingerprint not its input lines' or its commit's; a recorded harness not `ok` or a recorded mutant not as its patch expects; `kani` plus the record not `run.sh list` once each, or `kani-mutants` plus the record not `mutants/*.patch` once each; a large entry's timeout below the record's limit for it; a hosted entry above 13 GB; a missing or stale `kani/RESULTS.md` block |
 | `covers` | after `kani`, `kani-large` and `kani-record`: every harness of `run.sh list` in exactly one group's logs or (without `KANI_RUNNER`) the local record, then `tools/scripts/check-covers.sh` over every group's `covers.tsv` and the record's covers (89 harnesses, 164 covers) | a harness in no group nor the record, or in two; a family's cover satisfied in none of its harnesses |
 | `kani-mutants` | `kani/run.sh mutants --kani <NN>-*`, one job per mutant for the 15 sized at 13 GB or less, with the named harness's peak and three times its time, at least 1,800 s (manual, `mutants: true`) | a mutant whose plain or Kani result differs from its header (`killed-by`, `must-survive`) |
 | `kani-mutants-large` | as `kani-mutants`, for the other 16, only when `KANI_RUNNER` is set, is not `ubuntu-latest`, and the run is not routed (manual, `mutants: true`); otherwise they are the local record's | as `kani-mutants`; a hosted runner with less memory than the mutant's peak |

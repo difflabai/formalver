@@ -74,8 +74,10 @@ CI computes it in a shallow checkout without the submodule:
     tools/scripts/check-kani-record.py pathspecs    # the same inputs, for git diff
 
 These do not change the fingerprint: the Markdown, this directory, the
-workflow, and the rest of the repository. The workflow's matrices are
-checked separately (see CI below). Neither do the run's environment and
+workflow, and the rest of the repository. The check compares the
+workflow's matrices with the record instead (see CI below): the large
+jobs must be the recorded ones, and their timeouts may not drop below
+the `limit_s` the record ran them under. Neither do the run's environment and
 the host's cargo configuration outside the repository (`CARGO_HOME`'s,
 or a `.cargo/` above the checkout), so `run-local.py` refuses those that
 can change a verdict (below).
@@ -88,7 +90,8 @@ can change a verdict (below).
     projects/shared-pool/kani/local/run-local.py --record
     git add projects/shared-pool/kani/local projects/shared-pool/kani/RESULTS.md
 
-    # The jobs, without running them:
+    # The jobs, without running them (after the environment and cargo
+    # configuration checks below, as a run makes them):
     projects/shared-pool/kani/local/run-local.py --dry-run
 
     # Record a run directory that has already finished:
@@ -101,7 +104,8 @@ can change a verdict (below).
     tools/scripts/check-kani-record.py
     tools/scripts/test-check-kani-record.sh
 
-`run-local.py` needs Kani and CBMC at `tools/versions.env`'s versions
+`run-local.py` needs Python 3.11 or later (`tomllib`, for the cargo
+configuration check), Kani and CBMC at `tools/versions.env`'s versions
 (`cargo install --locked kani-verifier --version <KANI>; cargo kani
 setup`), the Rust toolchain `RUST_TOOLCHAIN` (`rustup toolchain install
 <RUST_TOOLCHAIN> --profile minimal`) and the submodule (`git submodule
@@ -122,7 +126,12 @@ It refuses to start when the environment sets a variable that changes what
 `CARGO_PROFILE_*` or `CARGO_TARGET_*_RUSTFLAGS`. It also refuses when a
 cargo configuration file outside the lanes (`CARGO_HOME`'s, or a
 `.cargo/config[.toml]` above the run directory or `TMPDIR`) sets
-`rustflags`, `rustc` or a wrapper, or a profile. With the default run
+`rustflags`, `rustc` or a wrapper (at any depth, such as
+`target.<triple>.rustflags`), a profile, or an `include`. It parses each
+file as TOML, as cargo does, so every spelling of a key counts (`[build]`
+then `"rustflags" = ...`, `build.rustflags = ...`, `build = { rustflags =
+... }`), and the error names the keys it found; a file that does not
+parse is refused too. With the default run
 directory, inside the repository, that includes the work tree's own,
 such as `kani/.cargo/config.toml`: cargo would read it on top of the
 lane's copy of the commit's, so a `rustflags` there would apply twice.
@@ -205,6 +214,12 @@ then `check-kani-record.py`, which fails when:
 - The same holds for `mutants/*.patch`: the `kani-mutants` entries plus the
   recorded mutants must cover them exactly once, and the
   `kani-mutants-large` entries must be the recorded mutants.
+- A `kani-large` or `kani-mutants-large` entry's timeout is below the
+  `limit_s` its recorded jobs ran under: the record shows a pass within
+  that limit, not within less. A higher timeout is fine. When this run's
+  `kani-large` (`--stale-ok-harnesses`) or `kani-mutants-large`
+  (`--stale-ok-mutants`) jobs run, they verify under the new timeout, and
+  it is a warning.
 - A `kani` or `kani-mutants` entry peaked above 13 GB.
 - RESULTS.md has no block, or its block is not `record.py table`.
 

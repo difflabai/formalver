@@ -26,6 +26,9 @@ instead of re-running the large part:
         each exactly once, and the kani-large groups are the recorded
         harnesses; the same for mutants/*.patch with the recorded mutants,
         kani-mutants and kani-mutants-large;
+      - no kani-large / kani-mutants-large entry's timeout is below the
+        limit_s its recorded run used (a higher one is fine; a warning
+        under the matching --stale-ok flag, as then that job runs);
       - every kani and kani-mutants entry peaked at IN_MEMORY_GB or less;
       - RESULTS.md has the local-record block, and it is `record.py table`.
   check-kani-record.py fingerprint [REV]   the inputs and fingerprint at REV
@@ -416,14 +419,16 @@ def check(stale_ok_harnesses, stale_ok_mutants):
 
     # Mutants: kani-mutants and the record split mutants/*.patch.
     def resolve(job):
+        """[(entry, the mutants/*.patch names it matches)] of job's matrix."""
         out = []
         for e in wf.get(job, []):
             ms = [p for p in patches if p.startswith(e["name"] + "-")]
             if len(ms) != 1:
                 errs.append("%s entry %s: matches %d mutants/*.patch, want 1" % (job, e["name"], len(ms)))
-            out += ms
+            out.append((e, ms))
         return out
-    ci_m, large_m = resolve("kani-mutants"), resolve("kani-mutants-large")
+    ci_e, large_e = resolve("kani-mutants"), resolve("kani-mutants-large")
+    ci_m, large_m = [p for _, ms in ci_e for p in ms], [p for _, ms in large_e for p in ms]
     for what, xs in (("in kani-mutants twice", ci_m), ("recorded twice", rec_m), ("in kani-mutants-large twice", large_m)):
         if dups(xs):
             errs.append("mutants %s: %s" % (what, words(dups(xs))))
@@ -436,6 +441,38 @@ def check(stale_ok_harnesses, stale_ok_mutants):
     if set(large_m) != set(rec_m):
         errs.append("kani-mutants-large must be the recorded mutants: only in kani-mutants-large: %s; only recorded: %s"
                     % (words(set(large_m) - set(rec_m)) or "-", words(set(rec_m) - set(large_m)) or "-"))
+
+    # Limits: the record shows that a large job passes within the limit_s
+    # it ran under (its matrix timeout then), so within any timeout at
+    # least that, but not within a lower one. A stale_ok flag means this
+    # run's large jobs verify them under the current timeouts: a warning.
+    rec_limit = {}
+    for j in jobs:
+        if j["kind"] not in ("harness", "mutant"):
+            continue
+        if re.fullmatch(r"[0-9]+", j["limit_s"]):
+            rec_limit[(j["kind"], j["name"])] = int(j["limit_s"])
+        else:
+            errs.append("recorded %s %s: limit_s %r is not a whole number of seconds: write the record with "
+                        "kani/local/record.py" % (j["kind"], j["name"], j["limit_s"]))
+    for job, kind, stale_ok, entries in (
+            ("kani-large", "harness", stale_ok_harnesses, [(e, e["name"].split()) for e in wf.get("kani-large", [])]),
+            ("kani-mutants-large", "mutant", stale_ok_mutants, large_e)):
+        for e, names in entries:
+            # A name the record lacks: the membership checks above report it.
+            over = [n for n in names if rec_limit.get((kind, n), 0) > e["timeout"]]
+            if not over:
+                continue
+            ran = max(rec_limit[(kind, n)] for n in over)
+            msg = ("%s entry %r: timeout %d is below the %d s the local record ran %s under; "
+                   % (job, e["name"], e["timeout"], ran, ", ".join(over)))
+            fix = "raise it back to %d or more, or %s" % (ran, RERUN)
+            if stale_ok:
+                warns.append(msg + "this run's %s job verifies %s in %d s, but the record does not show it: %s"
+                             % (job, "them" if len(over) > 1 else "it", e["timeout"], fix))
+            else:
+                errs.append(msg + "the record does not show that %s in %d s: %s"
+                            % ("they pass" if len(over) > 1 else "it passes", e["timeout"], fix))
 
     # The hosted jobs' entries fit the hosted runner in memory.
     for job in ("kani", "kani-mutants"):
