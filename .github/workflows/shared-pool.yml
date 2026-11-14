@@ -300,7 +300,9 @@ jobs:
   # local Kani record"), a recorded harness is not ok or a recorded mutant
   # not as its patch expects, or the record and the kani groups do not
   # cover `run.sh list` exactly once (kani-large's groups must be the
-  # recorded harnesses; the same for the mutants). The covers job counts
+  # recorded harnesses; the same for the mutants), or a kani-large or
+  # kani-mutants-large timeout is below the limit the record ran that job
+  # under (this workflow is not in the fingerprint). The covers job counts
   # the recorded harnesses and their covers with the groups'. A stale
   # record is only a warning when this run verifies everything it records:
   # kani-large its harnesses and kani-mutants-large (manual, `mutants`)
@@ -565,7 +567,8 @@ jobs:
         # As in the kani job. These groups' harnesses are the local
         # record's (check-kani-record.py checks it), and
         # kani/local/run-local.py runs them, with these timeouts, from
-        # this list.
+        # this list. A timeout below the record's limit_s for the group
+        # fails kani-record (raising one is fine).
         include:
           - { group: "h_step_observe_inv_3 h_step_cancel_inv h_step_cancel_post", gb: 15, timeout: 1800 }
           - { group: "h_step_settle_tx h_step_settle_inv_1 h_step_settle_post", gb: 19, timeout: 1800 }
@@ -925,7 +928,8 @@ jobs:
         # limit into the scans of 256 records (RESULTS.md: 262 s, 33.8M
         # clauses); its peak was not recorded, so it gets h_full_255's.
         # These are the local record's mutants (check-kani-record.py), and
-        # kani/local/run-local.py runs them from this list.
+        # kani/local/run-local.py runs them from this list. A timeout below
+        # the record's limit_s for the mutant fails kani-record.
         include:
           - { mutant: "01", gb: 21, timeout: 1800 }
           - { mutant: "03", gb: 21, timeout: 1800 }

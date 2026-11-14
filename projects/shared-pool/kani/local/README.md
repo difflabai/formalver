@@ -74,8 +74,10 @@ CI computes it in a shallow checkout without the submodule:
     tools/scripts/check-kani-record.py pathspecs    # the same inputs, for git diff
 
 These do not change the fingerprint: the Markdown, this directory, the
-workflow, and the rest of the repository. The workflow's matrices are
-checked separately (see CI below). Neither do the run's environment and
+workflow, and the rest of the repository. The check compares the
+workflow's matrices with the record instead (see CI below): the large
+jobs must be the recorded ones, and their timeouts may not drop below
+the `limit_s` the record ran them under. Neither do the run's environment and
 the host's cargo configuration outside the repository (`CARGO_HOME`'s,
 or a `.cargo/` above the checkout), so `run-local.py` refuses those that
 can change a verdict (below).
@@ -167,6 +169,12 @@ then `check-kani-record.py`, which fails when:
 - The same holds for `mutants/*.patch`: the `kani-mutants` entries plus the
   recorded mutants must cover them exactly once, and the
   `kani-mutants-large` entries must be the recorded mutants.
+- A `kani-large` or `kani-mutants-large` entry's timeout is below the
+  `limit_s` its recorded jobs ran under: the record shows a pass within
+  that limit, not within less. A higher timeout is fine. When this run's
+  `kani-large` (`--stale-ok-harnesses`) or `kani-mutants-large`
+  (`--stale-ok-mutants`) jobs run, they verify under the new timeout, and
+  it is a warning.
 - A `kani` or `kani-mutants` entry peaked above 13 GB.
 - RESULTS.md has no block, or its block is not `record.py table`.
 

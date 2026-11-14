@@ -3,8 +3,9 @@
 # finished local run of the kani-large and kani-mutants-large jobs (at HEAD)
 # records and passes the check; an incomplete, failed or foreign run is
 # refused and leaves the record alone; and each kind of stale, wrong or
-# inconsistent record, and each workflow matrix that does not split the
-# harnesses and mutants with the record, fails the check. Commits with
+# inconsistent record, each workflow matrix that does not split the
+# harnesses and mutants with the record, and each large timeout below the
+# limit the record ran it under, fails the check. Commits with
 # other Kani inputs are made in a scratch object directory over the
 # repository's (no object, ref or index of the repository is written).
 #
@@ -296,6 +297,35 @@ w "s = s.replace('- { mutant: \"02\", gb: 5, timeout: 1800 }', '- { mutant: \"02
 expect 1 "a matrix entry in another form" "a matrix entry must read" run_check "$t/good" "$t/wf.yml"
 w "s = s.replace('  kani-large:', '  kani-huge:', 1)"
 expect 1 "no kani-large job" "no matrix entries for the kani-large job" run_check "$t/good" "$t/wf.yml"
+# Timeouts: a large entry's may not drop below the limit_s its recorded
+# run used (the record shows a pass within that, not within less); a
+# higher one is fine; under the job's --stale-ok flag (the job runs) a
+# lower one is a warning.
+w "s = s.replace('{ group: \"h_wedge\", gb: 39, timeout: 1800 }', '{ group: \"h_wedge\", gb: 39, timeout: 600 }', 1)"
+expect 1 "a kani-large timeout below the recorded limit" \
+  "error: kani-large entry 'h_wedge': timeout 600 is below the 1800 s the local record ran h_wedge under; the record does not show that it passes in 600 s: raise it back to 1800 or more, or re-run the local Kani record" \
+  run_check "$t/good" "$t/wf.yml"
+expect 0 "... with --stale-ok-harnesses: a warning" \
+  "warning: kani-large entry 'h_wedge': timeout 600 is below the 1800 s .*this run's kani-large job verifies it in 600 s" \
+  run_check "$t/good" "$t/wf.yml" "" --stale-ok-harnesses
+w "s = s.replace('\"h_init h_validate\", gb: 27, timeout: 2400 }', '\"h_init h_validate\", gb: 27, timeout: 2399 }', 1)"
+expect 1 "a two-harness kani-large group 1 s below the recorded limit" \
+  "kani-large entry 'h_init h_validate': timeout 2399 is below the 2400 s the local record ran h_init, h_validate under; the record does not show that they pass" \
+  run_check "$t/good" "$t/wf.yml"
+w "s = s.replace('{ mutant: \"25\", gb: 19, timeout: 5100 }', '{ mutant: \"25\", gb: 19, timeout: 1800 }', 1)"
+expect 1 "a kani-mutants-large timeout below the recorded limit" \
+  "error: kani-mutants-large entry '25': timeout 1800 is below the 5100 s the local record ran 25-[a-z-]+ under" \
+  run_check "$t/good" "$t/wf.yml"
+expect 1 "... with --stale-ok-harnesses only (no kani-mutants-large)" "error: kani-mutants-large entry '25': timeout 1800" \
+  run_check "$t/good" "$t/wf.yml" "" --stale-ok-harnesses
+expect 0 "... with --stale-ok-mutants: a warning" "warning: kani-mutants-large entry '25': timeout 1800 .*verifies it in 1800 s" \
+  run_check "$t/good" "$t/wf.yml" "" --stale-ok-mutants
+w "s = s.replace('{ group: \"h_wedge\", gb: 39, timeout: 1800 }', '{ group: \"h_wedge\", gb: 39, timeout: 3600 }', 1).replace('{ mutant: \"25\", gb: 19, timeout: 5100 }', '{ mutant: \"25\", gb: 19, timeout: 7200 }', 1)"
+expect 0 "large timeouts raised above the recorded limits" "local Kani record ok" run_check "$t/good" "$t/wf.yml"
+grep -q '^warning: kani-' "$t/out" && { echo "FAIL: large timeouts raised: a timeout warning"; sed 's/^/  /' "$t/out"; fail=1; }
+bad; edit "$t/r/jobs.tsv" "s = re.sub(r'(?m)^(harness\th_wedge\t(?:[^\t]*\t){5})1800\t', r'\g<1>30m\t', s)"; redigest "$t/r"
+expect 1 "a recorded limit_s that is not whole seconds" "recorded harness h_wedge: limit_s '30m' is not a whole number of seconds" \
+  run_check "$t/r"
 
 expect 0 "RESULTS.md block current" "" run_check "$t/good" "$wf" "$t/results.md"
 cp "$t/results.md" "$t/stale.md"; edit "$t/stale.md" "s = s.replace('| \`h_wedge\` | ok |', '| \`h_wedge\` | ok?? |')"
