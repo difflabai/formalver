@@ -8,6 +8,17 @@
 #   - a status above the layer's ceiling (Kani: verified-with-assumptions;
 #     only Verus path A may claim `verified` with evidence `proof`);
 #   - a K or V property at verified* without `[review] spec_reviewer`.
+# When the file has `[findings.<ID>]` tables (shared-pool, plan-meta section
+# 4), it also checks them against the rows:
+#   - a finding's `status` is open, closed, documented or rejected;
+#   - every entry of a property's `closes` is a finding whose `closed_by`
+#     lists the property, and every `closed_by` entry is a property or
+#     assumption ID; a property in `closed_by` must list the finding in
+#     `closes`;
+#   - a closed finding has `closed_in` and a non-empty `closed_by` with at
+#     least one row past `unverified`/`stale` (a rejected one may have none);
+#   - a property's `finding` (comma-separated IDs) names open findings only.
+# Without [findings], `closes` is an error and `finding` is free text.
 # In-progress K/V properties are allowed without sign-off: they record that
 # the proofs pass in CI while the human spec review is still pending.
 #
@@ -116,13 +127,63 @@ def check(pid, p):
     if layer in ("kani", "verus") and RANK[status] >= RANK["verified-with-assumptions"] and not reviewer:
         errors.append(f"{pid}: {status} needs [review] spec_reviewer (strategy.md section 12)")
 
+props = {}
 for mod in st.get("modules", {}).values():
     for pid, p in mod.get("properties", {}).items():
         if isinstance(p, dict) and "status" in p:
+            props[pid] = p
             check(pid, p)
+
+# Findings (plan-meta section 4): closes <-> closed_by, and what a status needs.
+FSTATUS = {"open", "closed", "documented", "rejected"}
+findings = st.get("findings", {})
+assumptions = st.get("assumptions", {})
+rank_of = {pid: RANK.get(p["status"], 0) for pid, p in props.items()}
+rank_of.update({aid: RANK.get(a.get("status"), 0) for aid, a in assumptions.items() if isinstance(a, dict)})
+
+def ids(v):
+    if isinstance(v, str):
+        return [x.strip() for x in v.split(",") if x.strip()]
+    return list(v) if isinstance(v, list) else [v]
+
+for pid, p in props.items():
+    for fid in ids(p.get("closes", [])):
+        if fid not in findings:
+            errors.append(f"{pid}: closes {fid!r}, which is not a [findings] table")
+        elif pid not in ids(findings[fid].get("closed_by", [])):
+            errors.append(f"{pid}: closes {fid} but [findings.{fid}] closed_by does not list {pid}")
+    if findings:
+        for fid in ids(p.get("finding", [])):
+            if fid not in findings:
+                errors.append(f"{pid}: finding {fid!r} is not a [findings] table")
+            elif findings[fid].get("status") != "open":
+                errors.append(f"{pid}: finding {fid} is {findings[fid].get('status')!r}, not open (use closes)")
+
+for fid, f in findings.items():
+    if not isinstance(f, dict):
+        errors.append(f"findings.{fid}: not a table")
+        continue
+    fs, by = f.get("status"), ids(f.get("closed_by", []))
+    if fs not in FSTATUS:
+        errors.append(f"findings.{fid}: unknown status {fs!r} (one of {', '.join(sorted(FSTATUS))})")
+    for x in by:
+        if x not in rank_of:
+            errors.append(f"findings.{fid}: closed_by {x!r} is not a property or assumption")
+        elif x in props and fid not in ids(props[x].get("closes", [])):
+            errors.append(f"findings.{fid}: closed_by lists {x}, whose closes does not name {fid}")
+    if fs == "closed":
+        if not f.get("closed_in"):
+            errors.append(f"findings.{fid}: closed without closed_in")
+        if not by:
+            errors.append(f"findings.{fid}: closed with an empty closed_by")
+        elif not any(rank_of.get(x, 0) >= RANK["in-progress"] for x in by):
+            errors.append(f"findings.{fid}: closed, but every closed_by row is unverified or stale")
 
 for e in errors:
     print(f"::error::status-lint: {e}" if os.environ.get("GITHUB_ACTIONS") else f"status-lint: {e}")
-print(f"status-lint: {seen} properties, {len(errors)} problem(s)")
+if findings:
+    print(f"status-lint: {seen} properties, {len(findings)} findings, {len(errors)} problem(s)")
+else:
+    print(f"status-lint: {seen} properties, {len(errors)} problem(s)")
 sys.exit(1 if errors else 0)
 PY
