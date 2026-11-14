@@ -71,16 +71,21 @@ v1.0.0's kani/RESULTS.md, its peak times 1.25 (v1.1.0 measured up to 1.53
 times v1.0.0's, h_init); a mutant from the harnesses its Kani leg is
 expected to run (its first killed-by, or every checked-by of a
 `# must-survive` patch) plus 240 s of plain mode and build; otherwise
-unknown: 40 GB (KANI_MAX_GB, the most run.sh lets a job use), so that it
-runs alone or beside a job estimated at 10 GB or less, and 1800 s. A
-job's limit (KANI_TIMEOUT) is 3 times its estimate, at least 1800 s, and
-at least 7200 s for run.sh's 7200 s tier and for an unknown; a mutant's
-is the largest of its harnesses'. KANI_MAX_GB stays 40 (another value is
+unknown: 40 GB (KANI_MAX_GB, the most run.sh lets a job use) and 1800 s.
+A job estimated at 35 GB or more (the unknowns, and v1.0.0 numbers scaled
+near 40 GB) runs alone: it starts only when no job runs, and no job
+starts beside it; so does a running job whose sampled process tree has
+reached 35 GB. Other jobs share the budget, a running one counted at its
+estimate or its sampled tree peak, whichever is more. A job's limit
+(KANI_TIMEOUT) is 3 times its estimate, at least 1800 s, and at least
+7200 s for run.sh's 7200 s tier and for an unknown; a mutant's is the
+largest of its harnesses'. KANI_MAX_GB stays 40 (another value is
 refused). The run holds /tmp/sp-heavy.lock (SP_HEAVY_LOCK) from its start
 to its exit, failures and signals included, so that no other heavy job
 overlaps it: while another process holds it, the run waits (checking
-every 30 s), and it removes only a lock it took. --record is refused; the
-output is outside the repository (default
+every 30 s), and it removes only a lock it took; before it releases the
+lock, it kills every job it started (process group and process tree).
+--record is refused; the output is outside the repository (default
 ~/shared-pool-kani-measure/all-<commit>-<UTC time>), env.txt says `mode
 measurement`, and record.py refuses it. The lanes, the environment and
 cargo checks, the sampling and results.tsv are the record's. --dry-run
@@ -157,11 +162,19 @@ V11_MEASURED = {
 # times v1.0.0's (h_wedge, h_init), so the peak is scaled.
 V10_RESULTS = ("a072a2dec788afcf0741786cdb458c3906e350fa", SP + "/kani/RESULTS.md")
 V10_PEAK_SCALE = 1.25
-# Otherwise unknown: KANI_MAX_GB, the most run.sh lets a job use (a job of
-# that estimate shares the machine only with one that fits the budget
-# beside it), and 1800 s, run.sh's default limit.
+# Otherwise unknown: KANI_MAX_GB, the most run.sh lets a job use, and
+# 1800 s, run.sh's default limit.
 MAX_GB = 40.0
 UNKNOWN_SECS = 1800
+# A job counted at this or more runs alone: it starts only when no job
+# runs, and no job starts beside it (a running job counts its estimate or
+# its sampled tree peak, whichever is more). These are the unknowns and
+# v1.0.0 numbers scaled near MAX_GB (h_energy_max, h_bmc_from_init_s_submit);
+# v1.1.0's largest measured peak, h_init's 33.0 GB (W7), is below it. By
+# the budget alone, a 40 GB job could run beside one estimated at 10 GB,
+# and v1.1.0's small step harnesses peaked at 1.3 to 1.8 times their
+# v1.0.0 numbers (W11's smoke runs): 40 + 18 GB on a 64 GB machine.
+ALONE_GB = 35.0
 # A mutant job: plain mode (cargo test --release from scratch) and the
 # mutant tree's Kani codegen, before its Kani leg (v1.0.0's local record:
 # mutant 21's job 338 s around h_full_256's 46 s).
@@ -375,13 +388,27 @@ def only_jobs(jobs, only):
     return [j for j in jobs if j["name"] in want], []
 
 
-def simulate(jobs, lanes, budget):
+def fits(job, counted, budget, alone):
+    """Whether job may start beside the running jobs, counted at counted (GB each), within budget.
+
+    Alone, a job always fits (h_wedge's peak may be most of the budget).
+    alone: the size from which a job runs alone, the pending one or a
+    running one (--all's ALONE_GB; None for a record, whose peaks are
+    measured).
+    """
+    if not counted:
+        return True
+    if alone is not None and (job["peak"] >= alone or max(counted) >= alone):
+        return False
+    return sum(counted) + job["peak"] <= budget
+
+
+def simulate(jobs, lanes, budget, alone):
     """The schedule's length in seconds with the estimates: the main loop's policy, without the sampling."""
     t, pending, running = 0.0, list(jobs), []
     while pending or running:
         for _ in range(lanes - len(running)):
-            used = sum(p for _, p in running)
-            pick = next((j for j in pending if not running or used + j["peak"] <= budget), None)
+            pick = next((j for j in pending if fits(j, [p for _, p in running], budget, alone)), None)
             if pick is None:
                 break
             pending.remove(pick)
@@ -461,12 +488,12 @@ def make_lane(lane, commit, core, cargo_above):
         sys.exit("run-local.py: git archive of the source-mirror at %s failed" % core)
 
 
-def tree_rss(root):
-    """(tree KB, largest cbmc KB) for the process tree rooted at pid root."""
+def processes():
+    """Every process: ({ppid: [pid]}, {pid: rss KB}, {pid: command}); empty when ps fails."""
     try:
         out = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,rss=,comm="], capture_output=True, text=True).stdout
     except OSError:
-        return 0, 0
+        return {}, {}, {}
     kids, rss, comm = {}, {}, {}
     for line in out.splitlines():
         p = line.split(None, 3)
@@ -475,14 +502,48 @@ def tree_rss(root):
         pid, ppid, r = int(p[0]), int(p[1]), int(p[2])
         kids.setdefault(ppid, []).append(pid)
         rss[pid], comm[pid] = r, p[3]
-    tot, cb, stack = 0, 0, [root]
+    return kids, rss, comm
+
+
+def tree(root, kids):
+    """root and its descendants (kids: processes()'s)."""
+    out, stack = [], [root]
     while stack:
         p = stack.pop()
+        out.append(p)
+        stack.extend(kids.get(p, []))
+    return out
+
+
+def tree_rss(root):
+    """(tree KB, largest cbmc KB) for the process tree rooted at pid root."""
+    kids, rss, comm = processes()
+    tot, cb = 0, 0
+    for p in tree(root, kids):
         tot += rss.get(p, 0)
         if os.path.basename(comm.get(p, "")).startswith("cbmc"):
             cb = max(cb, rss.get(p, 0))
-        stack.extend(kids.get(p, []))
     return tot, cb
+
+
+def kill_job(proc):
+    """SIGKILL a job: its process group (run.sh leads one) and its process tree, listed before anything is killed.
+
+    The tree catches a descendant in a group of its own, which the group
+    kill misses and which, once its parent dies, is no longer in the tree
+    (run.sh's kill_tree does the same: it says cargo-kani starts CBMC in
+    its own group; under Kani 0.68 CBMC shares cargo-kani's).
+    """
+    pids = tree(proc.pid, processes()[0])
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except OSError:
+        pass
+    for p in pids:
+        try:
+            os.kill(p, signal.SIGKILL)
+        except OSError:
+            pass
 
 
 def verdict(job, so):
@@ -601,10 +662,13 @@ def main():
               "%d unknown (%.1f h of the estimate)"
               % (basis.count("W7"), basis.count("v1.0.0"), basis.count("harnesses"), basis.count("unknown"),
                  sum(j["est"] for j in jobs if j["basis"] == "unknown") / 3600))
-        print("estimate: %.1f h of jobs; / %d lanes = %.1f h; scheduled (%d lanes, budget %g GB, in this order, "
-              "with these estimates): %.1f h"
-              % (total / 3600, a.lanes, total / 3600 / a.lanes, a.lanes, a.budget_gb,
-                 simulate(jobs, a.lanes, a.budget_gb) / 3600))
+        alone = [j for j in jobs if j["peak"] >= ALONE_GB]
+        print("alone (estimated at %g GB or more; no job beside them): %d jobs, %.1f h of the estimate"
+              % (ALONE_GB, len(alone), sum(j["est"] for j in alone) / 3600))
+        print("estimate: %.1f h of jobs; / %d lanes = %.1f h; scheduled (%d lanes, budget %g GB, %g GB or more "
+              "alone, in this order, with these estimates): %.1f h"
+              % (total / 3600, a.lanes, total / 3600 / a.lanes, a.lanes, a.budget_gb, ALONE_GB,
+                 simulate(jobs, a.lanes, a.budget_gb, ALONE_GB) / 3600))
         return 0
     if a.dry_run:
         print("commit %s; %d jobs (KANI_TIMEOUT, measured peak GB, estimated s):" % (commit[:12], len(jobs)))
@@ -685,13 +749,16 @@ def main():
         print(line, flush=True)
 
     running, pending, ok = {}, list(jobs), True
+    # A signal while a job is being started waits until it is in running
+    # (so that stop kills it too).
+    starting, deferred = [False], []
 
     def stop(signum, _frame):
+        if starting[0]:
+            deferred.append(signum)
+            return
         for j in running.values():
-            try:
-                os.killpg(j["proc"].pid, signal.SIGKILL)
-            except OSError:
-                pass
+            kill_job(j["proc"])
         log("stopped by signal %d; not complete" % signum)
         sys.exit(1)
 
@@ -702,10 +769,7 @@ def main():
         # (atexit runs this first: it was registered last).
         def kill_running():
             for j in running.values():
-                try:
-                    os.killpg(j["proc"].pid, signal.SIGKILL)
-                except OSError:
-                    pass
+                kill_job(j["proc"])
         atexit.register(kill_running)
     log(("measurement (run-local.py --all, not a record): " if a.all else "")
         + "%d jobs: %d harnesses, %d mutants; budget %g GB; output %s"
@@ -717,10 +781,10 @@ def main():
             if lane in running or not pending:
                 continue
             # A measurement's estimates are uncertain: a running job counts
-            # what it already uses when that is more.
-            used = sum(max(j["peak"], j["ptree"] / 1048576) if a.all else j["peak"] for j in running.values())
-            # Alone, a job always fits (h_wedge's peak may be most of the budget).
-            pick = next((j for j in pending if not running or used + j["peak"] <= a.budget_gb), None)
+            # what it already uses when that is more, and a large one runs
+            # alone.
+            counted = [max(j["peak"], j["ptree"] / 1048576) if a.all else j["peak"] for j in running.values()]
+            pick = next((j for j in pending if fits(j, counted, a.budget_gb, ALONE_GB if a.all else None)), None)
             if pick is None:
                 break
             pending.remove(pick)
@@ -732,12 +796,18 @@ def main():
                 env["RUSTUP_TOOLCHAIN"] = rust_v
             lane_dir = os.path.join(out, "lanes", lane)
             so = open(os.path.join(d, "stdout.txt"), "w")
-            pick["proc"] = subprocess.Popen(["bash", os.path.join(lane_dir, SP, "kani/run.sh")] + pick["args"],
-                                            env=env, stdout=so, stderr=subprocess.STDOUT, cwd=lane_dir,
-                                            start_new_session=True)
-            pick["t0"], pick["start"] = time.monotonic(), iso(now())
-            pick["ptree"], pick["pcbmc"] = 0, 0
-            running[lane] = pick
+            starting[0] = True
+            try:
+                pick["proc"] = subprocess.Popen(["bash", os.path.join(lane_dir, SP, "kani/run.sh")] + pick["args"],
+                                                env=env, stdout=so, stderr=subprocess.STDOUT, cwd=lane_dir,
+                                                start_new_session=True)
+                pick["t0"], pick["start"] = time.monotonic(), iso(now())
+                pick["ptree"], pick["pcbmc"] = 0, 0
+                running[lane] = pick
+            finally:
+                starting[0] = False
+            if deferred:
+                stop(deferred[0], None)
             log("start %s on %s (peak %s GB, est %.0f s, limit %d s)" % (pick["name"], lane, pick["peak"],
                                                                          pick["est"], pick["timeout"]))
         time.sleep(3)
