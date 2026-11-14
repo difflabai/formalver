@@ -86,7 +86,7 @@ or on the tag line of a `wasm-surface.sh` check SURF-n; each file header
 equals the union of its tests' tags; `run.sh`, `run-mutants.sh` and
 `wasm-surface.sh` carry tags, and SURF-1, SURF-2 and SURF-3 each have a tag
 line; no SURF-n is used as a tag; the tag set `check-status.sh` extracts
-equals the one found. Checked 2026-11-13: 0 problems (catalogue 118 IDs,
+equals the one found. Checked 2026-11-14: 0 problems (catalogue 118 IDs,
 22 in layer near-tests; 38 tests tagged; 28 distinct IDs).
 
 ## Property results (v1.1.0)
@@ -96,8 +96,8 @@ equals the one found. Checked 2026-11-13: 0 problems (catalogue 118 IDs,
 | SH-1 | pass | `sh1_caller_is_the_predecessor_not_the_signer`, `sh1_now_is_the_block_timestamp_in_whole_seconds`, 15% relayed calls in SH-8; mutants s02, s10 |
 | SH-2 | pass | `sh2_new_is_private_and_initialises_once`; mutant s09 |
 | SH-3 | pass (NT-F4 fixed) | `sh3_on_result_is_private`, `sh3_on_result_maps_the_status_string`, `sh3_non_string_promise_results_become_unknown` (a failed call, no result, two results, more than 64 bytes, or anything but one JSON string is "unknown"), the NotFound event for a missing or pruned id (`sh9_pruned_*`); mutants s01, s03, s04, s08, s14, s23, s24, s25 |
-| SH-4 | pass | `sh4_rejected_submit_returns_the_decision_and_writes_nothing`; mutant s13 |
-| SH-5 | pass (NT-F1 fixed) | `sh5_core_errors_are_panics_with_the_error_string` on both paths; `nt_f1_documented_build_reports_every_panic_message`: the documented build reports the error string (the Plain build, the negative control, still traps bare); SURF-3: build.sh refuses a wasm without `panic_utf8` |
+| SH-4 | pass | `sh4_rejected_submit_returns_the_decision_and_writes_nothing`; the crafted allowed-but-failing submit in `sh5_core_errors_are_panics_with_the_error_string`; mutant s13 |
+| SH-5 | pass (NT-F1 fixed) | `sh5_core_errors_are_panics_with_the_error_string` on both paths, including a crafted state (`first_id = u32::MAX`) where the preview allows a submit the core refuses with Arithmetic: the shell panics with it and writes nothing; `nt_f1_documented_build_reports_every_panic_message`: the documented build reports the error string (the Plain build, the negative control, still traps bare); SURF-3: build.sh refuses a wasm without `panic_utf8`; mutants s07, s13, s14, s25 |
 | SH-6 | pass | `sh6_dispatch_promise_shape` (`promise_create` execute 30 Tgas, `promise_then` on_result 30 Tgas, `promise_return` of the callback); mutants s11, s27, s28 |
 | SH-7 | pass | `sh7_reconcile_guard_and_promise_shape`; mutants s05, s15, s28 |
 | SH-8 | pass (host, wasm, window) | `sh8_store_diff_host`, `sh8_store_diff_wasm`, `sh8_store_diff_window`; `conformance_traces_through_the_shell` with the v1.1.0 corpus (W10 patch, below) |
@@ -188,52 +188,70 @@ store_diff 300 x 40, wasm 40 x 40, everything else at its default.
   `nt_v100_executor` reads v1.0.0's executor state (no `newest`) and has
   no host `on_settled`. Ordinary builds set neither.
 
+s13 is equivalent in every reachable state of v1.1.0: `preview` is the
+candidate of `submit`, and the only check `submit` adds beyond it,
+`first_id + len` overflowing, needs more ids than the version cap allows.
+The first full run had s13 survive; the crafted state at the end of
+`sh5_core_errors_are_panics_with_the_error_string` (`first_id = u32::MAX`)
+now kills it.
+
 Until the v1.1.0 corpus is committed, the run uses `NT_SKIP_TRACES=1`
 (`tests/traces.rs` left out; see "Expected failure").
 
+Last run 2026-11-14 (`NT_SKIP_TRACES=1 ./run-mutants.sh`, 18 min): the
+control survives, 41 of 41 mutants killed, exit 0. Each verdict below lists
+every failing test.
+
+The historical mutants also fail the surface checks, outside
+`run-mutants.sh`: the documented build of s00a + s00b imports 19
+`promise_batch_*` functions per wasm (contract 35 imports, executor 32;
+SURF-2 fails), and build.sh's own checker exits 1 on them ("imports host
+functions for actions other than function calls") without writing
+`artifacts/build.json`.
+
 | Mutant | Crate | Breaks | Change | Verdict and failing tests |
 |---|---|---|---|---|
-| s00a_v100_contract | contract | SH-3/SH-10/SH-12 | the v1.0.0 contract (NT-F2, NT-F3, NT-F4 unfixed; Promise type) | pending |
-| s00b_v100_executor | executor | EX-6/EX-7/EX-8 | the v1.0.0 executor (no window, 256-job cap, no on_settled; Promise type) | pending |
-| s01_on_result_not_private | contract | SH-3 | on_result accepts any predecessor | pending |
-| s02_caller_is_signer | contract | SH-1 | caller() is the signer instead of the predecessor | pending |
-| s03_swap_completed_cancelled | contract | SH-3 | on_result maps completed and cancelled to the opposite settlement | pending |
-| s04_unknown_settles_cancelled | contract | SH-3 | an "unknown" status is treated as definitive non-execution | pending |
-| s05_reconcile_without_status_guard | contract | SH-7 | reconcile no longer refuses records that are not in flight | pending |
-| s06_get_commitments_limit_100 | contract | SH-9 | get_commitments pages up to 100 records | pending |
-| s07_settle_emits_no_event | contract | SH-5/SH-8 | settle forgets its "settled" event | pending |
-| s08_on_result_promise_error_is_active | contract | SH-3 | a failed execute (PromiseError::Failed) acknowledges the record as Active | pending |
-| s09_new_not_private | contract | SH-2 | anyone may initialise the pool | pending |
-| s10_now_rounds_up | contract | SH-1 | now() rounds the block timestamp up to the next second | pending |
-| s11_execute_sent_to_actor | contract | SH-6 | dispatch sends execute to the recipe's actor instead of its executor | pending |
-| s12_submit_payable | contract | SH-10 | submit accepts an attached deposit | pending |
-| s13_submit_ignores_preview | contract | SH-4/SH-5 | submit tries the core directly and swallows its error (the version-overflow panic is lost) | pending |
-| s14_on_result_panics_on_core_error | contract | SH-3/SH-5 | on_result panics on a core error instead of reporting it in the event | pending |
-| s15_reconcile_status_gas_30 | contract | SH-7 | reconcile attaches 30 Tgas to status instead of 10 | pending |
-| s16_executor_dedupe_dropped | executor | EX-2 | execute no longer deduplicates a replayed id (a second job is pushed) | pending |
-| s17_executor_lock_is_signer | executor | EX-1 | execute checks the signer, not the predecessor | pending |
-| s18_executor_set_mode_unguarded | executor | EX-3 | anyone may set the executor's mode | pending |
-| s19_executor_terminal_conflict_dropped | executor | EX-4 | finish may replace a terminal outcome with the other one | pending |
-| s20_executor_notify_inverted | executor | EX-5 | notify reports the opposite outcome to the lock | pending |
-| s21_executor_payload_unbound | executor | EX-2 | a replayed id with another payload returns the recorded status | pending |
-| s22_reconcile_takes_a_deposit | contract | SH-10 | reconcile's deposit check is removed (NT-F2 reverted) | pending |
-| s23_on_result_reads_65_bytes | contract | SH-3 | on_result accepts a 65-byte promise result | pending |
-| s24_on_result_any_result_count | contract | SH-3 | on_result reads result 0 of a callback with two or more promise results | pending |
-| s25_on_result_not_found_panics | contract | SH-3/SH-5 | on_result of a missing record panics NotFound again (NT-F4 reverted) | pending |
-| s26_get_commitments_skip_from | contract | SH-9 | get_commitments skips `from` records, not `from - first_id` (pages by index, not id) | pending |
-| s27_dispatch_indexes_records | contract | SH-6 | dispatch reads records[id], the index, not the record with that id | pending |
-| s28_promise_return_is_the_call | contract | SH-6/SH-7 | dispatch and reconcile return the executor call, not the on_result callback | pending |
-| s29_on_settled_advances_on_failed | executor | EX-8 | on_settled advances even when the lock's settle failed | pending |
-| s30_on_settled_not_private | executor | EX-8 | on_settled accepts any predecessor | pending |
-| s31_retain_keeps_the_boundary | executor | EX-6 | advance keeps the job exactly WINDOW below newest (`>=`) | pending |
-| s32a_execute_stale_off_by_one | executor | EX-6 | execute starts an id exactly WINDOW below newest (`<`, not `<=`) | pending |
-| s32b_confirm_stale_off_by_one | executor | EX-6 | confirm_not_executed accepts an id exactly WINDOW below newest (`>=`, not `>`) | pending |
-| s33_confirm_without_stale_check | executor | EX-6 | confirm_not_executed accepts a forgotten id | pending |
-| s34_max_jobs_256 | executor | EX-6/EX-7 | the executor holds at most 256 jobs (the v1.0 cap) | pending |
-| s35_notify_returns_on_settled | executor | EX-5/EX-8 | notify returns on_settled's result instead of the lock's settle | pending |
-| s36_advance_after_the_cap | executor | EX-6 | execute checks the cap before advance frees jobs | pending |
-| s37_execute_advances_on_a_stored_job | executor | EX-6 | an execute of an id that has a job raises newest (D-9) | pending |
-| s38_on_settled_never_advances | executor | EX-8 | on_settled never raises newest | pending |
+| s00a_v100_contract | contract | SH-3/SH-10/SH-12 | the v1.0.0 contract (NT-F2, NT-F3, NT-F4 unfixed; Promise type) | killed (19): `ex5_settle_before_callback_is_absorbed`, `ex7_d1_confirmed_failed_executes_stay_within_256`, `f1_control_without_the_disturbing_observe`, `f1_hedge_is_refused_through_the_shell`, `nt_f1_documented_build_reports_every_panic_message`, `nt_f2_reconcile_rejects_an_attached_deposit`, `sh10_mutating_methods_reject_attached_deposits`, `sh1_caller_is_the_predecessor_not_the_signer`, `sh3_non_string_promise_results_become_unknown`, `sh3_on_result_is_private`, `sh3_on_result_maps_the_status_string`, `sh5_core_errors_are_panics_with_the_error_string`, `sh6_dispatch_promise_shape`, `sh7_reconcile_guard_and_promise_shape`, `sh8_store_diff_host`, `sh8_store_diff_wasm`, `sh8_store_diff_window`, `sh9_pruned_ids_are_not_found_and_pages_are_by_id`, `sh9_views_and_paging_by_id_through_the_window` |
+| s00b_v100_executor | executor | EX-6/EX-7/EX-8 | the v1.0.0 executor (no window, 256-job cap, no on_settled; Promise type) | killed (11): `ex1_executor_wrappers`, `ex4_terminal_conflict_rejected`, `ex5_end_to_end_normal_reject_unknown_panic`, `ex5_notify_calls_lock_settle`, `ex6_random_differential_against_the_model`, `ex6_window_constants_match_the_lock`, `ex6_window_forgets_and_caps`, `ex7_d1_confirmed_failed_executes_stay_within_256`, `ex8_callbacks_in_any_order`, `ex8_on_settled_protocol`, `f1_no_wedge_end_to_end_with_the_executor` |
+| s01_on_result_not_private | contract | SH-3 | on_result accepts any predecessor | killed (2): `nt_f1_documented_build_reports_every_panic_message`, `sh3_on_result_is_private` |
+| s02_caller_is_signer | contract | SH-1 | caller() is the signer instead of the predecessor | killed (4): `sh1_caller_is_the_predecessor_not_the_signer`, `sh8_store_diff_host`, `sh8_store_diff_wasm`, `sh8_store_diff_window` |
+| s03_swap_completed_cancelled | contract | SH-3 | on_result maps completed and cancelled to the opposite settlement | killed (9): `ex5_end_to_end_normal_reject_unknown_panic`, `ex5_settle_before_callback_is_absorbed`, `ex7_d1_confirmed_failed_executes_stay_within_256`, `f1_hedge_is_refused_through_the_shell`, `sh3_non_string_promise_results_become_unknown`, `sh3_on_result_maps_the_status_string`, `sh8_store_diff_host`, `sh8_store_diff_wasm`, `sh8_store_diff_window` |
+| s04_unknown_settles_cancelled | contract | SH-3 | an "unknown" status is treated as definitive non-execution | killed (12): `ex5_end_to_end_normal_reject_unknown_panic`, `ex5_settle_before_callback_is_absorbed`, `ex7_d1_confirmed_failed_executes_stay_within_256`, `f1_hedge_is_refused_through_the_shell`, `f1_no_wedge_end_to_end_with_the_executor`, `sh3_non_string_promise_results_become_unknown`, `sh3_on_result_maps_the_status_string`, `sh5_core_errors_are_panics_with_the_error_string`, `sh7_reconcile_guard_and_promise_shape`, `sh8_store_diff_host`, `sh8_store_diff_wasm`, `sh8_store_diff_window` |
+| s05_reconcile_without_status_guard | contract | SH-7 | reconcile no longer refuses records that are not in flight | killed (5): `nt_f1_documented_build_reports_every_panic_message`, `sh7_reconcile_guard_and_promise_shape`, `sh8_store_diff_host`, `sh8_store_diff_wasm`, `sh8_store_diff_window` |
+| s06_get_commitments_limit_100 | contract | SH-9 | get_commitments pages up to 100 records | killed (3): `sh8_store_diff_window`, `sh9_pruned_ids_are_not_found_and_pages_are_by_id`, `sh9_views_and_paging_by_id_through_the_window` |
+| s07_settle_emits_no_event | contract | SH-5/SH-8 | settle forgets its "settled" event | killed (10): `ex5_settle_before_callback_is_absorbed`, `f1_control_without_the_disturbing_observe`, `f1_hedge_is_refused_through_the_shell`, `sh1_caller_is_the_predecessor_not_the_signer`, `sh5_core_errors_are_panics_with_the_error_string`, `sh7_reconcile_guard_and_promise_shape`, `sh8_store_diff_host`, `sh8_store_diff_wasm`, `sh8_store_diff_window`, `sh9_views_and_paging_by_id_through_the_window` |
+| s08_on_result_promise_error_is_active | contract | SH-3 | a failed execute (PromiseError::Failed) acknowledges the record as Active | killed (11): `ex5_end_to_end_normal_reject_unknown_panic`, `ex5_settle_before_callback_is_absorbed`, `f1_hedge_is_refused_through_the_shell`, `f1_no_wedge_end_to_end_with_the_executor`, `sh3_non_string_promise_results_become_unknown`, `sh3_on_result_maps_the_status_string`, `sh5_core_errors_are_panics_with_the_error_string`, `sh7_reconcile_guard_and_promise_shape`, `sh8_store_diff_host`, `sh8_store_diff_wasm`, `sh8_store_diff_window` |
+| s09_new_not_private | contract | SH-2 | anyone may initialise the pool | killed (1): `sh2_new_is_private_and_initialises_once` |
+| s10_now_rounds_up | contract | SH-1 | now() rounds the block timestamp up to the next second | killed (23): `ex5_settle_before_callback_is_absorbed`, `ex7_d1_confirmed_failed_executes_stay_within_256`, `f1_control_without_the_disturbing_observe`, `f1_hedge_is_refused_through_the_shell`, `f1_no_wedge_end_to_end_with_the_executor`, `nt_f1_documented_build_reports_every_panic_message`, `nt_f2_reconcile_rejects_an_attached_deposit`, `sh10_mutating_methods_reject_attached_deposits`, `sh1_caller_is_the_predecessor_not_the_signer`, `sh1_now_is_the_block_timestamp_in_whole_seconds`, `sh2_new_is_private_and_initialises_once`, `sh3_non_string_promise_results_become_unknown`, `sh3_on_result_is_private`, `sh3_on_result_maps_the_status_string`, `sh4_rejected_submit_returns_the_decision_and_writes_nothing`, `sh5_core_errors_are_panics_with_the_error_string`, `sh6_dispatch_promise_shape`, `sh7_reconcile_guard_and_promise_shape`, `sh8_store_diff_host`, `sh8_store_diff_wasm`, `sh8_store_diff_window`, `sh9_pruned_ids_are_not_found_and_pages_are_by_id`, `sh9_views_and_paging_by_id_through_the_window` |
+| s11_execute_sent_to_actor | contract | SH-6 | dispatch sends execute to the recipe's actor instead of its executor | killed (20): `ex5_end_to_end_normal_reject_unknown_panic`, `ex5_settle_before_callback_is_absorbed`, `ex7_d1_confirmed_failed_executes_stay_within_256`, `f1_control_without_the_disturbing_observe`, `f1_hedge_is_refused_through_the_shell`, `f1_no_wedge_end_to_end_with_the_executor`, `nt_f1_documented_build_reports_every_panic_message`, `nt_f2_reconcile_rejects_an_attached_deposit`, `sh10_mutating_methods_reject_attached_deposits`, `sh1_caller_is_the_predecessor_not_the_signer`, `sh3_non_string_promise_results_become_unknown`, `sh3_on_result_is_private`, `sh3_on_result_maps_the_status_string`, `sh5_core_errors_are_panics_with_the_error_string`, `sh6_dispatch_promise_shape`, `sh7_reconcile_guard_and_promise_shape`, `sh8_store_diff_host`, `sh8_store_diff_wasm`, `sh8_store_diff_window`, `sh9_views_and_paging_by_id_through_the_window` |
+| s12_submit_payable | contract | SH-10 | submit accepts an attached deposit | killed (1): `sh10_mutating_methods_reject_attached_deposits` |
+| s13_submit_ignores_preview | contract | SH-4/SH-5 | submit tries the core directly and keeps only an Ok id (a core error after an allowed preview no longer panics) | killed (1): `sh5_core_errors_are_panics_with_the_error_string` |
+| s14_on_result_panics_on_core_error | contract | SH-3/SH-5 | on_result panics on a core error instead of reporting it in the event | killed (3): `sh8_store_diff_host`, `sh8_store_diff_wasm`, `sh8_store_diff_window` |
+| s15_reconcile_status_gas_30 | contract | SH-7 | reconcile attaches 30 Tgas to status instead of 10 | killed (5): `nt_f2_reconcile_rejects_an_attached_deposit`, `sh7_reconcile_guard_and_promise_shape`, `sh8_store_diff_host`, `sh8_store_diff_wasm`, `sh8_store_diff_window` |
+| s16_executor_dedupe_dropped | executor | EX-2 | execute no longer deduplicates a replayed id (a second job is pushed) | killed (6): `ex2_payload_binding_and_dedupe`, `ex4_terminal_conflict_rejected`, `ex6_random_differential_against_the_model`, `ex6_window_forgets_and_caps`, `ex7_d1_confirmed_failed_executes_stay_within_256`, `ex8_on_settled_protocol` |
+| s17_executor_lock_is_signer | executor | EX-1 | execute checks the signer, not the predecessor | killed (1): `ex1_only_the_lock_executes` |
+| s18_executor_set_mode_unguarded | executor | EX-3 | anyone may set the executor's mode | killed (1): `ex3_only_the_operator_attests` |
+| s19_executor_terminal_conflict_dropped | executor | EX-4 | finish may replace a terminal outcome with the other one | killed (3): `ex4_terminal_conflict_rejected`, `ex6_random_differential_against_the_model`, `f1_no_wedge_end_to_end_with_the_executor` |
+| s20_executor_notify_inverted | executor | EX-5 | notify reports the opposite outcome to the lock | killed (9): `ex4_terminal_conflict_rejected`, `ex5_end_to_end_normal_reject_unknown_panic`, `ex5_notify_calls_lock_settle`, `ex6_random_differential_against_the_model`, `ex6_window_forgets_and_caps`, `ex7_d1_confirmed_failed_executes_stay_within_256`, `ex8_callbacks_in_any_order`, `ex8_on_settled_protocol`, `f1_no_wedge_end_to_end_with_the_executor` |
+| s21_executor_payload_unbound | executor | EX-2 | a replayed id with another payload returns the recorded status | killed (2): `ex2_payload_binding_and_dedupe`, `ex6_random_differential_against_the_model` |
+| s22_reconcile_takes_a_deposit | contract | SH-10 | reconcile's deposit check is removed (NT-F2 reverted) | killed (6): `nt_f2_reconcile_rejects_an_attached_deposit`, `sh10_mutating_methods_reject_attached_deposits`, `sh7_reconcile_guard_and_promise_shape`, `sh8_store_diff_host`, `sh8_store_diff_wasm`, `sh8_store_diff_window` |
+| s23_on_result_reads_65_bytes | contract | SH-3 | on_result accepts a 65-byte promise result | killed (4): `sh3_non_string_promise_results_become_unknown`, `sh8_store_diff_host`, `sh8_store_diff_wasm`, `sh8_store_diff_window` |
+| s24_on_result_any_result_count | contract | SH-3 | on_result reads result 0 of a callback with two or more promise results | killed (4): `sh3_non_string_promise_results_become_unknown`, `sh8_store_diff_host`, `sh8_store_diff_wasm`, `sh8_store_diff_window` |
+| s25_on_result_not_found_panics | contract | SH-3/SH-5 | on_result of a missing record panics NotFound again (NT-F4 reverted) | killed (5): `sh3_on_result_maps_the_status_string`, `sh8_store_diff_host`, `sh8_store_diff_wasm`, `sh8_store_diff_window`, `sh9_pruned_ids_are_not_found_and_pages_are_by_id` |
+| s26_get_commitments_skip_from | contract | SH-9 | get_commitments skips `from` records, not `from - first_id` (pages by index, not id) | killed (3): `sh8_store_diff_window`, `sh9_pruned_ids_are_not_found_and_pages_are_by_id`, `sh9_views_and_paging_by_id_through_the_window` |
+| s27_dispatch_indexes_records | contract | SH-6 | dispatch reads records[id], the index, not the record with that id | killed (3): `ex7_d1_confirmed_failed_executes_stay_within_256`, `sh8_store_diff_window`, `sh9_views_and_paging_by_id_through_the_window` |
+| s28_promise_return_is_the_call | contract | SH-6/SH-7 | dispatch and reconcile return the executor call, not the on_result callback | killed (17): `ex5_end_to_end_normal_reject_unknown_panic`, `ex5_settle_before_callback_is_absorbed`, `f1_control_without_the_disturbing_observe`, `f1_hedge_is_refused_through_the_shell`, `nt_f1_documented_build_reports_every_panic_message`, `nt_f2_reconcile_rejects_an_attached_deposit`, `sh10_mutating_methods_reject_attached_deposits`, `sh1_caller_is_the_predecessor_not_the_signer`, `sh3_non_string_promise_results_become_unknown`, `sh3_on_result_is_private`, `sh3_on_result_maps_the_status_string`, `sh5_core_errors_are_panics_with_the_error_string`, `sh6_dispatch_promise_shape`, `sh7_reconcile_guard_and_promise_shape`, `sh8_store_diff_wasm`, `sh8_store_diff_window`, `sh9_views_and_paging_by_id_through_the_window` |
+| s29_on_settled_advances_on_failed | executor | EX-8 | on_settled advances even when the lock's settle failed | killed (4): `ex6_random_differential_against_the_model`, `ex6_window_forgets_and_caps`, `ex7_d1_confirmed_failed_executes_stay_within_256`, `ex8_on_settled_protocol` |
+| s30_on_settled_not_private | executor | EX-8 | on_settled accepts any predecessor | killed (3): `ex6_random_differential_against_the_model`, `ex7_d1_confirmed_failed_executes_stay_within_256`, `ex8_on_settled_protocol` |
+| s31_retain_keeps_the_boundary | executor | EX-6 | advance keeps the job exactly WINDOW below newest (`>=`) | killed (5): `ex6_random_differential_against_the_model`, `ex6_window_forgets_and_caps`, `ex7_d1_confirmed_failed_executes_stay_within_256`, `ex8_callbacks_in_any_order`, `ex8_on_settled_protocol` |
+| s32a_execute_stale_off_by_one | executor | EX-6 | execute starts an id exactly WINDOW below newest (`<`, not `<=`) | killed (3): `ex6_random_differential_against_the_model`, `ex6_window_forgets_and_caps`, `ex8_on_settled_protocol` |
+| s32b_confirm_stale_off_by_one | executor | EX-6 | confirm_not_executed accepts an id exactly WINDOW below newest (`>=`, not `>`) | killed (3): `ex6_random_differential_against_the_model`, `ex6_window_forgets_and_caps`, `ex7_d1_confirmed_failed_executes_stay_within_256` |
+| s33_confirm_without_stale_check | executor | EX-6 | confirm_not_executed accepts a forgotten id | killed (3): `ex6_random_differential_against_the_model`, `ex6_window_forgets_and_caps`, `ex7_d1_confirmed_failed_executes_stay_within_256` |
+| s34_max_jobs_256 | executor | EX-6/EX-7 | the executor holds at most 256 jobs (the v1.0 cap) | killed (6): `ex6_random_differential_against_the_model`, `ex6_window_constants_match_the_lock`, `ex6_window_forgets_and_caps`, `ex7_d1_confirmed_failed_executes_stay_within_256`, `ex8_callbacks_in_any_order`, `ex8_on_settled_protocol` |
+| s35_notify_returns_on_settled | executor | EX-5/EX-8 | notify returns on_settled's result instead of the lock's settle | killed (6): `ex5_notify_calls_lock_settle`, `ex6_random_differential_against_the_model`, `ex6_window_forgets_and_caps`, `ex7_d1_confirmed_failed_executes_stay_within_256`, `ex8_callbacks_in_any_order`, `ex8_on_settled_protocol` |
+| s36_advance_after_the_cap | executor | EX-6 | execute checks the cap before advance frees jobs | killed (2): `ex6_window_forgets_and_caps`, `ex8_on_settled_protocol` |
+| s37_execute_advances_on_a_stored_job | executor | EX-6 | an execute of an id that has a job raises newest (D-9) | killed (5): `ex2_payload_binding_and_dedupe`, `ex6_random_differential_against_the_model`, `ex6_window_forgets_and_caps`, `ex7_d1_confirmed_failed_executes_stay_within_256`, `ex8_on_settled_protocol` |
+| s38_on_settled_never_advances | executor | EX-8 | on_settled never raises newest | killed (4): `ex6_random_differential_against_the_model`, `ex7_d1_confirmed_failed_executes_stay_within_256`, `ex8_callbacks_in_any_order`, `ex8_on_settled_protocol` |
 
 ## Gaps
 

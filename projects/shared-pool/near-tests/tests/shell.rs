@@ -648,6 +648,23 @@ fn sh5_core_errors_are_panics_with_the_error_string() {
             let r = q.ok(&Ctx::by(POOL, 101), Op::cb(1, Some("active")));
             assert_eq!(r.event()["error"], json!("Arithmetic"));
             assert_eq!(q.status(1), Status::Dispatched);
+
+            // A submit the preview allows but the core's submit refuses: the
+            // shell panics with the core's error and writes nothing, rather
+            // than swallowing it. The state is crafted and unreachable: ids
+            // are issued one per submit, below VERSION_CAP, so `first_id +
+            // len` never overflows, and an allowed preview is otherwise
+            // always a successful submit.
+            let mut w = Sim::new(path, open_config(), 100);
+            w.ok(&Ctx::by(A1, 101), submit(0, 1, 0, 150));
+            w.ok(&Ctx::by(A1, 101), Op::Cancel { id: 0 });
+            w.edit(|p| {
+                p.first_id = u32::MAX;
+                p.records[0].id = u32::MAX;
+            });
+            let v = w.pool.version;
+            assert!(w.pool.preview(A1, &rq(0, 1, v, 150), 101).allowed, "{path:?}");
+            w.err(&Ctx::by(A1, 101), submit(0, 1, v, 150), guest(E::Arithmetic));
         }
     });
 }
