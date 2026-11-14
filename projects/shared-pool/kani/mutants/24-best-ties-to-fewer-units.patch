@@ -2,7 +2,7 @@
 # best_quantity: ties go to the smaller quantity
 --- a/crates/core/src/lib.rs
 +++ b/crates/core/src/lib.rs
-@@ -484,7 +484,7 @@
+@@ -558,7 +558,7 @@
                  self.candidate(caller, &req, now)
                      .ok()
                      .and_then(|v| self.energy(&v).ok())

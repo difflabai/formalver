@@ -1,6 +1,9 @@
+Lean mutant 09-guard-order-paused-stale
+submit checks Stale before Paused.
+
 --- a/PoolLean/Machine.lean
 +++ b/PoolLean/Machine.lean
-@@ -330,8 +330,8 @@
+@@ -395,8 +395,8 @@
    let next := addv s.values rc.reserve u
    let post := addv next rc.complete u
    let bad := violating cfg s.values
@@ -10,4 +13,4 @@
 +   (.err .paused, s.paused),
     (.err .expired, decide (exp ≤ now ∨ satAdd now DAY < exp)),
     (.err .snapshotExpired, snapshotOld cfg s now),
-    (.err .full, decide (MAX_RECORDS ≤ s.records.length)),
+    (.err .full, fullFires s),

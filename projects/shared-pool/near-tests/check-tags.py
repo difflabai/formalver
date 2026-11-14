@@ -18,11 +18,12 @@ Exits 1, listing every problem, unless:
   3. every catalogue property whose layers include near-tests has at least
      one per-test tag on a test that checks it (lockfile.rs's scope tag does
      not count), or a tag line in the block of a wasm-surface.sh check
-     SURF-n that checks it (SH-11 is checked only there);
+     SURF-n that checks it (SH-11 is checked only there, SH-12 by SURF-2
+     and SURF-3);
   4. each test file's header tag line equals the union of its tests' tags;
   5. run.sh, run-mutants.sh and wasm-surface.sh carry tags, and each local
-     check SURF-n in wasm-surface.sh has a tag line in its block; no tag
-     names a SURF-n;
+     check SURF-n in wasm-surface.sh (SURF-1, SURF-2, SURF-3) has a tag
+     line in its block; no tag names a SURF-n;
   6. the tag set check-status.sh extracts for the near-tests corpus (its own
      regexes and file selection) equals the set found here.
 """
@@ -150,8 +151,8 @@ for a, b in zip(starts, starts[1:] + [end]):
     for toks in block_tags:
         for t in toks:
             covered.setdefault(t, []).append(f"wasm-surface.sh {surf}")
-if len(starts) != 2:
-    errors.append(f"wasm-surface.sh: expected SURF-1 and SURF-2 definitions, found {len(starts)}")
+if len(starts) != 3:
+    errors.append(f"wasm-surface.sh: expected the SURF-1, SURF-2 and SURF-3 definitions, found {len(starts)}")
 
 for pid in layer_ids:
     if pid not in covered:

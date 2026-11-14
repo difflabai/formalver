@@ -1,13 +1,14 @@
 # killed-by: h_full_256
-# candidate: a 257th record is admitted (>= became >)
+# candidate: Full only above 256 records (>= became >). At 256 with an open
+# front the mutant admits and then prunes the open record.
 --- a/crates/core/src/lib.rs
 +++ b/crates/core/src/lib.rs
-@@ -247,7 +247,7 @@
-         {
-             return Err(Error::SnapshotExpired);
+@@ -284,7 +284,7 @@
          }
--        if self.records.len() >= MAX_RECORDS {
-+        if self.records.len() > MAX_RECORDS {
+         // A full window frees a slot by pruning its oldest record, which must
+         // be terminal.
+-        if self.records.len() >= MAX_RECORDS && open(&self.records[0].status) {
++        if self.records.len() > MAX_RECORDS && open(&self.records[0].status) {
              return Err(Error::Full);
          }
          let r = self

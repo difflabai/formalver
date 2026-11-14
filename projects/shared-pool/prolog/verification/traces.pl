@@ -4,14 +4,19 @@
 %%
 %% Format (conformance/src/main.rs header): one Prolog term per line,
 %%   trace(N). config(..). init(Now, State). call(Op, Result, State).. end.
-%% The traces are generated from the real pool-core, so every result and
-%% post-state in them is the code's.
+%% or, for a config the code refuses (v1.1.0: Pool::new returns an error),
+%%   trace(N). config(..). init_error(E). end.
+%% State is s(Values, Version, ObservedAt, Paused, Records, FirstId, DoneUnits)
+%% (v1.1.0: the retained window starts at id FirstId; DoneUnits are the
+%% completed_units counters per recipe). The traces are generated from the
+%% real pool-core, so every result and post-state in them is the code's.
 %%
 %%   trace_file(-Path)              the checked-in trace file (found from the cwd)
 %%   prolog_root(-Root)             the prolog/ directory, as a char list path
 %%   fold_traces(+File, :Goal, +A0, -A)
 %%       calls Goal(trace(N, Cfg, Now, Init, Calls), A0, A1) for each trace in
-%%       order; Calls = [call(Op, Result, State)..]. One trace is in memory at a time.
+%%       order; Calls = [call(Op, Result, State)..]. A refused config gives
+%%       Now = none, Init = init_error(E), Calls = []. One trace is in memory at a time.
 %%   trace_to_pool(+Cfg, +s(..), -Pool)
 
 :- module(traces, [
@@ -42,7 +47,7 @@ root_path(Rel, Path) :-
 
 trace_file(Path) :- root_path("../conformance/traces/core.txt", Path).
 
-trace_to_pool(Cfg, s(V, N, O, P, R), pool(Cfg, V, N, O, P, R)).
+trace_to_pool(Cfg, s(V, N, O, P, R, F, D), pool(Cfg, V, N, O, P, R, F, D)).
 
 fold_traces(File, Goal, A0, A) :-
     setup_call_cleanup(open(File, read, In),
@@ -54,8 +59,11 @@ fold_(In, Goal, A0, A) :-
     (   T == end_of_file -> A = A0
     ;   T = trace(N)
     ->  read(In, config(O, MA, Ms, Ts, Rs)),
-        read(In, init(Now, Init)),
-        read_calls(In, Calls),
+        read(In, I),
+        (   I = init(Now, Init) -> read_calls(In, Calls)
+        ;   I = init_error(E) -> Now = none, Init = init_error(E), read_calls(In, Calls)
+        ;   throw(error(syntax_error(unexpected_term(I)), fold_traces))
+        ),
         call(Goal, trace(N, config(O, MA, Ms, Ts, Rs), Now, Init, Calls), A0, A1),
         fold_(In, Goal, A1, A)
     ;   throw(error(syntax_error(unexpected_term(T)), fold_traces))

@@ -4,7 +4,7 @@
 # expect: test_requirements C-5 CASH-SELF
 --- a/source-mirror/crates/core/src/fixtures.rs
 +++ b/source-mirror/crates/core/src/fixtures.rs
-@@ -189,7 +189,7 @@
+@@ -210,7 +210,7 @@
              c.recipes = vec![
                  recipe(
                      "Research worker units",

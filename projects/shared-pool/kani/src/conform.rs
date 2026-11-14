@@ -4,7 +4,11 @@
 //! proof.**
 //!
 //! Each trace is rebuilt as a `Pool` from its `config` and `init` lines and
-//! replayed on the pinned core call by call. Every call's result and
+//! replayed on the pinned core call by call (state terms `s/7`: the records'
+//! ids are `FirstId + j`, and `FirstId` and the completed units are
+//! compared too). A trace whose config the core refuses has
+//! `init_error(invalid_config)` instead of `init` and no calls (CFG-2, trace
+//! 210): `Pool::new` must refuse it with that error. Every call's result and
 //! post-state must be the recorded ones (so the replay is the trace), and
 //! every call must refine the TLA+ transcription (`tla::assert_refines` with
 //! the core's own limits as the image's capacity, `tla::TB`): the core's
@@ -230,17 +234,20 @@ fn status(t: &Term) -> Status {
     }
 }
 
-/// The pool state `s(Values, Version, ObservedAt, Paused, Records)` matches.
+/// The pool state `s(Values, Version, ObservedAt, Paused, Records, FirstId,
+/// DoneUnits)` matches. Record `j` of `Records` has id `FirstId + j`.
 fn state_is(p: &Pool, t: &Term) -> bool {
-    let a = app(t, "s", 5);
+    let a = app(t, "s", 7);
     let values: Vec<i64> = list(&a[0]).iter().map(i64_).collect();
+    let first_id = u32_(&a[5]);
+    let done: Vec<u32> = list(&a[6]).iter().map(u32_).collect();
     let records: Vec<Commitment> = list(&a[4])
         .iter()
         .enumerate()
         .map(|(j, c)| {
             let c = app(c, "c", 4);
             Commitment {
-                id: j as u32,
+                id: first_id.checked_add(j as u32).expect("trace: record id"),
                 recipe: u32_(&c[0]),
                 units: u32_(&c[1]),
                 expires_at: u64_(&c[2]),
@@ -253,6 +260,8 @@ fn state_is(p: &Pool, t: &Term) -> bool {
         && p.observed_at == u64_(&a[2])
         && p.paused == boolean(&a[3])
         && p.records == records
+        && p.first_id == first_id
+        && p.completed_units == done
 }
 
 fn op(t: &Term) -> Op {
@@ -347,18 +356,41 @@ fn h_ref_traces() {
         .unwrap_or_else(|e| panic!("h_ref_traces: cannot read {}: {e}", path.display()));
     let mut seen: BTreeMap<TErr, u64> = BTreeMap::new();
     let (mut traces, mut calls) = (0u32, 0u64);
+    // init_error traces, observe Ok refreshes and re-bases, prunes of a
+    // counted record (folded into the ghost), the largest first_id.
+    let (mut refused, mut refreshes, mut rebases, mut folds, mut pruned_max) = (0u32, 0u64, 0u64, 0u64, 0u32);
     let mut lines = text.lines().filter(|l| !l.trim().is_empty());
     while let Some(l) = lines.next() {
         let n = int(&app(&clause(l), "trace", 1)[0]);
         let cfg = config(&clause(lines.next().expect("config line")));
         let init = clause(lines.next().expect("init line"));
+        if matches!(&init, Term::App(f, _) if f == "init_error") {
+            // PROP: CFG-2
+            let want = error(atom(&app(&init, "init_error", 1)[0]));
+            assert!(
+                Pool::new(cfg, 0).err() == Some(want),
+                "trace {n}: Pool::new refuses the config with the recorded error"
+            );
+            assert!(
+                clause(lines.next().expect("end line")) == Term::Atom("end".into()),
+                "trace {n}: no calls after init_error"
+            );
+            refused += 1;
+            traces += 1;
+            continue;
+        }
         let a = app(&init, "init", 2);
         let mut p = Pool::new(cfg, u64_(&a[0])).unwrap_or_else(|e| panic!("trace {n}: Pool::new failed: {e:?}"));
         assert!(state_is(&p, &a[1]), "trace {n}: the initial state is the recorded one");
-        // The implementation's ghost: the values and record count at the
-        // last successful observe (or new).
+        // The implementation's ghost (plan 2.2, `tla::ghost_after`): the
+        // values at the last re-basing observe (or new), with every counted
+        // pruned record folded in, and `k0`, the first id not counted then.
+        // An observe Ok that restates the current values with some record
+        // open (the refresh) keeps both; any other observe Ok re-bases them
+        // (`k0 = first_id + len`); a submit that prunes a counted record
+        // folds its contribution into `base` and moves `k0` past it.
         let mut base = p.values.clone();
-        let mut k0 = 0u32;
+        let mut k0 = 0u64;
         let mut step = 0;
         loop {
             let c = clause(lines.next().expect("call or end line"));
@@ -375,18 +407,38 @@ fn h_ref_traces() {
             // PROP: REF-1 REF-2 REF-3
             let w = tla::assert_refines::<32, 64, 32, 32, 256>(&pre, &base, k0, &o, &res, &p);
             *seen.entry(w).or_default() += 1;
-            if matches!(o, Op::Observe { .. }) && res.is_ok() {
-                base = p.values.clone();
-                k0 = p.records.len() as u32;
+            let g = tla::ghost_after::<32>(&pre, &base, k0, &o, &res, &p);
+            if let (Op::Observe { vals, .. }, Ok(_)) = (&o, &res) {
+                let refresh = *vals == pre.values
+                    && pre.records.iter().any(|c| !matches!(c.status, Status::Completed | Status::Cancelled));
+                if refresh {
+                    refreshes += 1;
+                } else {
+                    rebases += 1;
+                }
             }
+            if p.first_id != pre.first_id && g.k0 != k0 {
+                folds += 1;
+            }
+            base = g.base[..g.nb].to_vec();
+            k0 = g.k0;
+            pruned_max = pruned_max.max(p.first_id);
             calls += 1;
         }
         traces += 1;
     }
-    eprintln!("h_ref_traces: {traces} traces, {calls} calls, TLA+ values {seen:?}");
-    // Vacuity: the whole file was replayed, and every value of the error
-    // operators that the traces contain occurred.
-    assert!(traces >= 200 && calls >= 8_000, "h_ref_traces: fewer traces or calls than the checked-in file has");
+    eprintln!(
+        "h_ref_traces: {traces} traces ({refused} init_error), {calls} calls, observe Ok {refreshes} refreshes \
+         {rebases} re-bases, {folds} prunes folded into the ghost, largest first_id {pruned_max}, TLA+ values {seen:?}"
+    );
+    // Vacuity: the whole file was replayed (216 traces, 8,865 calls), with
+    // a refused config, both ghost branches of observe and a prune of a
+    // counted record, and every value of the error operators that the
+    // traces contain occurred.
+    assert!(traces >= 216 && calls >= 8_800, "h_ref_traces: fewer traces or calls than the checked-in file has");
+    assert!(refused >= 1, "h_ref_traces: no init_error trace");
+    assert!(refreshes >= 1 && rebases >= 1, "h_ref_traces: an observe ghost branch never occurred");
+    assert!(pruned_max >= 1 && folds >= 1, "h_ref_traces: no trace prunes a counted record");
     for w in [
         TErr::Ok,
         TErr::Noop,

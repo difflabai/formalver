@@ -146,10 +146,12 @@ jobs:
         run: tools/scripts/check-pin.sh near-approval
       # status-lint (strategy.md section 14): status.toml claims nothing the
       # repository doesn't back. Runs only when a verification layer is selected.
+      # The self-test runs its near-approval cases only: its shared-pool cases
+      # read shared-pool's files and run in shared-pool.yml.
       - name: status-lint
         if: steps.areas.outputs.verification == 'true'
         run: |
-          tools/scripts/test-check-status.sh
+          tools/scripts/test-check-status.sh near-approval
           tools/scripts/check-status.sh near-approval
 
   plain:

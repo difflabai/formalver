@@ -3,7 +3,7 @@
 //! ladder").
 
 use crate::checks::{self, PART_COV, PART_INV, PART_POST, PART_REF, PART_TX};
-use crate::src::{Cfg, Dom, Shape, Sym};
+use crate::src::{Cfg, Dom, Shape, Sym, Ver};
 
 /// Step harnesses: 1 metric, 1 term, 2 recipes, exactly 2 records (fixed:
 /// a symbolic count doubles the formula, and each further metric, term or
@@ -17,7 +17,7 @@ const STEP: Cfg = Cfg {
     max_units: 3,
     any_weight: false,
     shape: SHAPE,
-    version_max: false,
+    ver: Ver::Free,
     part: PART_TX | PART_POST | PART_INV | PART_COV,
 };
 
@@ -183,12 +183,14 @@ step_parts!(checks::step_observe, h_step_observe_tx, h_step_observe_post, h_step
 /// per operation kind: the `h_step` pre-state and call (`checks::step_ref`:
 /// the same generators, `STEP` and its bounds), the real core applied, then
 /// `tla::assert_refines` on the image `TK` (capacity 2 metrics, 2 terms, 2
-/// recipes, 2 requirements, 4 records): REF-1 the core's result is the
-/// TLA+ error operator's (`Ok` exactly when the action is enabled or the
-/// call is the operator's "Noop"), REF-2 on "Ok" `alpha(post)` is the
-/// action's post-state, REF-3 every other call stutters. One cover per
-/// value of the operator that the step domain reaches (`checks::ref_covers`,
-/// the `h_ref` family).
+/// recipes, 2 requirements, 4 records; `first_id = 0`, so no prune: the
+/// window's REF is plain mode's, the walks and the traces): REF-1 the
+/// core's result is the TLA+ error operator's (`Ok` exactly when the action
+/// is enabled or the call is the operator's "Noop"), REF-2 on "Ok"
+/// `alpha(post)` is the action's post-state, REF-3 every other call
+/// stutters. One cover per value of the operator that the step domain
+/// reaches, and both ghost branches of `Observe` (`checks::ref_covers`, the
+/// `h_ref` family).
 macro_rules! step_ref {
     ($($h:ident = $k:ident);* $(;)?) => {
         $(
@@ -256,8 +258,41 @@ step_inv_at!(
     h_step_observe_inv_3 = checks::step_observe, 3;
 );
 
-/// TX-VER at `version = u32::MAX`, one harness per operation kind (the
-/// covers of all seven are one family, `h_version_max`).
+/// VER-CAP, INV-VERCAP and LIVE-ALL at `version >= VERSION_CAP` from INV
+/// states, one harness per operation kind (the covers of all seven are one
+/// family, `h_version_cap`).
+macro_rules! version_cap {
+    ($($h:ident = $k:ident),*) => {
+        $(
+            #[kani::proof]
+            #[kani::stub(std::vec::Vec::with_capacity_in, crate::model::with_capacity_in)]
+            #[kani::stub(std::vec::Vec::reserve, crate::model::reserve)]
+            #[kani::unwind(6)]
+            fn $h() {
+                checks::version_cap(
+                    &mut Sym(Cfg {
+                        ver: Ver::AtCap,
+                        ..STEP
+                    }),
+                    Some(crate::gen::$k),
+                );
+            }
+        )*
+    };
+}
+
+version_cap!(
+    h_version_cap_submit = SUBMIT,
+    h_version_cap_dispatch = DISPATCH,
+    h_version_cap_ack = ACK,
+    h_version_cap_cancel = CANCEL,
+    h_version_cap_settle = SETTLE,
+    h_version_cap_pause = PAUSE,
+    h_version_cap_observe = OBSERVE
+);
+
+/// TX-VER at `version = u32::MAX` (no wrap) on WF states, for the three
+/// kinds that use the plain increment (one cover family, `h_version_max`).
 macro_rules! version_max {
     ($($h:ident = $k:ident),*) => {
         $(
@@ -268,7 +303,7 @@ macro_rules! version_max {
             fn $h() {
                 checks::version_max(
                     &mut Sym(Cfg {
-                        version_max: true,
+                        ver: Ver::Max,
                         ..STEP
                     }),
                     Some(crate::gen::$k),
@@ -279,13 +314,34 @@ macro_rules! version_max {
 }
 
 version_max!(
-    h_version_max_submit = SUBMIT,
-    h_version_max_dispatch = DISPATCH,
     h_version_max_ack = ACK,
     h_version_max_cancel = CANCEL,
-    h_version_max_settle = SETTLE,
-    h_version_max_pause = PAUSE,
-    h_version_max_observe = OBSERVE
+    h_version_max_settle = SETTLE
+);
+
+/// WF states (K-D2): `first_id`, `completed_units`, the values and the
+/// version free; up to 2 records. TX, the post-state and the covers in one
+/// harness per kind (one cover family, `h_wf`).
+macro_rules! wf_step {
+    ($($h:ident = $k:ident),*) => {
+        $(
+            #[kani::proof]
+            #[kani::stub(std::vec::Vec::with_capacity_in, crate::model::with_capacity_in)]
+            #[kani::stub(std::vec::Vec::reserve, crate::model::reserve)]
+            #[kani::unwind(6)]
+            fn $h() {
+                checks::wf_step(&mut Sym(with_part(STEP, PART_TX | PART_POST | PART_COV)), Some(crate::gen::$k));
+            }
+        )*
+    };
+}
+
+wf_step!(
+    h_wf_submit = SUBMIT,
+    h_wf_dispatch = DISPATCH,
+    h_wf_ack = ACK,
+    h_wf_cancel = CANCEL,
+    h_wf_settle = SETTLE
 );
 
 #[kani::proof]
@@ -318,16 +374,18 @@ fn h_best() {
     checks::best(&mut Sym(with_records(STEP, 0)));
 }
 
-/// LIVE-1 with 3 records (two others may be open).
+/// LIVE-ALL with 3 records (two others may be open), no premise on the
+/// base or the version.
 #[kani::proof]
 #[kani::stub(std::vec::Vec::with_capacity_in, crate::model::with_capacity_in)]
 #[kani::stub(std::vec::Vec::reserve, crate::model::reserve)]
 #[kani::unwind(6)]
-fn h_live1() {
-    checks::live1(&mut Sym(with_records(STEP, 3)));
+fn h_live_all() {
+    checks::live_all(&mut Sym(with_records(STEP, 3)));
 }
 
-/// F-1 from `Pool::new` (values in -4..=4 suffice for the shape).
+/// F-1 fixed, from `Pool::new` (values in -4..=4 suffice for the shape):
+/// one exit call after the hedge is dispatched.
 #[kani::proof]
 #[kani::stub(std::vec::Vec::with_capacity_in, crate::model::with_capacity_in)]
 #[kani::stub(std::vec::Vec::reserve, crate::model::reserve)]
@@ -339,9 +397,9 @@ fn h_wedge() {
     }));
 }
 
-/// F-2 in every healthy INV state (`B = 0`, the step shape) whose record 0
-/// is Dispatched and record 1 Completed (deviation 19; plain mode: the
-/// script from `Pool::new`).
+/// F-2 fixed, in every healthy INV state (`B = 0`, the step shape, below
+/// the cap) whose record 0 is Dispatched and record 1 Completed (deviation
+/// 19; plain mode: the script from `Pool::new`).
 #[kani::proof]
 #[kani::stub(std::vec::Vec::with_capacity_in, crate::model::with_capacity_in)]
 #[kani::stub(std::vec::Vec::reserve, crate::model::reserve)]
@@ -416,18 +474,27 @@ fn h_slot_cycle_2() {
     checks::slot_cycle(&mut Sym(STEP), false);
 }
 
-/// The record limit: 255 records (submit admitted when the guards pass).
+/// The window: 255 records, the front's status free (never Full).
 #[kani::proof]
 #[kani::unwind(258)]
 fn h_full_255() {
-    checks::full(&mut Sym(STEP), Some(false));
+    checks::full(&mut Sym(STEP), Some(checks::FullAt::Below));
 }
 
-/// The record limit: 256 records (`Full`).
+/// The window: 256 records with an open front (`Full`).
 #[kani::proof]
 #[kani::unwind(258)]
 fn h_full_256() {
-    checks::full(&mut Sym(STEP), Some(true));
+    checks::full(&mut Sym(STEP), Some(checks::FullAt::OpenFront));
+}
+
+/// The window: 256 records with a terminal front, `first_id = 1`: the
+/// submit prunes the front (WIN-2), and `completed_units` keeps the
+/// completions of pruned records (mutant 44).
+#[kani::proof]
+#[kani::unwind(258)]
+fn h_full_256_prune() {
+    checks::full(&mut Sym(STEP), Some(checks::FullAt::Prune));
 }
 
 #[kani::proof]

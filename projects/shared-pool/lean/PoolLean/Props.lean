@@ -1,6 +1,7 @@
 /-
-The properties (strategy catalogue IDs): the invariant `Inv` (INV-WF,
-INV-LEDGER, INV-HARD, INV-DEP, INV-VER) and the step properties.
+The properties (strategy catalogue IDs): the invariant `Inv` (INV-WF with
+WIN-1/WIN-2, INV-LEDGER, INV-RES, INV-DEP, INV-VER, INV-VERCAP, and
+`PV(values) ≤ B`, from which INV-HARD follows) and the step properties.
 -/
 import PoolLean.Machine
 
@@ -10,27 +11,35 @@ variable {A : Type} [DecidableEq A] [Inhabited A]
 
 /-! ## The invariant -/
 
-/-- One record's well-formedness (INV-WF), `j` its index. -/
-structure RecOk (cfg : Cfg A) (k0 : Nat) (j : Nat) (c : Rec) : Prop where
+/-- One record's well-formedness (INV-WF), `j` its index in the history. -/
+structure RecOk (cfg : Cfg A) (k0 fid : Nat) (j : Nat) (c : Rec) : Prop where
   id : c.id = j
   recipe : c.recipe < cfg.recipes.length
   unitsPos : 0 < c.units
   unitsLe : c.units ≤ (cfg.recipe c.recipe).maxUnits
-  /-- records before the last `observe` are terminal -/
+  /-- records before the last re-basing `observe` are terminal -/
   old : j < k0 → c.status.isOpen = false
+  /-- WIN-2: pruned records are terminal -/
+  pruned : j < fid → c.status.isOpen = false
 
-/-- INV-WF: values of length `n` and bounded, `records[j].id = j`, recipe in
-range, `1 ≤ units ≤ max_units`, at most `MAX_RECORDS` records; the ghost
-baseline is a bounded vector of length `n` and every record before `k0` is
-terminal. (The config never changes: it is a parameter of the machine.) -/
+/-- INV-WF with WIN-1: values of length `n` and bounded, `records[j].id = j`
+(the window's ids are `firstId, firstId + 1, ...`), recipe in range, `1 ≤
+units ≤ max_units`; `firstId ≤ records.length`, at most `MAX_RECORDS`
+records retained, and `firstId + len = records.length ≤ version` (so the
+id's `checked_add`, lib.rs 363-366, cannot fail); the ghost baseline is a
+bounded vector of length `n`; every record before `k0` and (WIN-2) every
+pruned record is terminal. (The config never changes: it is a parameter of
+the machine.) -/
 structure WF (cfg : Cfg A) (s : State) : Prop where
   vlen : s.values.length = cfg.n
   vbnd : AllB s.values
   blen : s.base.length = cfg.n
   bbnd : AllB s.base
-  full : s.records.length ≤ MAX_RECORDS
+  fle : s.firstId ≤ s.records.length
+  win : s.records.length - s.firstId ≤ MAX_RECORDS
   k0le : s.k0 ≤ s.records.length
-  recs : ∀ j (h : j < s.records.length), RecOk cfg s.k0 j s.records[j]
+  lenVer : s.records.length ≤ s.version
+  recs : ∀ j (h : j < s.records.length), RecOk cfg s.k0 s.firstId j s.records[j]
 
 /-- A record's effect on metric `i`: its reservation unless cancelled, plus
 its completion if completed. -/
@@ -43,21 +52,34 @@ def ledger (cfg : Cfg A) (recs : List Rec) (k0 i : Nat) : Int :=
   sumI (fun c => if k0 ≤ c.id then contrib cfg i c else 0) recs
 
 /-- INV-LEDGER: `values = base + Σ_{j ≥ k0, ¬Cancelled} reserve_j·u_j +
-Σ_{j ≥ k0, Completed} complete_j·u_j`. -/
+Σ_{j ≥ k0, Completed} complete_j·u_j`, over the history (pruned records
+included; a refresh does not re-base). -/
 def Ledger (cfg : Cfg A) (s : State) : Prop :=
   ∀ i < cfg.n, get s.values i = get s.base i + ledger cfg s.records s.k0 i
 
 /-- B_i = PV_i(base). -/
 def B (cfg : Cfg A) (s : State) (i : Nat) : Int := viol cfg s.base i
 
-/-- INV-HARD: the envelope over the open records is computable, and on every
-metric its violation is at most the baseline's. -/
+/-- INV-RES: the envelope over the open records is computable (its
+endpoints within ±1e6), and on every metric its violation equals the
+values' own: `EV_i(values) = PV_i(values)`. Ghost-free. -/
+def InvRes (cfg : Cfg A) (s : State) : Prop :=
+  envFail cfg s.records s.values none none = false ∧
+    ∀ i < cfg.n, ev cfg s.records s.values none none i = viol cfg s.values i
+
+/-- No metric's violation exceeds the baseline's: `PV_i(values) ≤ B_i`
+(HARD-STEP accumulated since the last re-basing `observe`). -/
+def PvB (cfg : Cfg A) (s : State) : Prop := ∀ i < cfg.n, viol cfg s.values i ≤ B cfg s i
+
+/-- INV-HARD (v1.0's invariant, now a corollary `hard_of_inv`): the
+envelope is computable and its violation is at most the baseline's. -/
 def Hard (cfg : Cfg A) (s : State) : Prop :=
   envFail cfg s.records s.values none none = false ∧
     ∀ i < cfg.n, ev cfg s.records s.values none none i ≤ B cfg s i
 
 /-- INV-DEP: every record's prerequisites are met by completed records of
-lower index. -/
+lower index (the history: pruned records count, as `completed_units`
+keeps lifetime counts). -/
 def Dep (cfg : Cfg A) (s : State) : Prop :=
   ∀ j (h : j < s.records.length), ∀ pu ∈ (cfg.recipe s.records[j].recipe).requires,
     pu.2 ≤ doneUnits (s.records.take j) pu.1
@@ -66,12 +88,30 @@ def Dep (cfg : Cfg A) (s : State) : Prop :=
 `u32::MAX`. -/
 def Ver (s : State) : Prop := s.version = s.eff ∧ s.version ≤ U32_MAX
 
+/-- The plain bumps an open record may still need: `cancel` (Reserved), or
+`ack`, `ack`, `settle` (Dispatched), `ack`, `settle` (Unknown), `settle`
+(Active). `dispatch` is a capped bump and needs no headroom. -/
+def rem : Status → Nat
+  | .reserved => 3
+  | .dispatched => 3
+  | .unknown => 2
+  | .active => 1
+  | _ => 0
+
+def remSum (recs : List Rec) : Nat := sumN (fun c => rem c.status) recs
+
+/-- INV-VERCAP: the version leaves room for every plain bump the open
+records may still need. NO-OVF (`bump_ok`) is a corollary. -/
+def VerCap (s : State) : Prop := s.version + remSum s.records ≤ U32_MAX
+
 structure Inv (cfg : Cfg A) (s : State) : Prop where
   wf : WF cfg s
   ledger : Ledger cfg s
-  hard : Hard cfg s
+  res : InvRes cfg s
+  pvb : PvB cfg s
   dep : Dep cfg s
   ver : Ver s
+  vercap : VerCap s
 
 /-! ## Step properties -/
 
@@ -148,6 +188,11 @@ structure StepProps (cfg : Cfg A) (s : State) (op : Op A) (r : Res) (s' : State)
     energy cfg (addv s'.values (cfg.recipe rc).complete u) < energy cfg s.values
   /-- HARD-STEP: no call but `observe` raises any metric's violation -/
   hardStep : op.isObserve = false → ∀ i < cfg.n, viol cfg s'.values i ≤ viol cfg s.values i
+  /-- WIN-1/WIN-2: `firstId` grows by at most one, and a pruned record
+  never changes -/
+  prune : s.firstId ≤ s'.firstId ∧ s'.firstId ≤ s.firstId + 1 ∧
+    ∀ j (h : j < s.records.length) (h' : j < s'.records.length), j < s.firstId →
+      s'.records[j] = s.records[j]
   /-- ASYNC-1: `acknowledge` never changes values and keeps every record's
   reservation (open stays open, nothing is cancelled) -/
   async1 : op.isAck = true → s'.values = s.values ∧ s'.records.length = s.records.length ∧

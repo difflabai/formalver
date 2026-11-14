@@ -155,6 +155,55 @@ when any of these holds:
 To re-record (for example v1.1.0, or after any change to an input), run the
 first command again at the new commit and commit the result.
 
+## Measuring every harness and mutant (`--all`)
+
+The matrices' 13 GB split and timeouts come from a measurement of every
+harness and mutant, made before a record when the Kani layer changes
+(as for v1.1.0). `run-local.py --all` makes it with the record's lanes,
+`git archive` copies, environment and cargo checks, sampling and
+`results.tsv` format, but:
+
+- Its jobs are every harness of the commit's `run.sh list` and every
+  `mutants/*.patch` (`mutants --kani 'NN-*'`), not the matrices'.
+  Harnesses run first, so that a mutant's estimate can come from its
+  harness measured in the same run.
+- Each job's peak and time are estimated from the best source, named in
+  `jobs.json` and `estimates.tsv` (and by `--dry-run`): W7's
+  measurements of the v1.1.0 layer (`V11_MEASURED` in `run-local.py`);
+  then v1.0.0's `kani/RESULTS.md` (as of `a072a2d`) for a harness whose
+  name is unchanged, its peak times 1.25; a mutant from the harnesses
+  its Kani leg is expected to run, plus 240 s of plain mode and build;
+  otherwise unknown, 40 GB (`KANI_MAX_GB`, the most `run.sh` lets a job
+  use) and 1800 s.
+- A job estimated at 35 GB or more runs alone (the unknowns, and
+  v1.0.0 numbers scaled near 40 GB): it starts only when no job runs,
+  and no job starts beside it, nor beside a running job whose sampled
+  process tree has reached 35 GB. Other jobs share the budget
+  (`--budget-gb`, 50), a running one counted at its estimate or its
+  sampled tree peak, whichever is more. (By the budget alone, a 40 GB
+  job could run beside one estimated at 10 GB, and v1.1.0's small step
+  harnesses peaked at up to 1.8 times their v1.0.0 numbers.)
+- The limit (`KANI_TIMEOUT`) is 3 times the estimate, at least 1800 s,
+  and at least 7200 s for `run.sh`'s 7200 s tier and for an unknown.
+  `KANI_MAX_GB` stays 40.
+- It holds `/tmp/sp-heavy.lock` (the machine's lock for heavy jobs:
+  `mkdir` takes it, `rmdir` releases it) from its start to its exit,
+  also on a failure or a signal. While another process holds the lock,
+  it waits, checking every 30 s. It removes only a lock it took. Before
+  it releases the lock (SIGINT, SIGTERM, an error), it kills its running
+  jobs: each one's process group and every process in its tree, listed
+  first, so that a process in a group of its own is killed too. SIGKILL
+  of `run-local.py` leaves the jobs running and the lock held.
+- It is not a record. `--record` is refused, the output is outside the
+  repository (default `~/shared-pool-kani-measure/all-<commit>-<time>`),
+  `env.txt` says `mode measurement`, and `record.py` refuses it.
+
+Commands:
+
+    projects/shared-pool/kani/local/run-local.py --all --dry-run   # jobs, estimates, hours
+    projects/shared-pool/kani/local/run-local.py --all             # about 12-18 h at 5cf571e
+    projects/shared-pool/kani/local/run-local.py --all --only h_step_ack_tx,mutant-09
+
 ## CI
 
 The `kani-record` job runs on every workflow run. It runs the self-test,

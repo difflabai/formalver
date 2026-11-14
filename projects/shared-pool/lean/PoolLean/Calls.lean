@@ -1,8 +1,9 @@
 /-
-Per-call properties beyond StepProps, at every size and from every state:
-DEP-1, OBS-1 and PAUSE-1.
+Per-call properties beyond StepProps, at every size: DEP-1, OBS-1, OBS-2,
+the snapshot age bound and PAUSE-1 from every state; REFRESH-1 and VER-CAP
+from every `Inv` state.
 -/
-import PoolLean.StepProps
+import PoolLean.Live
 
 namespace Pool
 
@@ -20,26 +21,105 @@ theorem observe_ok_none {cfg : Cfg A} {s : State} {c : A} {vals : List Int} {now
     | err e => exact absurd ho (h e)
     | noop => have := noop_kind ho; simp [Op.isAck] at this
 
-/-- DEP-1: an accepted `submit` had every prerequisite met by the units of
-Completed records. -/
+/-- DEP-1: an accepted `submit` had every prerequisite met: by
+`completed_units` (`doneU`, lifetime and saturated) and so by the units of
+the Completed records of the whole history, pruned ones included. -/
 theorem dep1 {cfg : Cfg A} {s : State} {c : A} {r u ver exp now : Nat}
     (h : (exec cfg s (.submit c r u ver exp now)).1.isOk = true) :
-    ∀ pu ∈ (cfg.recipe r).requires, pu.2 ≤ doneUnits s.records pu.1 := by
+    ∀ pu ∈ (cfg.recipe r).requires, pu.2 ≤ doneU s pu.1 ∧ pu.2 ≤ doneUnits s.records pu.1 := by
   have F := submit_ok (submit_ok_none h)
   have hp := F.prereq
-  simp only [prereqFail, List.any_eq_false, decide_eq_true_eq, Nat.not_lt] at hp
-  exact hp
+  simp only [prereqFail, List.any_eq_false] at hp
+  intro pu hpu
+  have h1 : ¬ (doneU s pu.1 < pu.2) := fun h' => hp pu hpu (decide_eq_true h')
+  have h2 : doneU s pu.1 ≤ doneUnits s.records pu.1 := Nat.min_le_left _ _
+  omega
 
-/-- OBS-1: an accepted `observe` found no open record, and it leaves the
-records alone (the config is a parameter of the machine, so it never
-changes). -/
+/-- DEP-1's converse (the prerequisite guard reads the lifetime count, not
+the window): a valid recipe whose prerequisites are met by the Completed
+records of the history passes the `Prerequisite` guard. -/
+theorem dep1_iff {cfg : Cfg A} (hV : Valid cfg) (s : State) {r : Nat}
+    (hr : r < cfg.recipes.length) :
+    prereqFail (cfg.recipe r) s = false ↔
+      ∀ pu ∈ (cfg.recipe r).requires, pu.2 ≤ doneUnits s.records pu.1 := by
+  have RO := recipe_ok hV hr
+  simp only [prereqFail, List.any_eq_false]
+  constructor
+  · intro hp pu hpu
+    have h1 : ¬ (doneU s pu.1 < pu.2) := fun h' => hp pu hpu (decide_eq_true h')
+    have h2 : doneU s pu.1 ≤ doneUnits s.records pu.1 := Nat.min_le_left _ _
+    omega
+  · intro hp pu hpu hd
+    have h1 := hp pu hpu
+    have h2 := (RO.req pu hpu).2.2
+    have h3 : pu.2 ≤ doneU s pu.1 := by
+      simp only [doneU, MAX_UNITS, U32_MAX] at h2 ⊢; omega
+    have := of_decide_eq_true hd
+    omega
+
+/-- OBS-1: an accepted `observe` found no open record or restated the
+current values, and it leaves the records alone (the config is a
+parameter of the machine, so it never changes). -/
 theorem obs1 {cfg : Cfg A} {s : State} {c : A} {vals : List Int} {now : Nat}
     (h : (exec cfg s (.observe c vals now)).1.isOk = true) :
-    (∀ x ∈ s.records, x.status.isOpen = false) ∧
+    (anyOpen s.records = false ∨ vals = s.values) ∧
       (exec cfg s (.observe c vals now)).2.records = s.records ∧
       (exec cfg s (.observe c vals now)).2.values = vals := by
   have ho := observe_ok_none h
-  refine ⟨(observe_ok ho).closed, ?_, ?_⟩ <;> rw [exec_none ho] <;> rfl
+  refine ⟨(observe_ok ho).pend.symm, ?_, ?_⟩ <;> rw [exec_none ho] <;> rfl
+
+/-- OBS-2: an accepted `observe` while some record is open (a refresh)
+leaves the values and the records unchanged and does not re-base. -/
+theorem obs2 {cfg : Cfg A} {s : State} {c : A} {vals : List Int} {now : Nat}
+    (h : (exec cfg s (.observe c vals now)).1.isOk = true) (hopen : anyOpen s.records = true) :
+    (exec cfg s (.observe c vals now)).2.values = s.values ∧
+      (exec cfg s (.observe c vals now)).2.records = s.records ∧
+      (exec cfg s (.observe c vals now)).2.base = s.base ∧
+      (exec cfg s (.observe c vals now)).2.k0 = s.k0 := by
+  have ho := observe_ok_none h
+  have hv : vals = s.values := by
+    rcases (observe_ok ho).pend with h | h
+    · exact h
+    · rw [h] at hopen; cases hopen
+  have hr : refresh s vals = true := by simp [refresh, hv, hopen]
+  rw [exec_none ho]
+  exact ⟨hv, rfl, by simp [effect, hr], by simp [effect, hr]⟩
+
+/-- REFRESH-1: below the cap, the owner's `observe` restating the current
+values is `Ok` in every `Inv` state, open records or not (v1.0.0 answered
+`Pending` while any record was open, F-6). -/
+theorem refresh_ok {cfg : Cfg A} {s : State} (I : Inv cfg s) (hv : s.version < VERSION_CAP)
+    (now : Nat) : outcome cfg s (.observe cfg.owner s.values now) = none := by
+  have W := I.wf
+  simp only [outcome, guards, observeGuards, bumpNewGuards, capGuard, verGuard, energyBad,
+    firstFail_eq_none, noFire_cons, noFire_nil, List.cons_append, List.nil_append, and_true]
+  simp only [VERSION_CAP, MAX_RECORDS, U32_MAX] at hv
+  refine ⟨by simp, by simp, by simp [W.vbnd], by simp [W.vlen, W.vbnd],
+    decide_eq_false (by simp only [VERSION_CAP, MAX_RECORDS, U32_MAX]; omega),
+    decide_eq_false (by simp only [U32_MAX]; omega)⟩
+
+/-- VER-CAP: from `VERSION_CAP` on, no `submit`, `dispatch`, `set_paused` or
+`observe` passes its guards: each needs `version < VERSION_CAP`. -/
+theorem cap_stops {cfg : Cfg A} {s : State} (hcap : VERSION_CAP ≤ s.version) (op : Op A)
+    (hop : (∃ c r u ver exp now, op = .submit c r u ver exp now) ∨ (∃ c id now, op = .dispatch c id now) ∨
+      (∃ c b, op = .pause c b) ∨ (∃ c vals now, op = .observe c vals now)) :
+    outcome cfg s op ≠ none := by
+  intro h
+  rcases hop with ⟨c, r, u, ver, exp, now, rfl⟩ | ⟨c, id, now, rfl⟩ | ⟨c, b, rfl⟩ | ⟨c, vals, now, rfl⟩
+  · have := (submit_ok h).cap; omega
+  · have := (dispatch_ok h).cap; omega
+  · have := (pause_ok h).2.1; omega
+  · have := (observe_ok h).cap; omega
+
+/-- The snapshot's age bound is inclusive (lib.rs 277-284, 422-429):
+`SnapshotExpired` needs `max_age > 0` and `now` strictly past
+`observed_at + max_age` (saturating), so at that instant the snapshot is
+still fresh. -/
+theorem snapshot_fresh {cfg : Cfg A} {s : State} {now : Nat}
+    (h : cfg.maxAge = 0 ∨ now ≤ satAdd s.observedAt cfg.maxAge) :
+    snapshotOld cfg s now = false := by
+  simp only [snapshotOld, decide_eq_false_iff_not, not_and, Nat.not_lt]
+  omega
 
 /-- PAUSE-1, first half: while paused, `submit` and `dispatch` change nothing. -/
 theorem pause1_blocks {cfg : Cfg A} {s : State} (hp : s.paused = true) :

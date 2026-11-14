@@ -3,7 +3,7 @@
 # expect: test_requirements C-3 lifecycle
 --- a/source-mirror/crates/core/src/lib.rs
 +++ b/source-mirror/crates/core/src/lib.rs
-@@ -433,7 +433,7 @@
+@@ -502,7 +502,7 @@
          }
          if !matches!(
              c.status,

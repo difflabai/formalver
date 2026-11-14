@@ -44,6 +44,19 @@ impl Shape {
     };
 }
 
+/// The version of a generated state.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Ver {
+    /// Any version the domain allows (INV states: `first_id + len <= version`
+    /// and INV-VERCAP).
+    Free,
+    /// `version >= VERSION_CAP` (`h_version_cap_*`, INV states: INV-VERCAP
+    /// keeps the reserve for the open records).
+    AtCap,
+    /// `version = u32::MAX` (`h_version_max_*`, WF states).
+    Max,
+}
+
 /// Per-harness parameters (fixed under Kani, random in plain mode).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Cfg {
@@ -56,8 +69,8 @@ pub struct Cfg {
     /// Weights: `true` any `1..=1000`, `false` one of `{1, 2, 1000}`.
     pub any_weight: bool,
     pub shape: Shape,
-    /// Generated states have `version = u32::MAX` (`h_version_max`).
-    pub version_max: bool,
+    /// The version of generated states (`h_version_cap`, `h_version_max`).
+    pub ver: Ver,
     /// Which groups of checks to run (`checks::PART_*`).
     pub part: u8,
 }

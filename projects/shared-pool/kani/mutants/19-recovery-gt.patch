@@ -2,7 +2,7 @@
 # candidate: recovery accepts a completion that does not decrease energy (>= became >)
 --- a/crates/core/src/lib.rs
 +++ b/crates/core/src/lib.rs
-@@ -279,7 +279,7 @@
+@@ -312,7 +312,7 @@
              return Err(Error::Energy);
          }
          if self.violations(&self.values).iter().any(|v| *v > 0)

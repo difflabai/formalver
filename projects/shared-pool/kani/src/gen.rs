@@ -8,11 +8,16 @@
 //! `inv_state` builds a state together with its ghost `(base, k0)` and fixes
 //! the values by INV-LEDGER (`values = ledger(base, records, k0)`): under
 //! the assumption `inv` this loses nothing, and it is far cheaper than
-//! drawing the values and assuming the equation. `raw_config` builds any
-//! configuration of bounded size (for `validate` and `new`).
+//! drawing the values and assuming the equation. INV states have
+//! `first_id = 0` and `completed_units` = the retained Completed units
+//! (exact: fewer than 256 records means nothing was pruned, WIN-1; K-D2).
+//! `wf_state` builds well-formed states that are not reachable-closed
+//! (free `first_id`, `completed_units` and version; K-D2), for the paths
+//! INV makes dead. `raw_config` builds any configuration of bounded size
+//! (for `validate` and `new`).
 
 use crate::spec::{self, Ghost, Op, ACCTS};
-use crate::src::{assume, Cfg, Dom, Src};
+use crate::src::{assume, Cfg, Dom, Src, Ver};
 use pool_core::*;
 
 pub const MAX_M: u8 = 2;
@@ -21,7 +26,13 @@ pub const MAX_R: u8 = 2;
 pub const MAX_C: u8 = 3;
 
 pub fn acct(src: &mut impl Src) -> &'static str {
-    match src.below(4) {
+    let k = src.below(4);
+    acct_at(k)
+}
+
+/// `ACCTS[k % 4]`, as a choice among the constant strings.
+pub fn acct_at(k: u32) -> &'static str {
+    match k % 4 {
         0 => ACCTS[0],
         1 => ACCTS[1],
         2 => ACCTS[2],
@@ -142,10 +153,14 @@ pub fn config(src: &mut impl Src, c: &Cfg) -> Config {
                 let cap = if src.hint(70) { 4 } else { 100 };
                 requires.push((p, 1 + src.below(cap)));
             }
+            // CFG-2 (v1.1): the executor is never the actor; it may be the
+            // owner (Q3).
+            let a = src.below(4);
+            let e = a + 1 + src.below(3);
             recipes.push(Recipe {
                 name: "r".into(),
-                actor: acct(src).into(),
-                executor: acct(src).into(),
+                actor: acct_at(a).into(),
+                executor: acct_at(e).into(),
                 reserve,
                 complete,
                 max_units: 1 + src.below(c.max_units),
@@ -173,6 +188,12 @@ pub fn pool_of(cfg: Config) -> Pool {
             values.push(cfg.metrics[i].initial);
         }
     }
+    let mut completed_units = Vec::with_capacity(MAX_R as usize + 1);
+    for r in 0..MAX_R as usize + 1 {
+        if r < cfg.recipes.len() {
+            completed_units.push(0);
+        }
+    }
     Pool {
         config: cfg,
         values,
@@ -180,6 +201,8 @@ pub fn pool_of(cfg: Config) -> Pool {
         observed_at: 0,
         paused: false,
         records: Vec::new(),
+        first_id: 0,
+        completed_units,
     }
 }
 
@@ -200,8 +223,11 @@ pub fn init_config(src: &mut impl Src, c: &Cfg) -> Config {
     cfg
 }
 
-/// The records and ghost of a generated state: `nc` records, the first `k0`
-/// terminal; values by INV-LEDGER. `None` if the values leave ±1e6.
+/// The records and ghost of a generated state: `nc` records with ids `0..nc`
+/// (`first_id = 0`), the first `k0` terminal; values by INV-LEDGER;
+/// `completed_units` and the ghost's `done` the retained Completed units;
+/// `version >= nc` (WIN-1), and `>= VERSION_CAP` with `Ver::AtCap`. `None`
+/// if the values leave ±1e6.
 pub fn state_from(src: &mut impl Src, c: &Cfg, cfg: Config) -> Option<(Pool, Ghost)> {
     let nm = cfg.metrics.len();
     let nr = cfg.recipes.len() as u32;
@@ -247,18 +273,46 @@ pub fn state_from(src: &mut impl Src, c: &Cfg, cfg: Config) -> Option<(Pool, Gho
             values.push(l[i] as i64);
         }
     }
+    let mut completed_units = Vec::with_capacity(MAX_R as usize + 1);
+    let mut done = [0u64; spec::GR];
+    for r in 0..MAX_R as usize {
+        if r < nr as usize {
+            let d = spec::retained_done(&records, r as u32);
+            completed_units.push(d as u32);
+            done[r] = d;
+        }
+    }
     let g = Ghost {
         base,
         k0,
         eff: None,
+        pruned: [0; spec::M],
+        done,
     };
+    let version = match c.ver {
+        Ver::Max => u32::MAX,
+        // Plain mode: mostly just at or above the cap with `AtCap`, and
+        // sometimes with `Free` (Kani: free).
+        Ver::AtCap if src.hint(80) => spec::VERSION_CAP + src.below(16),
+        Ver::Free if src.hint(10) => spec::VERSION_CAP - 8 + src.below(24),
+        _ => src.u32(),
+    };
+    // WIN-1: every record was a submit, an effective transition.
+    if !assume(version as u64 >= nc as u64) {
+        return None;
+    }
+    if c.ver == Ver::AtCap && !assume(version >= spec::VERSION_CAP) {
+        return None;
+    }
     let p = Pool {
         config: cfg,
         values,
-        version: if c.version_max { u32::MAX } else { src.u32() },
+        version,
         observed_at: src.u64(),
         paused: src.bool(),
         records,
+        first_id: 0,
+        completed_units,
     };
     Some((p, g))
 }
@@ -267,7 +321,7 @@ pub fn state_from(src: &mut impl Src, c: &Cfg, cfg: Config) -> Option<(Pool, Gho
 /// random-walk state from `Pool::new`; otherwise built and filtered by
 /// `assume(inv)`.
 pub fn inv_state(src: &mut impl Src, c: &Cfg) -> Option<(Pool, Ghost)> {
-    if !c.version_max {
+    if c.ver == Ver::Free {
         if let Some((p, mut g)) = src.reach() {
             g.eff = None;
             return Some((p, g));
@@ -275,12 +329,91 @@ pub fn inv_state(src: &mut impl Src, c: &Cfg) -> Option<(Pool, Ghost)> {
     }
     let cfg = config(src, c);
     let (p, g) = state_from(src, c, cfg)?;
-    // INV-WF and INV-LEDGER hold by construction; the rest is assumed.
-    if !assume(spec::inv_hard(&p, &g)) || !assume(spec::inv_dep(&p)) {
+    // WIN-1, INV-LEDGER and INV-CU hold by construction; the rest is
+    // assumed (K-D6).
+    if !assume(spec::inv_res(&p))
+        || !assume(spec::inv_pv(&p, &g))
+        || !assume(spec::inv_vercap(&p))
+        || !assume(spec::inv_dep(&p, &g))
+    {
         return None;
     }
     #[cfg(not(kani))]
     assert!(spec::inv(&p, &g), "gen: state is not INV");
+    Some((p, g))
+}
+
+/// Records of a WF state (`wf_state`).
+pub const WF_C: u8 = 2;
+
+/// A well-formed state that need not be reachable (K-D2, the WF domain): a
+/// valid configuration; up to [`WF_C`] records with ids `first_id + j` and
+/// free statuses, recipes and units; `first_id` free with
+/// `first_id + len <= 2^32` (so the id overflow of submit is reachable) or
+/// small; `completed_units` free (one per recipe); values free and bounded
+/// (not ledger-derived); the version free, or `u32::MAX` with `Ver::Max`.
+/// The ghost is a placeholder (`eff: None`): only the `_tx`/`_post` checks
+/// run on WF states, and in plain mode REF-1..3 with the placeholder as the
+/// TLA+ ghost (`checks::wf_step`). It exercises the paths INV makes dead:
+/// `index` with `first_id > 0`, pruned ids, the id overflow, the plain
+/// increment at `u32::MAX`, a release that fails Bounds or Arithmetic, the
+/// saturating count.
+pub fn wf_state(src: &mut impl Src, c: &Cfg) -> Option<(Pool, Ghost)> {
+    let cfg = config(src, c);
+    let nm = cfg.metrics.len();
+    let nr = cfg.recipes.len() as u32;
+    let first_id = if src.bool() { src.below(4) } else { src.u32() };
+    let len = size(src, c.shape.records.map(|k| if k > WF_C { WF_C } else { k }), WF_C, 0);
+    if !assume(first_id as u64 + len as u64 <= u32::MAX as u64 + 1) {
+        return None;
+    }
+    let mut records = Vec::with_capacity(WF_C as usize + 1);
+    for j in 0..WF_C as usize {
+        let recipe = src.below(nr);
+        let units = 1 + src.below(spec::rcp_of(&cfg, recipe).max_units);
+        records.push(Commitment {
+            id: first_id.wrapping_add(j as u32),
+            recipe,
+            units,
+            expires_at: src.u64(),
+            status: status(src),
+        });
+    }
+    records.truncate(len);
+    let mut values = Vec::with_capacity(MAX_M as usize);
+    for i in 0..MAX_M as usize {
+        if i < nm {
+            values.push(val(src, c.val));
+        }
+    }
+    let mut completed_units = Vec::with_capacity(MAX_R as usize + 1);
+    for r in 0..MAX_R as usize {
+        if r < nr as usize {
+            let x = if src.hint(50) { src.below(4) } else { src.u32() };
+            completed_units.push(x);
+        }
+    }
+    let version = match c.ver {
+        Ver::Max => u32::MAX,
+        _ => src.u32(),
+    };
+    let g = Ghost {
+        base: copy_vec(&values, MAX_M as usize + 1),
+        k0: first_id,
+        eff: None,
+        pruned: [0; spec::M],
+        done: [0; spec::GR],
+    };
+    let p = Pool {
+        config: cfg,
+        values,
+        version,
+        observed_at: src.u64(),
+        paused: src.bool(),
+        records,
+        first_id,
+        completed_units,
+    };
     Some((p, g))
 }
 
@@ -334,6 +467,8 @@ pub fn copy_pool(p: &Pool, cap: usize) -> Pool {
         observed_at: p.observed_at,
         paused: p.paused,
         records: copy_vec(&p.records, cap),
+        first_id: p.first_id,
+        completed_units: copy_vec(&p.completed_units, MAX_R as usize + 1),
     }
 }
 
@@ -366,15 +501,22 @@ fn time(src: &mut impl Src, p: &Pool) -> u64 {
 }
 
 /// A record id: one that exists (plain mode, mostly), any `u32` (plain
-/// mode), or one in `0..8` (Kani: at most 4 records, so `4..8` are the
-/// NotFound ids).
+/// mode), or `first_id + 0..8` (Kani: at most 4 records, so `+4..8` are
+/// ids not yet issued, NotFound), or with `first_id > 0` one of the two ids
+/// below it (pruned, NotFound; WF states).
 fn id(src: &mut impl Src, p: &Pool) -> u32 {
+    let f = p.first_id;
     if !p.records.is_empty() && src.hint(85) {
-        src.below(p.records.len() as u32)
+        f.wrapping_add(src.below(p.records.len() as u32))
     } else if src.wide() {
         src.u32()
     } else {
-        src.below(8)
+        let k = src.below(8);
+        if f > 0 && src.bool() {
+            f.saturating_sub(1 + (k & 1))
+        } else {
+            f.wrapping_add(k)
+        }
     }
 }
 
@@ -389,7 +531,7 @@ fn caller(src: &mut impl Src, want: &str) -> &'static str {
 }
 
 fn record_role<'a>(p: &'a Pool, id: u32, executor: bool) -> &'a str {
-    match spec::rec(&p.records, id) {
+    match spec::rec(p, id) {
         Some(c) => {
             let r = spec::rcp_of(&p.config, c.recipe);
             if executor {
@@ -457,7 +599,7 @@ pub fn op(src: &mut impl Src, p: &Pool, k: u32, d: Dom) -> Op {
                 acct(src)
             };
             let now = if src.hint(60) {
-                match spec::rec(&p.records, id) {
+                match spec::rec(p, id) {
                     Some(c) => c.expires_at.saturating_sub(1 + src.below(2) as u64),
                     None => src.u64(),
                 }
@@ -522,6 +664,9 @@ pub fn op(src: &mut impl Src, p: &Pool, k: u32, d: Dom) -> Op {
                 acct(src)
             };
             let nm = p.config.metrics.len();
+            // The current values (the refresh, C16: allowed with records
+            // open) need exact equality, which a free vector rarely meets.
+            let same = src.bool() && !src.hint(60);
             let len = if src.hint(0) || src.bool() {
                 nm
             } else {
@@ -529,7 +674,11 @@ pub fn op(src: &mut impl Src, p: &Pool, k: u32, d: Dom) -> Op {
             };
             let mut vals = Vec::with_capacity(MAX_M as usize + 1);
             for i in 0..MAX_M as usize + 1 {
-                if i < len {
+                if same {
+                    if i < p.values.len() {
+                        vals.push(p.values[i]);
+                    }
+                } else if i < len {
                     let x = match src.below(8) {
                         0 => -1_000_001,
                         1 => 1_000_001,
@@ -691,5 +840,189 @@ pub fn raw_config(src: &mut impl Src, c: &Cfg, long: bool) -> Config {
         terms,
         recipes,
         max_age_seconds: src.u32(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Window walks (plain mode)
+// ---------------------------------------------------------------------------
+
+/// Plain mode: a configuration for walks long enough to fill and prune the
+/// window (`checks::window_walk`, `checks::cap_walk`), after upstream's
+/// `window_on_random_runs`: metric 0 in `[-L, L]` (`L` in `60..=150`) with
+/// every recipe's effects in `-10..=10`; metric 1 in `[-100, 100]`, touched
+/// by no recipe, usually the only term's metric (so admission is limited by
+/// the hard bounds, not by energy). 2 or 3 recipes (`spec::GR`), a later one
+/// sometimes requiring 1-3 completed units of an earlier one.
+#[cfg(not(kani))]
+pub fn window_config(src: &mut crate::src::Rng) -> Config {
+    let l = 60 + src.below(91) as i64;
+    let nr = 2 + src.below(2);
+    let mut recipes = Vec::new();
+    for i in 0..nr {
+        let requires = if i > 0 && src.hint(60) {
+            vec![(src.below(i), 1 + src.below(3))]
+        } else {
+            vec![]
+        };
+        let a = src.below(4);
+        let e = a + 1 + src.below(3);
+        recipes.push(Recipe {
+            name: "r".into(),
+            actor: acct_at(a).into(),
+            executor: acct_at(e).into(),
+            reserve: vec![src.range(-10, 10), 0],
+            complete: vec![src.range(-10, 10), 0],
+            max_units: 1 + src.below(3),
+            requires,
+        });
+    }
+    let m = |min, max| Metric {
+        name: "m".into(),
+        unit: "u".into(),
+        initial: 0,
+        min,
+        max,
+    };
+    let term = if src.hint(80) {
+        Term {
+            metric: 1,
+            target: 0,
+            weight: 1,
+            shape: Shape::Target,
+        }
+    } else {
+        Term {
+            metric: 0,
+            target: src.range(-20, 20),
+            weight: 1,
+            shape: shape_of(src),
+        }
+    };
+    Config {
+        name: "w".into(),
+        owner: acct(src).into(),
+        metrics: vec![m(-l, l), m(-100, 100)],
+        terms: vec![term],
+        recipes,
+        max_age_seconds: 0,
+    }
+}
+
+/// Plain mode: the id of a record to act on: the oldest a quarter of the
+/// time, an open one half of the time (never one whose id is 7 mod 32, so
+/// the front is sometimes open when the window is full), otherwise any
+/// retained id or one just outside the window (pruned or not yet issued).
+#[cfg(not(kani))]
+pub fn window_id(src: &mut crate::src::Rng, p: &Pool) -> u32 {
+    let f = p.first_id;
+    let len = p.records.len() as u32;
+    if len > 0 && src.hint(25) {
+        return f;
+    }
+    if src.hint(65) {
+        let open: Vec<u32> = p
+            .records
+            .iter()
+            .filter(|c| spec::open(&c.status) && c.id % 32 != 7)
+            .map(|c| c.id)
+            .collect();
+        if !open.is_empty() {
+            return open[src.below(open.len() as u32) as usize];
+        }
+    }
+    if len > 0 && src.hint(85) {
+        return f + src.below(len);
+    }
+    let lo = f.saturating_sub(3);
+    lo + src.below(f - lo + len + 3)
+}
+
+/// Plain mode: one operation of a window walk, steered toward accepted
+/// calls (current version, far expiry, the role that may act).
+#[cfg(not(kani))]
+pub fn window_op(src: &mut crate::src::Rng, p: &Pool) -> Op {
+    let cfg = &p.config;
+    let now = p.observed_at;
+    let owner = caller(src, &cfg.owner.clone());
+    let role = |src: &mut crate::src::Rng, id: u32, executor: bool| {
+        let want = record_role(p, id, executor).to_string();
+        if src.hint(95) {
+            caller(src, &want)
+        } else {
+            acct(src)
+        }
+    };
+    let k = src.below(100);
+    if p.paused && src.hint(30) {
+        return Op::Pause { caller: owner, paused: false };
+    }
+    match k {
+        0..=44 => {
+            let recipe = src.below(cfg.recipes.len() as u32);
+            let r = &cfg.recipes[recipe as usize];
+            let caller = if src.hint(95) { caller(src, &r.actor.clone()) } else { acct(src) };
+            let version = if src.hint(95) { p.version } else { p.version.wrapping_sub(1) };
+            Op::Submit {
+                caller,
+                req: Request {
+                    recipe,
+                    units: 1 + src.below(r.max_units),
+                    version,
+                    expires_at: now + 80_000,
+                },
+                now,
+            }
+        }
+        45..=56 => {
+            let id = window_id(src, p);
+            Op::Dispatch { caller: role(src, id, false), id, now }
+        }
+        57..=63 => Op::Ack {
+            id: window_id(src, p),
+            accepted: src.bool(),
+        },
+        64..=79 => {
+            let id = window_id(src, p);
+            // Recipe 0 rarely completes, so that its completions get pruned
+            // while a later recipe still requires them.
+            let r0 = matches!(spec::rec(p, id), Some(c) if c.recipe == 0);
+            Op::Settle {
+                caller: role(src, id, true),
+                id,
+                completed: src.hint(if r0 { 8 } else { 60 }),
+            }
+        }
+        80..=93 => {
+            let id = window_id(src, p);
+            let caller = if src.bool() { owner } else { role(src, id, false) };
+            Op::Cancel { caller, id, now }
+        }
+        94..=98 => {
+            let open = p.records.iter().any(|c| spec::open(&c.status));
+            let vals = if src.hint(if open { 80 } else { 30 }) {
+                p.values.clone()
+            } else {
+                let mut v = Vec::new();
+                for m in &cfg.metrics {
+                    let x = if src.hint(90) {
+                        src.range(m.min, m.max)
+                    } else {
+                        src.range(m.min - 5, m.max + 5)
+                    };
+                    v.push(x);
+                }
+                v
+            };
+            Op::Observe {
+                caller: owner,
+                vals,
+                now: now + src.below(2) as u64,
+            }
+        }
+        _ => Op::Pause {
+            caller: owner,
+            paused: src.hint(30),
+        },
     }
 }

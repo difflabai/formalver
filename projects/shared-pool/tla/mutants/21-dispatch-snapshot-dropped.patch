@@ -1,10 +1,12 @@
+# checks: safety-1 trace
+# dispatch does not check the snapshot's age.
 --- a/SharedPool.tla
 +++ b/SharedPool.tla
-@@ -251,7 +251,6 @@
+@@ -292,7 +292,6 @@
      ELSE IF paused THEN "Paused"
-     ELSE IF Rec(i).status # "Reserved" THEN "InvalidState"
-     ELSE IF now >= Rec(i).exp THEN "Expired"
+     ELSE IF Rec(id).status # "Reserved" THEN "InvalidState"
+     ELSE IF now >= Rec(id).exp THEN "Expired"
 -    ELSE IF SnapExpired(now) THEN "SnapshotExpired"
-     ELSE VerErr
+     ELSE CapErr
  
  AckTo(acc) == IF acc THEN "Active" ELSE "Unknown"

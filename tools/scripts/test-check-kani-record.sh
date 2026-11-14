@@ -2,13 +2,16 @@
 # Self-test for check-kani-record.py, kani/local/record.py and
 # run-local.py's environment and cargo configuration checks: a synthetic
 # finished local run of the kani-large and kani-mutants-large jobs (at HEAD)
-# records and passes the check; an incomplete, failed or foreign run is
-# refused and leaves the record alone; and each kind of stale, wrong or
-# inconsistent record, each workflow matrix that does not split the
-# harnesses and mutants with the record, and each large timeout below the
-# limit the record ran it under, fails the check. Commits with
+# records and passes the check; an incomplete, failed, foreign or
+# measurement run is refused and leaves the record alone; and each kind of
+# stale, wrong or inconsistent record, each workflow matrix that does not
+# split the harnesses and mutants with the record, and each large timeout
+# below the limit the record ran it under, fails the check. Commits with
 # other Kani inputs are made in a scratch object directory over the
 # repository's (no object, ref or index of the repository is written).
+# Also kani/local/run-local.py's job lists (the record's, and --all's
+# measurement of every harness and mutant), --all's refusals and its
+# heavy-job lock (a scratch one), without running a job.
 #
 # usage: tools/scripts/test-check-kani-record.sh
 set -uo pipefail
@@ -182,6 +185,11 @@ edit "$t/bad/jobs.json" "import json; s = json.dumps([j for j in json.loads(s) i
 expect 1 "a run without one large harness" "h_wedge" run_record "$t/bad" "$t/rec2"
 cmp -s "$t/good/jobs.tsv" "$t/rec2/jobs.tsv" || { echo "FAIL: a run without h_wedge: the record changed"; fail=1; }
 expect 1 "a missing run directory" "no env.txt" run_record "$t/nowhere" "$t/rec2"
+# A measurement (run-local.py --all) is not a record's run.
+rm -rf "$t/bad" "$t/rec2"; cp -R "$t/run" "$t/bad"; cp -R "$t/good" "$t/rec2"
+echo 'mode measurement (run-local.py --all: every harness of run.sh list and every mutant; not a record)' >>"$t/bad/env.txt"
+expect 1 "a measurement (run-local.py --all)" "is a measurement \(run-local\.py --all" run_record "$t/bad" "$t/rec2"
+cmp -s "$t/good/jobs.tsv" "$t/rec2/jobs.tsv" || { echo "FAIL: a measurement: the record changed"; fail=1; }
 
 # --- check-kani-record.py ----------------------------------------------------
 bad() { rm -rf "$t/r"; cp -R "$t/good" "$t/r"; }
@@ -430,6 +438,174 @@ expect 1 "run-local.py: a .cargo/config.toml above the run directory" "above/\.c
   dry "$t/above/lr"
 expect 0 "run-local.py: ... not above another run directory" "$ok_dry" dry "$t/lr"
 expect 1 "run-local.py: RUSTFLAGS in the environment" "RUSTFLAGS set in the environment" dry "$t/lr" RUSTFLAGS=-Coverflow-checks=off
+
+# --- run-local.py's jobs and --all -------------------------------------------
+# The record's jobs are the large matrix entries. --all, a measurement,
+# runs every harness of run.sh list and every mutant, each once, with an
+# estimate and its source; it is not a record, writes outside the
+# repository, and holds the machine's heavy-job lock while it runs (here a
+# lock in $t: KANI_CBMC=/usr/bin/false fails the tool check after it is
+# taken, so no job starts). A run in the background is a plain command, so
+# that $! is run-local.py's pid (a shell function would run in a subshell,
+# which the test's signal would stop instead).
+kd="$root/projects/shared-pool/kani"
+names() { awk '/^  [^ ]/ {print $1}' "$t/out" | sort; }
+clean_env=(env -i PATH="$PATH" HOME="$HOME" TMPDIR="$t" SP_HEAVY_LOCK="$t/lock" KANI_CBMC=/usr/bin/false)
+clean() { "${clean_env[@]}" "$@"; }
+expect 0 "run-local.py --dry-run" "jobs \(KANI_TIMEOUT" py "$runlocal" --dry-run
+want=$( { "$check" matrix kani-large | cut -f1 | tr ' ' '\n'; "$check" matrix kani-mutants-large | cut -f1 | sed 's/^/mutant-/'; } | sort)
+[ "$(names)" = "$want" ] || { echo "FAIL: run-local.py --dry-run: not the kani-large harnesses and kani-mutants-large mutants"; fail=1; }
+expect 0 "run-local.py --all --dry-run" "measurement \(--all, not a record\)" py "$runlocal" --all --dry-run
+want=$( { bash "$kd/run.sh" list; for p in "$kd"/mutants/*.patch; do p=${p##*/}; echo "mutant-${p%%-*}"; done; } | sort)
+if [ "$(names)" != "$want" ] || [ -n "$(names | uniq -d)" ]; then
+  echo "FAIL: run-local.py --all --dry-run: not each harness of run.sh list and each mutant exactly once"
+  diff <(names) <(echo "$want") | sed 's/^/  /'; fail=1
+fi
+grep -E '^  [^ ]' "$t/out" | grep -vE ' s  (W7|v1\.0\.0 RESULTS\.md|RESULTS\.md at|killed-by|checked-by|unknown)' | grep -q . &&
+  { echo "FAIL: run-local.py --all --dry-run: an estimate without its source"; fail=1; }
+expect 2 "run-local.py --all --record" "a measurement, not a record: --record is refused" py "$runlocal" --all --record
+expect 2 "run-local.py --only without --all" "--only needs --all" py "$runlocal" --only h_wedge --dry-run
+expect 2 "run-local.py --all --only, not a job" "not a job of --all: h_nonesuch" py "$runlocal" --all --only h_wedge,h_nonesuch --dry-run
+expect 0 "run-local.py --all --only" "2 jobs, 1 harnesses of run.sh list and 1 mutants" py "$runlocal" --all --only h_wedge,01 --dry-run
+[ "$(names | tr '\n' ' ')" = "h_wedge mutant-01 " ] || { echo "FAIL: run-local.py --all --only h_wedge,01: $(names | tr '\n' ' ')"; fail=1; }
+expect 1 "run-local.py --all, output in the repository" "is in the repository; a measurement is not a record" \
+  clean python3 -I "$runlocal" --all --only h_full_256 --out "$kd/target/measure"
+expect 1 "run-local.py --all, a failure with the lock held" "holding $t/lock" \
+  clean python3 -I "$runlocal" --all --only h_full_256 --out "$t/measure"
+grep -q "released $t/lock" "$t/out" && [ ! -e "$t/lock" ] && [ ! -e "$t/measure" ] ||
+  { echo "FAIL: run-local.py --all: the lock not released on failure (or the run started)"; sed 's/^/  /' "$t/out"; fail=1; }
+# Another process's lock: --all waits for it, and leaves it when stopped.
+mkdir "$t/lock"
+"${clean_env[@]}" python3 -I "$runlocal" --all --only h_full_256 --out "$t/measure" >"$t/wait.out" 2>&1 &
+pid=$!
+for _ in $(seq 40); do grep -q "waiting for $t/lock" "$t/wait.out" && break; sleep 0.25; done
+kill -TERM "$pid" 2>/dev/null; wait "$pid"; rc=$?
+[ "$rc" = 143 ] && grep -q "waiting for $t/lock" "$t/wait.out" && grep -q "stopped by signal 15" "$t/wait.out" &&
+  [ -d "$t/lock" ] && ! grep -q "holding" "$t/wait.out" ||
+  { echo "FAIL: run-local.py --all: did not wait for another's lock, or removed it (exit $rc)"; sed 's/^/  /' "$t/wait.out"; fail=1; }
+rmdir "$t/lock"
+
+# --all's scheduling: a job estimated at ALONE_GB or more starts only when
+# no job runs, and none starts beside it, nor beside a running job whose
+# sampled tree reached ALONE_GB; other jobs share the budget. The record
+# (alone None) keeps the budget rule alone. The dry run says so.
+expect 0 "run-local.py --all: a job of ALONE_GB or more runs alone" "^ok$" py - "$runlocal" <<'PY'
+import importlib.util, sys
+sys.dont_write_bytecode = True  # no __pycache__ in kani/local
+spec = importlib.util.spec_from_file_location("run_local", sys.argv[1])
+rl = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(rl)
+A = rl.ALONE_GB
+def job(gb, secs=0):
+    return {"peak": gb, "est": secs}
+bad = [c for c, want in [
+    ((job(40), [], 50, A), True),            # alone, it fits
+    ((job(40), [3], 50, A), False),          # not beside a running job
+    ((job(A), [3], 50, A), False),
+    ((job(3), [40], 50, A), False),          # nothing beside it
+    ((job(3), [A], 50, A), False),           # nor beside a tree that reached A
+    ((job(A - 0.1), [3], 50, A), True),      # below A: the budget
+    ((job(10), [39.9 - 10], 50, A), True),
+    ((job(10), [30, 10.1], 50, A), False),
+    ((job(10), [40], 50, None), True),       # the record: the budget only
+    ((job(10.1), [40], 50, None), False),
+] if rl.fits(*c) != want]
+# 40 GB for 100 s, then the two small jobs together: 110 s (100 s beside it).
+jobs = [job(40, 100), job(3, 10), job(3, 10)]
+sim = (rl.simulate(jobs, 2, 50, A), rl.simulate(jobs, 2, 50, None))
+print("ok" if not bad and sim == (110, 100) and A == 35 else "wrong: fits %s, simulate %s, ALONE_GB %s" % (bad, sim, A))
+PY
+expect 0 "run-local.py --all --dry-run: the alone line" "^alone \(estimated at 35 GB or more; no job beside them\): [0-9]+ jobs" \
+  py "$runlocal" --all --dry-run
+
+# A run whose jobs run, without Kani: stand-ins for cargo (cargo kani),
+# rustc and CBMC, first on PATH and in run.sh's $HOME/.cargo/bin. Each job
+# leaves a process in its group and one in a session of its own (run.sh
+# says cargo-kani once started CBMC so; the group kill misses it). Stopped
+# by SIGTERM, or failing on an exception (here progress.log turned into a
+# directory), while a job runs, the run kills both and then releases the
+# lock. Needs the source-mirror at the core pin for the lanes: CI's
+# checkout has no submodule, so this is skipped there.
+core=$(git -C "$root" rev-parse HEAD:projects/shared-pool/source-mirror)
+if git -C "$root/projects/shared-pool/source-mirror" cat-file -e "$core^{commit}" 2>/dev/null; then
+  fh="$t/fakehome"; fb="$t/fakehome/.cargo/bin"; pids="$t/pids"
+  mkdir -p "$fb" "$pids"
+  ver() { git -C "$root" show HEAD:tools/versions.env | sed -n "s/^$1=//p"; }
+  printf '#!/bin/sh\necho "%s (stand-in)"\n' "$(ver CBMC)" >"$fb/cbmc"
+  printf '#!/bin/sh\necho "rustc %s (stand-in)"\n' "$(ver RUST_TOOLCHAIN)" >"$fb/rustc"
+  { echo '#!/usr/bin/env bash'
+    echo "kv='$(ver KANI)' pids='$pids'"
+    cat <<'SH'
+case " $* " in
+  *" --version "*) echo "cargo-kani $kv"; exit 0 ;;
+  *" --only-codegen "*) exit 0 ;;
+esac
+prev=
+for x in "$@"; do [ "$prev" = --harness ] && h=${x#*::}; prev=$x; done
+if [ "$h" = h_step_ack_tx ] && [ -e "$pids/crash" ]; then
+  # Once the other job runs: the scheduler's next log line raises.
+  until [ -s "$pids/h_step_pause_tx.own" ]; do sleep 0.1; done
+  out=$(dirname "$(dirname "$KANI_LOG_DIR")")
+  rm "$out/progress.log"; mkdir "$out/progress.log"
+  exit 1
+fi
+sleep 120 &
+echo $! >"$pids/$h.group"
+# Its pid file is written once it is in a session of its own.
+python3 -c 'import os, sys, time; os.setsid(); open(sys.argv[1], "w").write(str(os.getpid())); time.sleep(120)' \
+  "$pids/$h.own" &
+wait
+SH
+  } >"$fb/cargo"
+  chmod +x "$fb/cargo" "$fb/rustc" "$fb/cbmc"
+  fake_env=(env -i PATH="$fb:$PATH" HOME="$fh" TMPDIR="$t" SP_HEAVY_LOCK="$t/lock" KANI_CBMC="$fb/cbmc")
+  alive() { local s; s=$(ps -o stat= -p "$1" 2>/dev/null | tr -d ' '); [ -n "$s" ] && [ "${s#Z}" = "$s" ]; }
+  # killed <harness>: its two processes are gone (within 5 s: reaped).
+  killed() {
+    local f p
+    for f in group own; do
+      [ -s "$pids/$1.$f" ] || return 1
+      p=$(cat "$pids/$1.$f")
+      for _ in $(seq 20); do alive "$p" || continue 2; sleep 0.25; done
+      return 1
+    done
+  }
+  # sweep: whatever a failed case left of the stand-ins' sleepers.
+  sweep() {
+    local f p
+    for f in "$pids"/*.group "$pids"/*.own; do
+      [ -s "$f" ] || continue
+      p=$(cat "$f")
+      ps -o command= -p "$p" 2>/dev/null | grep -q sleep && kill -KILL "$p" 2>/dev/null
+    done
+    rm -f "$pids"/*
+  }
+  "${fake_env[@]}" python3 -I "$runlocal" --all --only h_step_ack_tx --lanes 1 --out "$t/m1" >"$t/m1.out" 2>&1 &
+  pid=$!
+  for _ in $(seq 240); do [ -s "$pids/h_step_ack_tx.own" ] && break; kill -0 "$pid" 2>/dev/null || break; sleep 0.25; done
+  kill -TERM "$pid" 2>/dev/null; wait "$pid"; rc=$?
+  if [ "$rc" != 1 ] || ! grep -q "stopped by signal 15; not complete" "$t/m1.out" ||
+     ! grep -q "released $t/lock" "$t/m1.out" || [ -e "$t/lock" ] || ! killed h_step_ack_tx; then
+    echo "FAIL: run-local.py --all: SIGTERM with a job running: exit $rc, its processes or the lock left"
+    sed 's/^/  /' "$t/m1.out"; ls "$pids" | sed 's/^/  pids: /'; fail=1
+  fi
+  sweep; rmdir "$t/lock" 2>/dev/null
+  touch "$pids/crash"
+  "${fake_env[@]}" python3 -I "$runlocal" --all --only h_step_ack_tx,h_step_pause_tx --lanes 2 --out "$t/m2" \
+    >"$t/m2.out" 2>&1 &
+  pid=$!
+  for _ in $(seq 240); do kill -0 "$pid" 2>/dev/null || break; sleep 0.25; done
+  kill -0 "$pid" 2>/dev/null && kill -TERM "$pid"
+  wait "$pid"; rc=$?
+  if [ "$rc" != 1 ] || ! grep -q "^Traceback" "$t/m2.out" || ! grep -q "released $t/lock" "$t/m2.out" ||
+     [ -e "$t/lock" ] || ! killed h_step_pause_tx; then
+    echo "FAIL: run-local.py --all: an exception with a job running: exit $rc, its processes or the lock left"
+    sed 's/^/  /' "$t/m2.out"; ls "$pids" | sed 's/^/  pids: /'; fail=1
+  fi
+  sweep; rmdir "$t/lock" 2>/dev/null
+else
+  echo "skip: run-local.py --all with running jobs (no source-mirror at $core, as in CI's checkout)"
+fi
 
 [ "$fail" = 0 ] && echo "check-kani-record: all cases pass"
 exit "$fail"

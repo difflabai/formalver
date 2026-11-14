@@ -4,12 +4,12 @@
 # expect: test_mc2 MC-2: all traces replay
 --- a/prolog/model/pool_machine.pl
 +++ b/prolog/model/pool_machine.pl
-@@ -311,7 +311,7 @@
-     pool_config(S, C), recipe_of(C, RI, r(_, _, _, _, MU, _)), U >= 1, U =< MU.
- holds(submit, prerequisites, S, submit(_, RI, _, _, _, _)) :-              % spec:19; handoff:19
-     pool_config(S, C), recipe_of(C, RI, r(_, _, _, _, _, Req)), pool_records(S, Recs),
--    forall(member(p(P, U), Req), ( completed_units(Recs, P, N), N >= U )).
-+    forall(member(p(P, U), Req), ( completed_units(Recs, P, N), N > U )).
+@@ -393,7 +393,7 @@
+ % spec:21 "completed-unit prerequisites (completed_units)"; handoff:19
+ holds(submit, prerequisites, S, submit(_, RI, _, _, _, _)) :-
+     pool_config(S, C), recipe_of(C, RI, r(_, _, _, _, _, Req)),
+-    forall(member(p(P, U), Req), ( completed_units(S, P, N), N >= U )).
++    forall(member(p(P, U), Req), ( completed_units(S, P, N), N > U )).
  holds(submit, reserve_arith, S, Op) :- submit_next(S, Op, _).
  holds(submit, envelope_arith, S, Op) :- submit_envelope(S, Op, _, _).
  holds(submit, bounds, S, Op) :-

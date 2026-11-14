@@ -3,7 +3,7 @@
 # expect: test_requirements C-1 authority
 --- a/source-mirror/crates/core/src/lib.rs
 +++ b/source-mirror/crates/core/src/lib.rs
-@@ -346,7 +346,7 @@
+@@ -407,7 +407,7 @@
      pub fn dispatch(&mut self, caller: &str, id: u32, now: u64) -> Result<(), Error> {
          let c = self.record(id)?;
          let r = &self.config.recipes[c.recipe as usize];

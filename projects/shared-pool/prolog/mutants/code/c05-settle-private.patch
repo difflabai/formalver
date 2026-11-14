@@ -3,7 +3,7 @@
 # expect: test_requirements C-1 authority
 --- a/source-mirror/crates/contract/src/lib.rs
 +++ b/source-mirror/crates/contract/src/lib.rs
-@@ -136,6 +136,7 @@
+@@ -143,6 +143,7 @@
              near_sdk::serde_json::json!({"id":id,"outcome":status,"error":update.err().map(|e|e.to_string())}),
          );
      }

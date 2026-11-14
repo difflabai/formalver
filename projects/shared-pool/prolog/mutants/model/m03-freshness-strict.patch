@@ -4,12 +4,12 @@
 # expect: test_mc2 MC-2: all traces replay
 --- a/prolog/model/pool_machine.pl
 +++ b/prolog/model/pool_machine.pl
-@@ -344,7 +344,7 @@
+@@ -427,7 +427,7 @@
  fresh(S, Now) :-
-     S = pool(config(_, MaxAge, _, _, _), _, _, Obs, _, _),
+     S = pool(config(_, MaxAge, _, _, _), _, _, Obs, _, _, _, _),
      (   MaxAge =:= 0 -> true
 -    ;   sat_add64(Obs, MaxAge, Lim), Now =< Lim
 +    ;   sat_add64(Obs, MaxAge, Lim), Now < Lim
      ).
  
- % --- dispatch (spec:37)
+ % --- dispatch (spec:39)

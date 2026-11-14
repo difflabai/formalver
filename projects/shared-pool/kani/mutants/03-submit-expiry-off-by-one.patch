@@ -2,7 +2,7 @@
 # candidate: a request expiring now is accepted (<= became <)
 --- a/crates/core/src/lib.rs
 +++ b/crates/core/src/lib.rs
-@@ -236,7 +236,7 @@
+@@ -271,7 +271,7 @@
          if req.version != self.version {
              return Err(Error::Stale);
          }

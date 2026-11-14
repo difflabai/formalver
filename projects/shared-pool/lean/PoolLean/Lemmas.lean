@@ -176,6 +176,31 @@ theorem sumN_set (f : α → Nat) (l : List α) (k : Nat) (x : α) (hk : k < l.l
       simp only [List.set_cons_succ, sumN_cons, List.getElem_cons_succ]
       have := ih k (by simpa using hk); omega
 
+theorem sumN_append (f : α → Nat) (l₁ l₂ : List α) : sumN f (l₁ ++ l₂) = sumN f l₁ + sumN f l₂ := by
+  induction l₁ with
+  | nil => simp
+  | cons a l ih => simp [ih]; omega
+
+theorem sumN_le_mul {f : α → Nat} {c : Nat} {l : List α} (h : ∀ x ∈ l, f x ≤ c) :
+    sumN f l ≤ c * l.length := by
+  induction l with
+  | nil => simp
+  | cons a l ih =>
+    simp only [sumN_cons, List.length_cons, Nat.mul_succ]
+    have := h a (by simp); have := ih (fun x hx => h x (by simp [hx])); omega
+
+theorem sumN_eq_zero {f : α → Nat} {l : List α} (h : ∀ x ∈ l, f x = 0) : sumN f l = 0 := by
+  have := sumN_le_mul (c := 0) (fun x hx => Nat.le_of_eq (h x hx)); omega
+
+theorem le_sumN {f : α → Nat} {l : List α} {x : α} (hx : x ∈ l) : f x ≤ sumN f l := by
+  induction l with
+  | nil => simp at hx
+  | cons a l ih =>
+    simp only [sumN_cons]
+    rcases List.mem_cons.mp hx with rfl | hx
+    · omega
+    · have := ih hx; omega
+
 /-- Updating an entry that counts zero never lowers a sum. -/
 theorem sumN_set_ge (f : α → Nat) (l : List α) (k : Nat) (x : α)
     (h0 : ∀ h : k < l.length, f l[k] = 0) : sumN f l ≤ sumN f (l.set k x) := by
@@ -235,78 +260,90 @@ theorem sumI_setStatus (f : Rec → Int) {l : List Rec} {k : Nat} (hk : k < l.le
 
 /-! ## The envelope -/
 
-theorem envS_append_new (f : Int → Int) (cfg : Cfg A) (recs : List Rec) (r u exp i : Nat) :
-    envS f cfg (recs ++ [⟨recs.length, r, u, exp, .reserved⟩]) none i =
-      envS f cfg recs none i + f (dlt cfg r u i) := by
+theorem envS_append_new (t : Nat → Nat → Nat → Int) (recs : List Rec) (r u exp i : Nat) :
+    envS t (recs ++ [⟨recs.length, r, u, exp, .reserved⟩]) none i = envS t recs none i + t r u i := by
   simp [envS, sumI_append, inEnv, Status.isOpen]
 
 /-- Removing record `k` from the envelope (the code's `skip`). -/
-theorem envS_split (f : Int → Int) (cfg : Cfg A) {recs : List Rec} {k : Nat} (hk : k < recs.length)
+theorem envS_split (t : Nat → Nat → Nat → Int) {recs : List Rec} {k : Nat} (hk : k < recs.length)
     (hid : ∀ j (h : j < recs.length), recs[j].id = j) (i : Nat) :
-    envS f cfg recs none i = envS f cfg recs (some k) i +
-      (if recs[k].status.isOpen then f (dlt cfg recs[k].recipe recs[k].units i) else 0) := by
-  let T : Rec → Int := fun c => if c.status.isOpen then f (dlt cfg c.recipe c.units i) else 0
-  have h1 : envS f cfg recs (some k) i =
+    envS t recs none i = envS t recs (some k) i +
+      (if recs[k].status.isOpen then t recs[k].recipe recs[k].units i else 0) := by
+  let T : Rec → Int := fun c => if c.status.isOpen then t c.recipe c.units i else 0
+  have h1 : envS t recs (some k) i =
       sumI (fun c => T c - (if c.id = k then T c else 0)) recs := by
     apply sumI_congr; intro c _
     by_cases h : c.id = k
     · simp [T, inEnv, h]
     · have h' : k ≠ c.id := fun e => h e.symm
       simp [T, inEnv, h, h']
-  have h2 : envS f cfg recs none i = sumI T recs := by
+  have h2 : envS t recs none i = sumI T recs := by
     apply sumI_congr; intro c _; simp [T, inEnv]
   have h3 := sumI_id T recs 0 k (by simpa using hid) (by omega) (by omega)
   rw [h1, h2, sumI_sub, h3]
   simp [T]
 
 /-- Closing record `k` (completed or cancelled) is skipping it. -/
-theorem envS_close (f : Int → Int) (cfg : Cfg A) {recs : List Rec} {k : Nat} (hk : k < recs.length)
+theorem envS_close (t : Nat → Nat → Nat → Int) {recs : List Rec} {k : Nat} (hk : k < recs.length)
     (hid : ∀ j (h : j < recs.length), recs[j].id = j) {st : Status} (hst : st.isOpen = false)
-    (i : Nat) : envS f cfg (setStatus recs k st) none i = envS f cfg recs (some k) i := by
-  have := envS_split f cfg hk hid i
+    (i : Nat) : envS t (setStatus recs k st) none i = envS t recs (some k) i := by
+  have := envS_split t hk hid i
   simp only [envS] at this ⊢
   rw [sumI_setStatus _ hk]
   simp [inEnv, hst] at this ⊢
   omega
 
 /-- Moving record `k` between open statuses leaves the envelope alone. -/
-theorem envS_open (f : Int → Int) (cfg : Cfg A) {recs : List Rec} {k : Nat} (hk : k < recs.length)
+theorem envS_open (t : Nat → Nat → Nat → Int) {recs : List Rec} {k : Nat} (hk : k < recs.length)
     {st : Status} (h1 : recs[k].status.isOpen = true) (h2 : st.isOpen = true) (i : Nat) :
-    envS f cfg (setStatus recs k st) none i = envS f cfg recs none i := by
+    envS t (setStatus recs k st) none i = envS t recs none i := by
   simp only [envS]
   rw [sumI_setStatus _ hk]
   simp [inEnv, h1, h2]
 
-theorem envS_min_nonpos (cfg : Cfg A) (recs : List Rec) (skip : Option Nat) (i : Nat) :
-    envS (fun x => min 0 x) cfg recs skip i ≤ 0 :=
-  sumI_nonpos fun c _ => by dsimp only; split <;> omega
+/-- With no record open, the envelope is empty. -/
+theorem envS_closed (t : Nat → Nat → Nat → Int) {recs : List Rec} (h : anyOpen recs = false)
+    (skip : Option Nat) (i : Nat) : envS t recs skip i = 0 := by
+  simp only [anyOpen, List.any_eq_false, Bool.not_eq_true] at h
+  simp only [envS]
+  rw [sumI_congr (g := fun _ => 0) (fun c hc => by simp [inEnv, h c hc]), sumI_zero]
 
-theorem envS_max_nonneg (cfg : Cfg A) (recs : List Rec) (skip : Option Nat) (i : Nat) :
-    0 ≤ envS (fun x => max 0 x) cfg recs skip i :=
-  sumI_nonneg fun c _ => by dsimp only; split <;> omega
+theorem loT_nonpos (cfg : Cfg A) (r u i : Nat) : loT cfg r u i ≤ 0 := by
+  simp only [loT]; omega
 
-theorem extraD_min_nonpos (cfg : Cfg A) (e : Option (Nat × Nat)) (i : Nat) :
-    extraD (fun x => min 0 x) cfg e i ≤ 0 := by
+theorem hiT_nonneg (cfg : Cfg A) (r u i : Nat) : 0 ≤ hiT cfg r u i := by
+  simp only [hiT]; omega
+
+theorem envS_lo_nonpos (cfg : Cfg A) (recs : List Rec) (skip : Option Nat) (i : Nat) :
+    envS (loT cfg) recs skip i ≤ 0 :=
+  sumI_nonpos fun c _ => by have := loT_nonpos cfg c.recipe c.units i; split <;> omega
+
+theorem envS_hi_nonneg (cfg : Cfg A) (recs : List Rec) (skip : Option Nat) (i : Nat) :
+    0 ≤ envS (hiT cfg) recs skip i :=
+  sumI_nonneg fun c _ => by have := hiT_nonneg cfg c.recipe c.units i; split <;> omega
+
+theorem extraT_lo_nonpos (cfg : Cfg A) (e : Option (Nat × Nat)) (i : Nat) :
+    extraT (loT cfg) e i ≤ 0 := by
   cases e with
-  | none => simp [extraD]
-  | some p => obtain ⟨r, u⟩ := p; simp [extraD]; omega
+  | none => simp [extraT]
+  | some p => obtain ⟨r, u⟩ := p; exact loT_nonpos cfg r u i
 
-theorem extraD_max_nonneg (cfg : Cfg A) (e : Option (Nat × Nat)) (i : Nat) :
-    0 ≤ extraD (fun x => max 0 x) cfg e i := by
+theorem extraT_hi_nonneg (cfg : Cfg A) (e : Option (Nat × Nat)) (i : Nat) :
+    0 ≤ extraT (hiT cfg) e i := by
   cases e with
-  | none => simp [extraD]
-  | some p => obtain ⟨r, u⟩ := p; simp [extraD]; omega
+  | none => simp [extraT]
+  | some p => obtain ⟨r, u⟩ := p; exact hiT_nonneg cfg r u i
 
 theorem low_le (cfg : Cfg A) (recs : List Rec) (v : List Int) (e : Option (Nat × Nat))
     (skip : Option Nat) (i : Nat) : low cfg recs v e skip i ≤ get v i := by
-  have := envS_min_nonpos cfg recs skip i
-  have := extraD_min_nonpos cfg e i
+  have := envS_lo_nonpos cfg recs skip i
+  have := extraT_lo_nonpos cfg e i
   simp only [low]; omega
 
 theorem le_high (cfg : Cfg A) (recs : List Rec) (v : List Int) (e : Option (Nat × Nat))
     (skip : Option Nat) (i : Nat) : get v i ≤ high cfg recs v e skip i := by
-  have := envS_max_nonneg cfg recs skip i
-  have := extraD_max_nonneg cfg e i
+  have := envS_hi_nonneg cfg recs skip i
+  have := extraT_hi_nonneg cfg e i
   simp only [high]; omega
 
 /-- PV ≤ EV: the envelope contains the candidate. -/
@@ -337,10 +374,33 @@ theorem envFail_false {cfg : Cfg A} {recs : List Rec} {v : List Int} {e : Option
       ∀ i < v.length, Bounded (low cfg recs v e k i) ∧ Bounded (high cfg recs v e k i) := by
   simp [envFail, anyLt_eq_false]
 
+/-- `check_bounds` passes: on every metric the envelope's violation is at
+most both the current values' and the candidate's. -/
 theorem boundsFail_false {cfg : Cfg A} {s : State} {v : List Int} {e : Option (Nat × Nat)}
     {k : Option Nat} : boundsFail cfg s v e k = false ↔
-      ∀ i < cfg.n, ev cfg s.records v e k i ≤ viol cfg s.values i := by
-  simp [boundsFail, anyLt_eq_false]
+      ∀ i < cfg.n, ev cfg s.records v e k i ≤ viol cfg s.values i ∧
+        ev cfg s.records v e k i ≤ viol cfg v i := by
+  simp only [boundsFail, anyLt_eq_false, decide_eq_false_iff_not, Int.not_lt]
+  constructor
+  · intro h i hi; have := h i hi; omega
+  · intro h i hi; have := h i hi; omega
+
+/-! ## The sub-box (`res_sub`'s arithmetic) -/
+
+/-- One metric of `res_sub`. The pre-state's envelope is `[v + L + lk, v + H
++ hk]`: `L ≤ 0 ≤ H` the other open records' terms and `lk = min(d, x, 0) ≤ 0
+≤ hk = max(d, x, 0)` record `k`'s. Closing `k` with delta `t ∈ {d, x}` (so
+`lk ≤ t ≤ hk`) moves the values to `v + t` and the envelope to `[v + t + L,
+v + t + H]`. If the pre-state's envelope violation equals the values' own
+(INV-RES), the post envelope lies inside the pre one, and its violation is
+at most both the old and the new values' violation. -/
+theorem sub_box {m M v L H lk hk t : Int} (hL : L ≤ 0) (hH : 0 ≤ H) (hlk : lk ≤ t)
+    (hhk : t ≤ hk) (hlk0 : lk ≤ 0) (hhk0 : 0 ≤ hk)
+    (hres : max 0 (m - (v + L + lk)) + max 0 (v + H + hk - M) = max 0 (m - v) + max 0 (v - M)) :
+    v + L + lk ≤ v + t + L ∧ v + t + H ≤ v + H + hk ∧
+    max 0 (m - (v + t + L)) + max 0 (v + t + H - M) ≤ max 0 (m - v) + max 0 (v - M) ∧
+    max 0 (m - (v + t + L)) + max 0 (v + t + H - M) ≤ max 0 (m - (v + t)) + max 0 (v + t - M) := by
+  omega
 
 /-! ## The ledger -/
 

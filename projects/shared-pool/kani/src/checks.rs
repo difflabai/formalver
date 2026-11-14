@@ -5,11 +5,13 @@
 
 use crate::gen::{self, ACK, CANCEL, DISPATCH, OBSERVE, PAUSE, SETTLE, SUBMIT};
 use crate::spec::{self, *};
+use crate::spec::VERSION_CAP;
 use crate::src::Src;
 use pool_core::*;
 
 /// `_tx`: exact result, TX-0, TX-NOOP, TX-VER, AUTH-1, STALE-1, ADM-1/2,
-/// DEP-1, PAUSE-1 (blocked ops), OBS-1.
+/// DEP-1, PAUSE-1 (blocked ops), OBS-1, OBS-2, REFRESH-1, and LIVE-ALL (on
+/// INV states).
 pub const PART_TX: u8 = 1;
 /// `_post`: exact post-state and frame, LIFE-1, ASYNC-1, TERM-1, HARD-STEP,
 /// PAUSE-1 (unaffected ops).
@@ -31,15 +33,24 @@ pub const PART_ALL: u8 = PART_TX | PART_POST | PART_INV | PART_COV | PART_REF;
 // Shared checks
 // ---------------------------------------------------------------------------
 
-/// Every state invariant, asserted one by one so Kani reports each.
+/// Every state invariant (K-D6), asserted one by one so Kani reports each.
+/// INV-HARD and INV-HEALTHY are corollaries (INV-RES and INV-PV give
+/// `EV <= PV <= B`); they are asserted in plain mode only.
 pub fn assert_inv(p: &Pool, g: &Ghost) {
-    assert!(spec::valid(&p.config), "INV-WF: config valid"); // PROP: INV-WF
-    assert!(spec::inv_wf(p, g), "INV-WF"); // PROP: INV-WF
+    assert!(spec::valid(&p.config), "INV-WF: config valid"); // PROP: INV-WF CFG-2
+    assert!(spec::win(p, g), "WIN-1: window and well-formedness"); // PROP: INV-WF WIN-1
     assert!(spec::inv_ledger(p, g), "INV-LEDGER"); // PROP: INV-LEDGER
-    assert!(spec::inv_hard(p, g), "INV-HARD"); // PROP: INV-HARD
-    assert!(spec::inv_healthy(p, g), "INV-HEALTHY"); // PROP: INV-HARD (corollary INV-HEALTHY)
-    assert!(spec::inv_dep(p), "INV-DEP"); // PROP: INV-DEP
+    assert!(spec::inv_res(p), "INV-RES: release-aware envelope at the current violation"); // PROP: INV-RES
+    assert!(spec::inv_pv(p, g), "INV-PV: no violation above the base's"); // PROP: INV-HARD (INV-PV)
+    assert!(spec::inv_vercap(p), "INV-VERCAP: version + remaining increments <= u32::MAX"); // PROP: INV-VERCAP
+    assert!(spec::inv_cu(p, g), "INV-CU: completed_units = min(lifetime, u32::MAX)"); // PROP: WIN-1 (INV-CU)
+    assert!(spec::inv_dep(p, g), "INV-DEP"); // PROP: INV-DEP
     assert!(spec::inv_ver(p, g), "INV-VER"); // PROP: INV-VER
+    #[cfg(not(kani))]
+    {
+        assert!(spec::inv_hard(p, g), "INV-HARD"); // PROP: INV-HARD (corollary)
+        assert!(spec::inv_healthy(p, g), "INV-HEALTHY"); // PROP: INV-HEALTHY (corollary, every outcome combination)
+    }
 }
 
 fn vals_of(p: &Pool) -> Vals {
@@ -50,7 +61,7 @@ fn vals_of(p: &Pool) -> Vals {
 /// makes it private; out-of-range ids).
 fn authorized(pre: &Pool, op: &Op) -> bool {
     let cfg = &pre.config;
-    let rec_recipe = |id: u32| spec::rec(&pre.records, id).map(|c| spec::rcp_of(cfg, c.recipe));
+    let rec_recipe = |id: u32| spec::rec(pre, id).map(|c| spec::rcp_of(cfg, c.recipe));
     match op {
         Op::Submit { caller, req, .. } => match spec::rcp(cfg, req.recipe) {
             Some(r) => spec::eq_str(caller, &r.actor),
@@ -119,8 +130,8 @@ pub fn check_tx(pre: &Pool, post: &Pool, op: &Op, res: &Res, x: &Exp) {
                         None => panic!("ADM-2: completion leaves the value range"),
                     }
                 }
-                // PROP: DEP-1
-                assert!(spec::prereqs_met(r, &pre.records), "DEP-1: prerequisites met by Completed units");
+                // PROP: DEP-1 (v1.1: the lifetime count, which a prune keeps)
+                assert!(spec::prereqs_met(r, &pre.completed_units), "DEP-1: prerequisites met by completed_units");
             }
         }
         Op::Dispatch { .. } => {
@@ -128,24 +139,70 @@ pub fn check_tx(pre: &Pool, post: &Pool, op: &Op, res: &Res, x: &Exp) {
                 assert!(!changed, "PAUSE-1: paused blocks dispatch"); // PROP: PAUSE-1
             }
         }
-        Op::Observe { .. } => {
+        Op::Observe { caller, vals, now } => {
+            let any_open = spec::any_open(&pre.records);
             if res.is_ok() {
-                // PROP: OBS-1
-                let mut any_open = false;
-                for c in &pre.records {
-                    if spec::open(&c.status) {
-                        any_open = true;
-                    }
-                }
-                assert!(!any_open, "OBS-1: observe only with no open record");
+                // PROP: OBS-1: new values only with no open record.
+                assert!(
+                    !any_open || spec::eq_i64s(&post.values, &pre.values),
+                    "OBS-1: observe changes the values only with no open record"
+                );
                 assert!(spec::same_config(&post.config, &pre.config), "OBS-1: config unchanged");
+                if any_open {
+                    // PROP: OBS-2 (frame of the refresh, F-6)
+                    assert!(
+                        spec::eq_i64s(&post.values, &pre.values)
+                            && post.records == pre.records
+                            && post.first_id == pre.first_id
+                            && spec::eq_u32s(&post.completed_units, &pre.completed_units)
+                            && post.paused == pre.paused
+                            && post.observed_at == *now,
+                        "OBS-2: a refresh with records open changes only observed_at and the version"
+                    );
+                }
+            }
+            // PROP: REFRESH-1: below the cap the owner can always restate the
+            // current values (F-6 fixed).
+            if spec::eq_str(caller, &pre.config.owner) && spec::eq_i64s(vals, &pre.values) && pre.version < VERSION_CAP {
+                assert!(res.is_ok(), "REFRESH-1: the owner's observe of the current values is Ok below the cap");
             }
         }
-        Op::Settle { completed: true, .. } => {
-            // PROP: INV-HARD (corollary): from an INV state, completing a
-            // record never fails Arithmetic except at version u32::MAX.
-            if *res == Err(Error::Arithmetic) {
-                assert!(pre.version == u32::MAX, "INV-HARD: settle(completed) Arithmetic only at version MAX");
+        _ => {}
+    }
+}
+
+/// LIVE-ALL (F-1, F-2, F-2b, F-5 fixed): from an INV state, with no premise
+/// on the base or the version, every open record can be resolved. An
+/// authorized cancel of a Reserved record is Ok, the executor's settle of a
+/// Dispatched, Active or Unknown record is Ok either way, and the
+/// acknowledgment of a Dispatched or Unknown record never fails Arithmetic.
+/// In v1.0 these failed Bounds or Arithmetic (the `h_wedge*` covers and
+/// "cancel: Bounds"/"settle: Arithmetic"); they are assertions now (K-D3).
+/// Not for WF states (`wf_step`), where the release check may fail.
+pub fn check_live(pre: &Pool, op: &Op, res: &Res) {
+    match op {
+        Op::Cancel { id, .. } => {
+            if let Some(c) = spec::rec(pre, *id) {
+                if c.status == Status::Reserved && authorized(pre, op) {
+                    // PROP: LIVE-ALL
+                    assert!(res.is_ok(), "LIVE-ALL: an authorized cancel of a Reserved record is Ok");
+                }
+            }
+        }
+        Op::Settle { id, .. } => {
+            if let Some(c) = spec::rec(pre, *id) {
+                if matches!(c.status, Status::Dispatched | Status::Active | Status::Unknown) && authorized(pre, op) {
+                    // PROP: LIVE-ALL
+                    assert!(res.is_ok(), "LIVE-ALL: the executor's settle of an in-flight record is Ok, either way");
+                }
+            }
+        }
+        Op::Ack { id, .. } => {
+            if let Some(c) = spec::rec(pre, *id) {
+                if matches!(c.status, Status::Dispatched | Status::Unknown) {
+                    // PROP: LIVE-ALL INV-VERCAP
+                    assert!(*res != Err(Error::Arithmetic), "LIVE-ALL: acknowledging an in-flight record never fails Arithmetic");
+                }
             }
         }
         _ => {}
@@ -157,20 +214,45 @@ pub fn check_post(pre: &Pool, post: &Pool, op: &Op, res: &Res, x: &Exp) {
     // PROP: TX-SUBMIT TX-DISPATCH TX-ACK TX-CANCEL TX-SETTLE TX-PAUSE TX-OBSERVE (post-state, frame)
     assert!(spec::post_matches(pre, post, x), "TX: exact post-state and frame");
 
-    // PROP: LIFE-1
+    // PROP: LIFE-1 WIN-2
     let k = pre.records.len();
+    // `s`: records pruned from the front (0 or 1). Only a submit at 256
+    // records prunes, so on the Kani step domains (at most 3 records) it is
+    // asserted to be 0 and the loops below are v1.0's; `h_full_256_prune`
+    // checks the prune.
+    #[cfg(kani)]
+    let s = {
+        assert!(post.first_id == pre.first_id, "WIN-2: no prune below 256 records");
+        0usize
+    };
+    #[cfg(not(kani))]
+    let s = {
+        let s = post.first_id.wrapping_sub(pre.first_id) as usize;
+        assert!(s <= 1, "WIN-2: at most one record pruned per step");
+        if s == 1 {
+            assert!(
+                matches!(op, Op::Submit { .. }) && res.is_ok() && k == spec::MAXREC,
+                "WIN-2: only an accepted submit at 256 records prunes"
+            );
+            assert!(spec::terminal(&pre.records[0].status), "WIN-2: a pruned record was terminal");
+        }
+        s
+    };
     assert!(
-        post.records.len() == k || post.records.len() == k + 1,
-        "LIFE-1: records are append-only, at most one per step"
+        post.records.len() + s == k || post.records.len() + s == k + 1,
+        "LIFE-1: records are append-only (a prune drops the front), at most one per step"
     );
-    if post.records.len() == k + 1 {
+    if post.records.len() + s == k + 1 {
         assert!(matches!(op, Op::Submit { .. }), "LIFE-1: only submit appends");
-        let c = &post.records[k];
-        assert!(c.id as usize == k && c.status == Status::Reserved, "LIFE-1: new record Reserved at id = index");
+        let c = &post.records[k - s];
+        assert!(
+            c.id as u64 == pre.first_id as u64 + k as u64 && c.status == Status::Reserved,
+            "LIFE-1: new record Reserved with id = first_id + len"
+        );
     }
     for j in 0..k {
-        if j < post.records.len() {
-            let (a, b) = (&pre.records[j], &post.records[j]);
+        if j >= s && j - s < post.records.len() {
+            let (a, b) = (&pre.records[j], &post.records[j - s]);
             assert!(
                 a.id == b.id && a.recipe == b.recipe && a.units == b.units && a.expires_at == b.expires_at,
                 "LIFE-1: id, recipe, units, expires_at immutable"
@@ -193,15 +275,22 @@ pub fn check_post(pre: &Pool, post: &Pool, op: &Op, res: &Res, x: &Exp) {
             assert!(spec::eq_i64s(&post.values, &pre.values), "ASYNC-1: acknowledge never changes values"); // PROP: ASYNC-1
         }
         Op::Cancel { id, .. } => {
-            if let Some(c) = spec::rec(&pre.records, *id) {
+            if let Some(c) = spec::rec(pre, *id) {
                 if authorized(pre, op) && matches!(c.status, Status::Dispatched | Status::Active | Status::Unknown) {
                     // PROP: ASYNC-1
                     assert!(*res == Err(Error::Pending), "ASYNC-1: in-flight records keep their reservation");
                 }
+                if authorized(pre, op) && c.status == Status::Completed {
+                    // PROP: TERM-1 (v1.1: conflicting terminal evidence, as in settle)
+                    assert!(
+                        *res == Err(Error::InvalidState) && spec::same_state(post, pre),
+                        "TERM-1: cancel of a Completed record is InvalidState and changes nothing"
+                    );
+                }
             }
         }
         Op::Settle { id, completed, .. } => {
-            if let Some(c) = spec::rec(&pre.records, *id) {
+            if let Some(c) = spec::rec(pre, *id) {
                 if authorized(pre, op) && spec::terminal(&c.status) {
                     // PROP: TERM-1
                     let same = (*completed && c.status == Status::Completed)
@@ -216,14 +305,20 @@ pub fn check_post(pre: &Pool, post: &Pool, op: &Op, res: &Res, x: &Exp) {
         }
         _ => {}
     }
-    // PROP: HARD-STEP
+    // PROP: HARD-STEP (v1.1: an accepted submit leaves every metric's
+    // violation as it was: its envelope holds both the current and the
+    // reserved values)
     if res.is_ok() && !matches!(op, Op::Observe { .. }) {
         let cfg = &pre.config;
         let (a, b) = (vals_of(pre), vals_of(post));
+        let submit = matches!(op, Op::Submit { .. });
         for i in 0..M {
             if i < spec::n(cfg) {
                 let m = &cfg.metrics[i];
                 assert!(spec::pv(m, b[i]) <= spec::pv(m, a[i]), "HARD-STEP: no metric's violation grows");
+                if submit {
+                    assert!(spec::pv(m, b[i]) == spec::pv(m, a[i]), "HARD-STEP: submit keeps every metric's violation");
+                }
             }
         }
     }
@@ -247,7 +342,10 @@ pub fn check_post(pre: &Pool, post: &Pool, op: &Op, res: &Res, x: &Exp) {
                 && y.observed_at == x.observed_at
                 && y.paused == !x.paused
                 && y.push == x.push
-                && y.status == x.status,
+                && y.prune == x.prune
+                && y.first_id == x.first_id
+                && y.status == x.status
+                && y.cu == x.cu,
             "PAUSE-1: the spec's outcome is independent of paused"
         );
         #[cfg(not(kani))]
@@ -267,11 +365,14 @@ fn covers(pre: &Pool, op: &Op, res: &Res, x: &Exp, g: &Ghost) {
     use Error::*;
     let w = x.why;
     let healthy = spec::healthy_base(&pre.config, g);
+    let cap = pre.version >= VERSION_CAP;
     match op {
-        Op::Submit { .. } => {
+        Op::Submit { req, .. } => {
+            let needs = matches!(spec::rcp(&pre.config, req.recipe), Some(r) if !r.requires.is_empty());
             cover!(res.is_ok() && !spec::violating(&pre.config, &vals_of(pre)), "submit: Ok");
             cover!(res.is_ok() && spec::violating(&pre.config, &vals_of(pre)), "submit: Ok in a violating state (recovery)");
             cover!(res.is_ok() && pre.records.len() >= 2, "submit: Ok with 2 earlier records");
+            cover!(res.is_ok() && needs, "submit: Prerequisite met by completed units");
             cover!(*res == Err(Paused), "submit: Paused");
             cover!(*res == Err(Stale), "submit: Stale");
             cover!(*res == Err(Expired), "submit: Expired");
@@ -282,7 +383,7 @@ fn covers(pre: &Pool, op: &Op, res: &Res, x: &Exp, g: &Ghost) {
             cover!(*res == Err(Prerequisite), "submit: Prerequisite");
             cover!(*res == Err(Arithmetic) && w == Why::Add, "submit: Arithmetic (reserve)");
             cover!(*res == Err(Arithmetic) && w == Why::Envelope, "submit: Arithmetic (envelope)");
-            cover!(*res == Err(Arithmetic) && w == Why::Version, "submit: Arithmetic (version)");
+            cover!(*res == Err(Arithmetic) && w == Why::Cap, "submit: Arithmetic (cap)");
             cover!(*res == Err(Bounds), "submit: Bounds");
             cover!(*res == Err(Energy) && w == Why::EnergyUp, "submit: Energy (increase)");
             cover!(*res == Err(Energy) && w == Why::Recovery, "submit: Energy (recovery rule)");
@@ -295,64 +396,63 @@ fn covers(pre: &Pool, op: &Op, res: &Res, x: &Exp, g: &Ghost) {
             cover!(*res == Err(InvalidState), "dispatch: InvalidState");
             cover!(*res == Err(Expired), "dispatch: Expired");
             cover!(*res == Err(SnapshotExpired), "dispatch: SnapshotExpired");
-            cover!(*res == Err(Arithmetic), "dispatch: Arithmetic (version)");
+            cover!(*res == Err(Arithmetic) && w == Why::Cap, "dispatch: Arithmetic (cap)");
         }
         Op::Ack { id, accepted } => {
-            let st = spec::rec(&pre.records, *id).map(|c| c.status.clone());
+            let st = spec::rec(pre, *id).map(|c| c.status.clone());
             cover!(res.is_ok() && w != Why::Noop && st == Some(Status::Dispatched) && *accepted, "ack: Dispatched -> Active");
             cover!(res.is_ok() && w != Why::Noop && st == Some(Status::Dispatched) && !*accepted, "ack: Dispatched -> Unknown");
             cover!(res.is_ok() && w != Why::Noop && st == Some(Status::Unknown), "ack: Unknown -> Active");
+            cover!(res.is_ok() && w != Why::Noop && cap, "ack: Ok at or above the cap");
             cover!(x.noop() && st == Some(Status::Unknown), "ack: no-op Unknown -> Unknown");
             cover!(x.noop() && st == Some(Status::Active), "ack: no-op on Active (late ack)");
             cover!(x.noop() && st == Some(Status::Completed), "ack: no-op on a terminal record");
             cover!(*res == Err(NotFound), "ack: NotFound");
-            cover!(*res == Err(Arithmetic), "ack: Arithmetic (version)");
         }
         Op::Cancel { .. } => {
             cover!(res.is_ok() && w == Why::Release, "cancel: Ok (released)");
+            cover!(res.is_ok() && w == Why::Release && !healthy, "cancel: Ok released after a disturbing observe");
+            cover!(res.is_ok() && w == Why::Release && cap, "cancel: Ok released at or above the cap");
             cover!(x.noop(), "cancel: no-op on Cancelled");
             cover!(*res == Err(NotFound), "cancel: NotFound");
             cover!(*res == Err(Unauthorized), "cancel: Unauthorized");
             cover!(*res == Err(Pending), "cancel: Pending");
-            cover!(*res == Err(Arithmetic) && w == Why::Add, "cancel: Arithmetic (release)");
-            cover!(*res == Err(Arithmetic) && w == Why::Envelope, "cancel: Arithmetic (envelope)");
-            cover!(*res == Err(Arithmetic) && w == Why::Version, "cancel: Arithmetic (version)");
-            cover!(*res == Err(Bounds), "cancel: Bounds (a dependent reservation blocks release)");
+            cover!(*res == Err(InvalidState) && w == Why::CancelCompleted, "cancel: InvalidState (Completed)");
         }
         Op::Settle { completed, .. } => {
             cover!(res.is_ok() && *completed && w != Why::Noop, "settle: Ok completed");
             cover!(res.is_ok() && *completed && w != Why::Noop && !healthy, "settle: Ok completed after a disturbing observe");
+            cover!(res.is_ok() && *completed && w != Why::Noop && cap, "settle: Ok completed at or above the cap");
             cover!(res.is_ok() && !*completed && w == Why::Release, "settle: Ok cancelled (released)");
+            cover!(res.is_ok() && !*completed && w == Why::Release && !healthy, "settle: Ok cancelled after a disturbing observe");
             cover!(x.noop() && *completed, "settle: no-op Completed again");
             cover!(x.noop() && !*completed, "settle: no-op Cancelled again");
             cover!(*res == Err(NotFound), "settle: NotFound");
             cover!(*res == Err(Unauthorized), "settle: Unauthorized");
             cover!(*res == Err(InvalidState) && w == Why::Plain, "settle: InvalidState (Reserved)");
             cover!(*res == Err(InvalidState) && w == Why::Opposite, "settle: InvalidState (opposite terminal)");
-            cover!(*res == Err(Bounds) && *completed, "settle: Bounds (completion)");
-            cover!(*res == Err(Bounds) && !*completed, "settle: Bounds (release)");
-            cover!(*res == Err(Arithmetic) && !*completed && w == Why::Add, "settle: Arithmetic (release)");
-            cover!(*res == Err(Arithmetic) && w == Why::Version, "settle: Arithmetic (version)");
         }
         Op::Pause { paused, .. } => {
             cover!(res.is_ok() && *paused, "pause: Ok pause");
             cover!(res.is_ok() && !*paused, "pause: Ok unpause");
             cover!(res.is_ok() && *paused == pre.paused, "pause: Ok without change still bumps");
             cover!(*res == Err(Error::Unauthorized), "pause: Unauthorized");
-            cover!(*res == Err(Error::Arithmetic), "pause: Arithmetic (version)");
+            cover!(*res == Err(Error::Arithmetic) && w == Why::Cap, "pause: Arithmetic (cap)");
         }
         Op::Observe { vals, .. } => {
             let viol = vals.len() == spec::n(&pre.config)
                 && vals.iter().all(|v| spec::bounded(*v as spec::Z))
                 && spec::violating(&pre.config, &spec::vals(&pre.config, vals));
+            let open = spec::any_open(&pre.records);
             cover!(res.is_ok() && !viol, "observe: Ok");
             cover!(res.is_ok() && viol, "observe: Ok exposing a violation");
-            cover!(res.is_ok() && !pre.records.is_empty(), "observe: Ok after terminal records");
+            cover!(res.is_ok() && !pre.records.is_empty() && !open, "observe: Ok after terminal records");
+            cover!(res.is_ok() && open, "observe: Ok refresh with an open record");
             cover!(*res == Err(Unauthorized), "observe: Unauthorized");
-            cover!(*res == Err(Pending), "observe: Pending");
+            cover!(*res == Err(Pending), "observe: Pending (values differ, record open)");
             cover!(*res == Err(Bounds) && vals.len() != spec::n(&pre.config), "observe: Bounds (length)");
             cover!(*res == Err(Bounds) && vals.len() == spec::n(&pre.config), "observe: Bounds (value)");
-            cover!(*res == Err(Arithmetic), "observe: Arithmetic (version)");
+            cover!(*res == Err(Arithmetic) && w == Why::Cap, "observe: Arithmetic (cap)");
         }
     }
 }
@@ -373,6 +473,7 @@ pub fn step(src: &mut impl Src, kind: u32) {
     let res = spec::apply(&mut p, &op); // PROP: ROB-1 (Kani's panic, overflow and bounds checks, in every harness that calls the core)
     if c.part & PART_TX != 0 {
         check_tx(&pre, &p, &op, &res, &x);
+        check_live(&pre, &op, &res);
     }
     if c.part & PART_COV != 0 {
         covers(&pre, &op, &res, &x, &g);
@@ -408,17 +509,44 @@ pub fn step_ref(src: &mut impl Src, kind: u32) {
     refines(&pre, &g, &op, &res, &p);
 }
 
+/// The TLA+ ghost `(base, k0)` of a state with the Kani ghost `g`.
+/// SharedPool.tla folds a counted pruned record's contribution into `base`
+/// and moves `k0` past it (`Submit`); `spec::ghost_step` keeps that
+/// contribution in `pruned` and leaves `k0` (plan 2.2, K-D5). So the TLA+
+/// ghost is `base + pruned` and `max(k0, first_id)`: every id below
+/// `first_id` is pruned, and a record pruned with `id >= k0` is in
+/// `pruned`. Equal to `(base, k0)` on the INV domain (`first_id = 0`).
+pub fn tla_ghost(p: &Pool, g: &Ghost) -> ([i64; M], usize, u64) {
+    let nb = g.base.len();
+    assert!(nb <= M, "spec: the ghost base has at most M values");
+    let mut b = [0i64; M];
+    for i in 0..M {
+        if i < nb {
+            b[i] = g.base[i] + g.pruned[i];
+        }
+    }
+    let k0 = if g.k0 < p.first_id { p.first_id } else { g.k0 };
+    (b, nb, k0 as u64)
+}
+
 /// REF-1..3 for the step `pre --op--> post` (`tla::assert_refines` with
 /// the step bounds' image, `tla::TK`), and the `h_ref` covers.
 pub fn refines(pre: &Pool, g: &Ghost, op: &Op, res: &Res, post: &Pool) {
-    let w = crate::tla::assert_refines::<2, 2, 2, 2, 4>(pre, &g.base, g.k0, op, res, post); // PROP: REF-1 REF-2 REF-3
-    ref_covers(op, w);
+    let (b, nb, k0) = tla_ghost(pre, g);
+    let w = crate::tla::assert_refines::<2, 2, 2, 2, 4>(pre, &b[..nb], k0, op, res, post); // PROP: REF-1 REF-2 REF-3
+    ref_covers(pre, op, w);
 }
 
 /// The `h_ref` cover family: every value of each TLA+ error operator that
 /// the step domains reach ("Ok": the action is enabled, REF-2; "Noop" and
-/// every error: a stutter, REF-3). `Full` needs 256 records (`h_full_*`).
-fn ref_covers(op: &Op, w: crate::tla::TErr) {
+/// every error: a stutter, REF-3), and both ghost branches of `Observe`
+/// (the refresh keeps `base` and `k0`). `Full` and the prune need 256
+/// records (`h_full_*`, and the conformance traces in plain mode). From
+/// v1.1.0 no INV state reaches `AckErr`'s Arithmetic or `CancelErr`'s and
+/// `SettleErr`'s Arithmetic and Bounds (INV-VERCAP and INV-RES: LIVE-ALL,
+/// the F-2 and F-5 fixes; asserted by the `_tx` parts and `h_live_all`), so
+/// those values have no cover here; v1.0.0's did (its findings).
+fn ref_covers(pre: &Pool, op: &Op, w: crate::tla::TErr) {
     use crate::tla::TErr as W;
     match op {
         Op::Submit { .. } => {
@@ -449,16 +577,14 @@ fn ref_covers(op: &Op, w: crate::tla::TErr) {
             cover!(w == W::Ok, "ref ack: Ok (Ack enabled)");
             cover!(w == W::Noop, "ref ack: Noop");
             cover!(w == W::NotFound, "ref ack: NotFound");
-            cover!(w == W::Arithmetic, "ref ack: Arithmetic");
         }
         Op::Cancel { .. } => {
             cover!(w == W::Ok, "ref cancel: Ok (Cancel enabled)");
             cover!(w == W::Noop, "ref cancel: Noop");
             cover!(w == W::NotFound, "ref cancel: NotFound");
             cover!(w == W::Unauthorized, "ref cancel: Unauthorized");
+            cover!(w == W::InvalidState, "ref cancel: InvalidState (Completed)");
             cover!(w == W::Pending, "ref cancel: Pending");
-            cover!(w == W::Arithmetic, "ref cancel: Arithmetic");
-            cover!(w == W::Bounds, "ref cancel: Bounds");
         }
         Op::Settle { .. } => {
             cover!(w == W::Ok, "ref settle: Ok (Settle enabled)");
@@ -466,16 +592,16 @@ fn ref_covers(op: &Op, w: crate::tla::TErr) {
             cover!(w == W::NotFound, "ref settle: NotFound");
             cover!(w == W::Unauthorized, "ref settle: Unauthorized");
             cover!(w == W::InvalidState, "ref settle: InvalidState");
-            cover!(w == W::Arithmetic, "ref settle: Arithmetic");
-            cover!(w == W::Bounds, "ref settle: Bounds");
         }
         Op::Pause { .. } => {
             cover!(w == W::Ok, "ref pause: Ok (SetPaused enabled)");
             cover!(w == W::Unauthorized, "ref pause: Unauthorized");
             cover!(w == W::Arithmetic, "ref pause: Arithmetic");
         }
-        Op::Observe { .. } => {
-            cover!(w == W::Ok, "ref observe: Ok (Observe enabled)");
+        Op::Observe { vals, .. } => {
+            let refresh = spec::eq_i64s(vals, &pre.values) && spec::any_open(&pre.records);
+            cover!(w == W::Ok && !refresh, "ref observe: Ok (Observe enabled, re-base)");
+            cover!(w == W::Ok && refresh, "ref observe: Ok (Observe enabled, refresh keeps base and k0)");
             cover!(w == W::Unauthorized, "ref observe: Unauthorized");
             cover!(w == W::Pending, "ref observe: Pending");
             cover!(w == W::Bounds, "ref observe: Bounds");
@@ -506,17 +632,19 @@ pub fn step_observe(src: &mut impl Src) {
     step(src, OBSERVE)
 }
 
-/// `h_version_max_<op>`: an operation of kind `kind` (any kind if `None`)
-/// from an INV state at `version = u32::MAX`. PROP: TX-VER (no wrap: every
-/// effective transition fails Arithmetic), TX-NOOP (idempotent paths still
-/// succeed), TX-0. Under Kani one harness per kind: all seven kinds in one
-/// formula did not finish in 30 minutes (RESULTS.md, cost ladder).
-pub fn version_max(src: &mut impl Src, kind: Option<u32>) {
+/// `h_version_cap_<op>`: an operation of kind `kind` (any kind if `None`)
+/// from an INV state at `version >= VERSION_CAP`. PROP: VER-CAP (submit,
+/// dispatch, set_paused and observe fail Arithmetic and change nothing:
+/// the 768 increments above the cap are kept for the open records),
+/// INV-VERCAP and LIVE-ALL near the cap (ack, cancel and settle are exactly
+/// the spec's, never Arithmetic, and resolve every open record), TX-0. Under
+/// Kani one harness per kind (RESULTS.md, cost ladder).
+pub fn version_cap(src: &mut impl Src, kind: Option<u32>) {
     let c = src.cfg();
     let Some((mut p, _g)) = gen::inv_state(src, &c) else {
         return;
     };
-    assume!(p.version == u32::MAX);
+    assume!(p.version >= VERSION_CAP);
     let kind = match kind {
         Some(k) => k,
         None => src.below(gen::KINDS),
@@ -525,30 +653,153 @@ pub fn version_max(src: &mut impl Src, kind: Option<u32>) {
     let pre = gen::copy(&p);
     let x = spec::expected(&pre, &op);
     let res = spec::apply(&mut p, &op);
-    // Plain mode only (the Kani harnesses' code is unchanged).
+    // Plain mode only (the Kani harnesses' code is unchanged). Without the
+    // `h_ref` covers: at the cap most of them are unreachable (no submit is
+    // enabled).
     #[cfg(not(kani))]
     {
         if c.part & PART_REF != 0 {
-            let w = crate::tla::assert_refines::<2, 2, 2, 2, 4>(&pre, &_g.base, _g.k0, &op, &res, &p); // PROP: REF-1 REF-2 REF-3
-            assert!(w != crate::tla::TErr::Ok, "REF: no action is enabled at version MAX");
+            let (b, nb, k0) = tla_ghost(&pre, &_g);
+            crate::tla::assert_refines::<2, 2, 2, 2, 4>(&pre, &b[..nb], k0, &op, &res, &p); // PROP: REF-1 REF-2 REF-3
         }
     }
+    assert!(res == x.res, "TX: exact result at or above the cap");
+    if res.is_err() {
+        assert!(spec::same_state(&p, &pre), "TX-0: an error leaves the pool unchanged"); // PROP: TX-0
+    }
+    let capped = kind == SUBMIT || kind == DISPATCH || kind == PAUSE || kind == OBSERVE;
+    if capped {
+        // PROP: VER-CAP
+        assert!(res.is_err(), "VER-CAP: submit, dispatch, set_paused and observe fail at or above the cap");
+        assert!(spec::same_state(&p, &pre), "VER-CAP: nothing changes at or above the cap");
+    } else {
+        // PROP: INV-VERCAP
+        assert!(res != Err(Error::Arithmetic), "INV-VERCAP: ack, cancel and settle have their increment");
+        check_live(&pre, &op, &res); // PROP: LIVE-ALL (near the cap)
+        if x.effective() {
+            assert!(p.version as u64 == pre.version as u64 + 1, "TX-VER: effective Ok increments version by 1");
+        }
+    }
+    let ar = res == Err(Error::Arithmetic);
+    let eff = res.is_ok() && x.effective();
+    cover!(ar && kind == SUBMIT, "version cap: submit Arithmetic");
+    cover!(ar && kind == DISPATCH, "version cap: dispatch Arithmetic");
+    cover!(ar && kind == PAUSE, "version cap: pause Arithmetic");
+    cover!(ar && kind == OBSERVE, "version cap: observe Arithmetic");
+    cover!(eff && kind == ACK, "version cap: ack Ok");
+    cover!(eff && kind == CANCEL, "version cap: cancel Ok (released)");
+    cover!(eff && kind == SETTLE, "version cap: settle Ok");
+}
+
+/// `h_version_max_<op>`: an acknowledgment, cancel or settle (any of the
+/// three if `None`) from a WF state at `version = u32::MAX` (K-D2: INV
+/// states cannot have an open record there). PROP: TX-VER (no wrap: every
+/// effective transition fails Arithmetic), TX-NOOP (idempotent paths still
+/// succeed), TX-0.
+pub fn version_max(src: &mut impl Src, kind: Option<u32>) {
+    let c = src.cfg();
+    let Some((mut p, _g)) = gen::wf_state(src, &c) else {
+        return;
+    };
+    assume!(p.version == u32::MAX);
+    let kind = match kind {
+        Some(k) => k,
+        None => [ACK, CANCEL, SETTLE][src.below(3) as usize],
+    };
+    let op = gen::op(src, &p, kind, c.val);
+    let pre = gen::copy(&p);
+    let x = spec::expected(&pre, &op);
+    let res = spec::apply(&mut p, &op);
     assert!(res == x.res, "TX: exact result at version MAX");
     assert!(spec::same_state(&p, &pre), "TX-VER: at version MAX nothing changes (no wrap)"); // PROP: TX-VER TX-0
     if res.is_ok() {
         assert!(x.noop(), "TX-NOOP: only idempotent paths succeed at version MAX"); // PROP: TX-NOOP
     }
-    let ar = res == Err(Error::Arithmetic);
-    cover!(ar && kind == SUBMIT, "version max: submit Arithmetic");
-    cover!(ar && kind == DISPATCH, "version max: dispatch Arithmetic");
+    let ar = res == Err(Error::Arithmetic) && x.why == Why::Version;
     cover!(ar && kind == ACK, "version max: ack Arithmetic");
     cover!(ar && kind == CANCEL, "version max: cancel Arithmetic");
     cover!(ar && kind == SETTLE, "version max: settle Arithmetic");
-    cover!(ar && kind == PAUSE, "version max: pause Arithmetic");
-    cover!(ar && kind == OBSERVE, "version max: observe Arithmetic");
     cover!(res.is_ok() && kind == ACK, "version max: ack no-op Ok");
     cover!(res.is_ok() && kind == CANCEL, "version max: cancel no-op Ok");
     cover!(res.is_ok() && kind == SETTLE, "version max: settle no-op Ok");
+}
+
+/// `h_wf_<op>`: an operation of kind `kind` (any kind if `None`) from a WF
+/// state (K-D2): `first_id`, `completed_units`, values and the version free.
+/// TX exactness, TX-0, TX-NOOP, TX-VER and the exact post-state, on the
+/// paths INV makes dead: `index` with `first_id > 0` and pruned ids, the id
+/// overflow, a release that fails Bounds or Arithmetic, the saturating
+/// count. In plain mode also REF-1..3 (`PART_REF`). No INV, no LIVE-ALL
+/// (WF states need not be reachable).
+pub fn wf_step(src: &mut impl Src, kind: Option<u32>) {
+    let c = src.cfg();
+    let Some((mut p, _g)) = gen::wf_state(src, &c) else {
+        return;
+    };
+    let kind = match kind {
+        Some(k) => k,
+        None => src.below(gen::KINDS),
+    };
+    let op = gen::op(src, &p, kind, c.val);
+    let pre = gen::copy(&p);
+    let x = spec::expected(&pre, &op);
+    let res = spec::apply(&mut p, &op);
+    if c.part & PART_TX != 0 {
+        check_tx(&pre, &p, &op, &res, &x);
+    }
+    // Plain mode only (the Kani `h_wf_*` code is unchanged; their REF is
+    // not measured). REF-1..3 on WF states, with the placeholder ghost as
+    // the TLA+ ghost: the only REF checks that reach the transcription's
+    // id-overflow exit (`SubmitErr`'s last `Arithmetic`) and `DoneCap`
+    // (`Settle`'s `Min(@ + units, DoneCap)`), which INV states and the
+    // conformance traces do not.
+    #[cfg(not(kani))]
+    {
+        if c.part & PART_REF != 0 {
+            let (b, nb, k0) = tla_ghost(&pre, &_g);
+            let w = crate::tla::assert_refines::<2, 2, 2, 2, 4>(&pre, &b[..nb], k0, &op, &res, &p); // PROP: REF-1 REF-2 REF-3
+            let over = |r: u32, u: u32| pre.completed_units[r as usize] as u64 + u as u64 > u32::MAX as u64;
+            cover!(
+                w == crate::tla::TErr::Arithmetic && x.why == Why::IdOverflow,
+                "ref wf submit: Arithmetic (id overflow, firstId + NR > MaxVersion)"
+            );
+            cover!(
+                w == crate::tla::TErr::Ok
+                    && matches!(&op, Op::Settle { id, completed: true, .. }
+                        if matches!(spec::rec(&pre, *id), Some(r) if over(r.recipe, r.units))),
+                "ref wf settle(true): doneU saturates (@ + units > DoneCap)"
+            );
+        }
+    }
+    if c.part & PART_POST != 0 {
+        // PROP: TX-SUBMIT TX-DISPATCH TX-ACK TX-CANCEL TX-SETTLE (post-state on WF states)
+        assert!(spec::post_matches(&pre, &p, &x), "TX: exact post-state and frame (WF)");
+    }
+    if c.part & PART_COV != 0 {
+        let w = x.why;
+        let id_of = |op: &Op| match op {
+            Op::Dispatch { id, .. } | Op::Ack { id, .. } | Op::Cancel { id, .. } | Op::Settle { id, .. } => Some(*id),
+            _ => None,
+        };
+        let pruned = matches!(id_of(&op), Some(i) if i < pre.first_id);
+        let f = pre.first_id;
+        cover!(res == Err(Error::NotFound) && pruned, "wf: NotFound (pruned id)");
+        cover!(res.is_ok() && f > 0 && id_of(&op).is_some(), "wf: Ok on a record at first_id > 0");
+        cover!(res == Err(Error::Arithmetic) && w == Why::IdOverflow, "wf submit: Arithmetic (id overflow)");
+        cover!(
+            res == Err(Error::Bounds) && matches!(op, Op::Cancel { .. }),
+            "wf cancel: Bounds (release)"
+        );
+        cover!(
+            res == Err(Error::Arithmetic) && matches!(op, Op::Cancel { .. }) && w != Why::Version,
+            "wf cancel: Arithmetic (release)"
+        );
+        cover!(res == Err(Error::Bounds) && matches!(op, Op::Settle { .. }), "wf settle: Bounds");
+        cover!(
+            matches!(x.cu, Some((r, v)) if v == u32::MAX && (r as usize) < pre.completed_units.len() && pre.completed_units[r as usize] > u32::MAX - 100),
+            "wf settle(true): completed units saturate"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -602,9 +853,21 @@ pub fn init(src: &mut impl Src) {
         Err(e) => assert!(*e == Error::InvalidConfig, "CFG-1: new fails only InvalidConfig"),
         Ok(p) => {
             assert!(
-                spec::same_config(&p.config, &cfg) && p.version == 0 && p.observed_at == now && !p.paused && p.records.is_empty(),
+                spec::same_config(&p.config, &cfg)
+                    && p.version == 0
+                    && p.observed_at == now
+                    && !p.paused
+                    && p.records.is_empty()
+                    && p.first_id == 0,
                 "CFG-1: initial pool"
             );
+            let mut cu = p.completed_units.len() == cfg.recipes.len();
+            for (r, x) in p.completed_units.iter().enumerate() {
+                if r < cfg.recipes.len() && *x != 0 {
+                    cu = false;
+                }
+            }
+            assert!(cu, "CFG-1: completed_units zero, one per recipe");
             let mut ok = p.values.len() == cfg.metrics.len();
             for (i, m) in cfg.metrics.iter().enumerate() {
                 if i < p.values.len() && p.values[i] != m.initial {
@@ -669,6 +932,10 @@ pub fn validate(src: &mut impl Src) {
     if ok {
         let n = cfg.metrics.len();
         assert!(n >= 1 && !cfg.terms.is_empty() && !cfg.recipes.is_empty(), "CFG-2: nonempty");
+        for r in &cfg.recipes {
+            // PROP: CFG-2 (F-4 fixed)
+            assert!(!spec::eq_str(&r.actor, &r.executor), "CFG-2: actor != executor");
+        }
         for t in &cfg.terms {
             assert!((t.metric as usize) < n, "CFG-2: term metric in range");
             assert!(spec::bounded(t.target as spec::Z) && t.weight >= 1 && t.weight <= 1000, "CFG-2: term values");
@@ -697,10 +964,16 @@ pub fn validate(src: &mut impl Src) {
         }
     }
     cover!(ok, "validate: Ok");
-    // F-4: `validate` accepts a recipe whose actor is its executor.
+    // F-4 fixed: a recipe whose actor is its executor is refused (CFG-2:
+    // exactly the spec's validity, which requires actor != executor).
     cover!(
-        ok && !cfg.recipes.is_empty() && spec::eq_str(&cfg.recipes[0].actor, &cfg.recipes[0].executor),
-        "validate: Ok with actor = executor (F-4)"
+        !ok && cfg.recipes.len() == 1 && spec::eq_str(&cfg.recipes[0].actor, &cfg.recipes[0].executor),
+        "validate: InvalidConfig with actor = executor (F-4 fixed)"
+    );
+    // Q3: the owner may be a recipe's executor (a documented limit).
+    cover!(
+        ok && !cfg.recipes.is_empty() && spec::eq_str(&cfg.owner, &cfg.recipes[0].executor),
+        "validate: Ok with owner = executor (Q3)"
     );
     cover!(ok && cfg.recipes.len() == 3 && cfg.recipes[2].requires.len() == 2, "validate: Ok with two requirements");
     cover!(!ok && cfg.name.is_empty(), "validate: empty name");
@@ -888,8 +1161,9 @@ pub fn energy_max(_src: &mut impl Src) {
 
 /// `h_preview`: RD-PREVIEW. `allowed` iff the spec's admission accepts;
 /// `reason`, `candidate`, `before`, `after` and the term strings as coded;
-/// no mutation; allowed and version < MAX implies submit succeeds with the
-/// previewed candidate.
+/// no mutation; allowed implies submit succeeds with the previewed
+/// candidate (v1.1: the cap is in `candidate`, and the id overflow is dead
+/// on INV states).
 pub fn preview(src: &mut impl Src) {
     let c = src.cfg();
     let Some((p, _g)) = gen::inv_state(src, &c) else {
@@ -932,10 +1206,10 @@ pub fn preview(src: &mut impl Src) {
             }
             _ => panic!("RD-PREVIEW: candidate presence"),
         }
-        if d.allowed && p.version < u32::MAX {
+        if d.allowed {
             let mut q = gen::copy(&p);
             let r = q.submit(caller, req.clone(), now);
-            assert!(r.is_ok(), "RD-PREVIEW: allowed and version < MAX implies submit Ok");
+            assert!(r.is_ok(), "RD-PREVIEW: allowed implies submit Ok");
             assert!(
                 matches!(&d.candidate, Some(v) if spec::eq_i64s(&q.values, v)),
                 "RD-PREVIEW: submit reserves the previewed candidate"
@@ -975,6 +1249,7 @@ pub fn preview(src: &mut impl Src) {
         cover!(!d.allowed && d.candidate.is_none(), "preview: rejected without a candidate");
         cover!(rs.eq("Energy"), "preview: Energy");
         cover!(rs.eq("Bounds"), "preview: Bounds");
+        cover!(rs.eq("Arithmetic") && p.version >= VERSION_CAP, "preview: Arithmetic at the cap");
     }
 }
 
@@ -1127,14 +1402,12 @@ pub fn best(src: &mut impl Src) {
     }
     // Soundness: `got` is a request whose candidate is Ok. Under Kani that
     // is the stub's; with `h_preview` (candidate Ok iff the spec's) and
-    // `h_step_submit_tx` (submit is the spec's: Ok below `u32::MAX`) the
-    // core's submit accepts it. Plain mode calls submit.
+    // `h_step_submit_tx` (submit is the spec's: Ok whenever the candidate
+    // is) the core's submit accepts it. Plain mode calls submit.
     #[cfg(not(kani))]
     if let Some(r) = &got {
         let mut q = gen::copy(&p);
-        if p.version < u32::MAX {
-            assert!(q.submit(caller, r.clone(), now).is_ok(), "RD-BEST: sound (submit accepts it)");
-        }
+        assert!(q.submit(caller, r.clone(), now).is_ok(), "RD-BEST: sound (submit accepts it)");
     }
     cover!(got.is_none(), "best: None");
     cover!(matches!(&got, Some(r) if r.units == req.units), "best: all requested units");
@@ -1146,40 +1419,65 @@ pub fn best(src: &mut impl Src) {
 // Liveness, wedge, traces, limits, canary
 // ---------------------------------------------------------------------------
 
-/// `h_live1`: LIVE-1. From an INV state with `B = 0` and version < MAX, the
-/// executor can complete every Dispatched, Active or Unknown record.
-pub fn live1(src: &mut impl Src) {
+/// `h_live_all`: LIVE-ALL (F-1, F-2, F-2b and F-5 fixed). From any INV
+/// state, with no premise on the base or the version (INV-VERCAP is part of
+/// INV), every open record can be resolved by its roles: a Reserved record
+/// by a cancel of its actor or the owner, a Dispatched, Active or Unknown
+/// record by its executor's settle, either way. v1.0's LIVE-1 needed
+/// `B = 0`, version < MAX and settle(completed).
+pub fn live_all(src: &mut impl Src) {
     let c = src.cfg();
     let Some((mut p, g)) = gen::inv_state(src, &c) else {
         return;
     };
-    assume!(spec::healthy_base(&p.config, &g));
-    assume!(p.version < u32::MAX);
     assume!(!p.records.is_empty());
-    let id = src.below(p.records.len() as u32);
-    let c0 = spec::rec(&p.records, id).expect("in range").clone();
+    let j = src.below(p.records.len() as u32);
+    let id = p.first_id + j;
+    let c0 = p.records[j as usize].clone();
     let st = c0.status.clone();
-    assume!(matches!(st, Status::Dispatched | Status::Active | Status::Unknown));
-    let mut others = 0;
-    for c in &p.records {
-        if spec::open(&c.status) {
-            others += 1;
+    assume!(spec::open(&st));
+    let mut open = 0;
+    let mut done_other = false;
+    for r in &p.records {
+        if spec::open(&r.status) {
+            open += 1;
+        } else if r.status == Status::Completed {
+            done_other = true;
         }
     }
-    let ex = spec::rcp_of(&p.config, c0.recipe).executor.clone();
-    let r = p.settle(&ex, id, true);
-    // PROP: LIVE-1
-    assert!(r.is_ok(), "LIVE-1: the executor can complete an in-flight record");
-    cover!(st == Status::Dispatched, "live1: from Dispatched");
-    cover!(st == Status::Active, "live1: from Active");
-    cover!(st == Status::Unknown, "live1: from Unknown");
-    cover!(others >= 3, "live1: with two other open records");
+    let healthy = spec::healthy_base(&p.config, &g);
+    let cap = p.version >= VERSION_CAP;
+    let owner = p.config.owner.clone();
+    let r = spec::rcp_of(&p.config, c0.recipe);
+    let (actor, ex) = (r.actor.clone(), r.executor.clone());
+    let by_owner = src.bool();
+    let b = src.bool();
+    let res = if st == Status::Reserved {
+        p.cancel(if by_owner { &owner } else { &actor }, id, 0)
+    } else {
+        p.settle(&ex, id, b)
+    };
+    // PROP: LIVE-ALL
+    assert!(res.is_ok(), "LIVE-ALL: every open record can be resolved by its roles");
+    assert!(spec::terminal(&p.records[j as usize].status), "LIVE-ALL: the record is terminal");
+    let reserved = st == Status::Reserved;
+    cover!(reserved && by_owner, "live all: Reserved, cancelled by the owner");
+    cover!(reserved && !by_owner, "live all: Reserved, cancelled by the actor");
+    cover!(st == Status::Dispatched && b, "live all: Dispatched, completed");
+    cover!(st == Status::Dispatched && !b, "live all: Dispatched, released");
+    cover!(st == Status::Active && b, "live all: Active, completed");
+    cover!(st == Status::Active && !b, "live all: Active, released");
+    cover!(st == Status::Unknown && b, "live all: Unknown, completed");
+    cover!(st == Status::Unknown && !b, "live all: Unknown, released");
+    cover!(!healthy, "live all: a disturbed base (B > 0)");
+    cover!(cap, "live all: at or above the cap");
+    cover!(open >= 3, "live all: with two other open records");
+    cover!(
+        st == Status::Dispatched && !b && healthy && done_other,
+        "live all: the F-2 shape (a Dispatched position released beside a Completed record, B = 0)"
+    );
 }
 
-/// `h_wedge`: F-1 from `Pool::new`. After a disturbing `observe`, a recovery
-/// hedge is admitted and dispatched; then settle(completed), settle(cancelled),
-/// cancel and observe all fail, so the record can never become terminal and
-/// the pool is frozen for observations. The cover must be SATISFIED.
 /// The wedge harnesses' initial pool: `Pool::new(cfg, 100)` for a valid
 /// configuration. Under Kani the roles are fixed (owner `o_`, every actor
 /// `a1`, every executor `x1`) and `new`'s `Ok` value is built directly
@@ -1204,6 +1502,14 @@ fn wedge_new(cfg: Config) -> Pool {
     Pool::new(cfg, 100).expect("valid")
 }
 
+/// `h_wedge`: F-1 fixed, from `Pool::new`. v1.0's script (an observe,
+/// then a recovery hedge admitted and dispatched) reached a state where
+/// settle both ways failed Bounds and cancel and observe failed Pending.
+/// Now, after the same script, one exit call (any of the four) is asserted:
+/// settle(completed) Ok, settle(cancelled) Ok, the owner's observe of the
+/// current values Ok (the refresh), the owner's cancel Pending (in flight).
+/// A hedge the release term cannot cover is refused at admission instead
+/// (cover "submit refused with Bounds after a disturbing observe").
 pub fn wedge(src: &mut impl Src) {
     let c = src.cfg();
     let cfg = gen::init_config(src, &c);
@@ -1217,6 +1523,13 @@ pub fn wedge(src: &mut impl Src) {
         obs.push(gen::val(src, c.val));
     }
     let o1 = p.observe(&owner, obs, 100);
+    // B > 0: the observe put some metric outside its bounds.
+    let mut disturbed = false;
+    for i in 0..M {
+        if i < n && i < p.values.len() && spec::pv(&p.config.metrics[i], p.values[i] as Z) > 0 {
+            disturbed = true;
+        }
+    }
     let s = p.submit(
         &actor,
         Request {
@@ -1229,54 +1542,57 @@ pub fn wedge(src: &mut impl Src) {
     );
     let d = p.dispatch(&actor, 0, 100);
     let reached = o1.is_ok() && s == Ok(0) && d.is_ok();
-    let before = gen::copy(&p);
-    let st = p.settle(&ex, 0, true);
-    let sf = p.settle(&ex, 0, false);
-    let ca = p.cancel(&owner, 0, 100);
-    let vv = gen::copy_vec(&p.values, M + 1);
-    let ob = p.observe(&owner, vv, 100);
-    let wedged = reached
-        && st == Err(Error::Bounds)
-        && sf == Err(Error::Bounds)
-        && ca == Err(Error::Pending)
-        && ob == Err(Error::Pending);
-    if wedged {
-        assert!(spec::same_state(&p, &before), "F-1: the failed calls change nothing"); // PROP: TX-0
-        // The disturbed base, the reservation back inside, the record open.
-        assert!(p.records[0].status == Status::Dispatched, "F-1: record still open");
+    cover!(reached && disturbed, "wedge: disturbed state, hedge admitted and dispatched");
+    cover!(o1.is_ok() && disturbed && s == Err(Error::Bounds), "wedge: submit refused with Bounds after a disturbing observe");
+    if reached {
+        let k = src.below(4);
+        let r = match k {
+            0 => p.settle(&ex, 0, true),
+            1 => p.settle(&ex, 0, false),
+            2 => {
+                let vv = gen::copy_vec(&p.values, M + 1);
+                p.observe(&owner, vv, 100)
+            }
+            _ => p.cancel(&owner, 0, 100),
+        };
+        // PROP: LIVE-ALL REFRESH-1 ASYNC-1 (F-1 fixed)
+        if k < 3 {
+            assert!(r.is_ok(), "F-1 fixed: settle either way and the refresh are Ok after the hedge is dispatched");
+        } else {
+            assert!(r == Err(Error::Pending), "ASYNC-1: the owner's cancel of the in-flight hedge is Pending");
+        }
+        cover!(k == 1 && disturbed, "wedge: the dispatched hedge is released in a disturbed state");
     }
-    // F-1 (finding): must be SATISFIED.
-    cover!(wedged, "wedge: F-1 reachable (settle both ways Bounds, cancel and observe Pending)");
-    cover!(reached, "wedge: disturbed state, hedge admitted and dispatched");
 }
 
-/// `h_wedge_healthy`: F-2 from `Pool::new`, with no observe (so `B = 0`
-/// throughout). A position (recipe 0) and a hedge (recipe 1) are admitted and
-/// dispatched; the hedge completes, relying on the position's reservation.
-/// Then the executor's honest `settle(position, cancelled)` fails `Bounds`
-/// (its release would push the point outside `[min, max]`), `cancel` fails
-/// `Pending` and `observe` fails `Pending`: under an honest executor the
-/// position can never become terminal. `settle(completed)` still succeeds
-/// (LIVE-1 is unaffected). The cover must be SATISFIED. Under Kani the last
-/// three calls run from every healthy INV state with a Dispatched record 0
-/// and a Completed record 1 (the state the script reaches).
+/// `h_wedge_healthy`: F-2 fixed. v1.0: a position (recipe 0) and a hedge
+/// (recipe 1) are admitted and dispatched, the hedge completes relying on
+/// the position's reservation, and then the executor's honest
+/// settle(position, cancelled) failed Bounds while cancel and observe
+/// failed Pending: the position could never become terminal. v1.1: from
+/// the same state the owner's cancel is Pending (in flight), the owner's
+/// observe of the current values is Ok (the refresh), and settle(position,
+/// cancelled) is Ok. Under Kani from every healthy INV state below the cap
+/// with a Dispatched record 0 and a Completed record 1 (the state the
+/// script reaches); plain mode runs the script from `Pool::new` on random
+/// configurations (the small instance of v1.0 is now refused at the
+/// hedge's admission, `f2_small_instance`).
 pub fn wedge_healthy(src: &mut impl Src) {
     let c = src.cfg();
     // Under Kani from a healthy INV state (deviation 19): with the script
     // from `Pool::new` every step's outcome is symbolic, so the record
     // vector's length is too from the first submit on, and the nine calls on
-    // the core ran out of 40 GB, even on one concrete configuration. Plain
-    // mode runs the script from `Pool::new` on random configurations.
+    // the core ran out of 40 GB, even on one concrete configuration.
     #[cfg(kani)]
     {
         let Some((mut p, g)) = gen::inv_state(src, &c) else {
             return;
         };
         assume!(spec::healthy_base(&p.config, &g));
-        assume!(p.version < u32::MAX);
+        assume!(p.version < VERSION_CAP);
         assume!(p.records.len() == 2);
         assume!(p.records[0].status == Status::Dispatched && p.records[1].status == Status::Completed);
-        let _ = wedge_healthy_tail(&mut p);
+        wedge_healthy_tail(&mut p);
     }
     #[cfg(not(kani))]
     {
@@ -1285,41 +1601,38 @@ pub fn wedge_healthy(src: &mut impl Src) {
     }
 }
 
-/// The calls of F-2 on a state in which record 0 (the position) is open:
-/// the executor's honest `settle(cancelled)`, the owner's `cancel`, and
-/// `observe`. True iff they fail `Bounds`, `Pending` and `Pending`. Plain
-/// mode also asserts TX-0 for them and LIVE-1 for the position; under Kani
-/// those are `h_step_{settle,cancel,observe}_tx`'s and `h_live1`'s over the
-/// same states (INV, `B = 0`, version < MAX, a Dispatched record).
-fn wedge_healthy_tail(p: &mut Pool) -> bool {
+/// The calls of F-2 on a state in which record 0 (the position) is
+/// Dispatched, below the cap: the owner's cancel (Pending), the owner's
+/// observe of the current values (Ok), the executor's settle(cancelled)
+/// (Ok, F-2 fixed). Plain mode also checks the other way out: settle
+/// (completed) from the same state is Ok.
+fn wedge_healthy_tail(p: &mut Pool) {
     let caller = |s: &str| spec::ACCTS.iter().copied().find(|a| *a == s).unwrap_or("z_");
     let owner = caller(&p.config.owner);
     let x0 = caller(&spec::rcp_of(&p.config, p.records[0].recipe).executor);
     #[cfg(not(kani))]
-    let before = gen::copy(p);
-    let sf = p.settle(x0, 0, false);
+    {
+        let mut q = gen::copy(p);
+        assert!(q.settle(x0, 0, true).is_ok(), "LIVE-ALL: settle(completed) of the position is Ok");
+    }
     let ca = p.cancel(owner, 0, 100);
     let vv = gen::copy_vec(&p.values, M + 1);
     let ob = p.observe(owner, vv, 100);
-    let wedged = sf == Err(Error::Bounds) && ca == Err(Error::Pending) && ob == Err(Error::Pending);
-    #[cfg(not(kani))]
-    if wedged {
-        assert!(spec::same_state(p, &before), "F-2: the failed calls change nothing"); // PROP: TX-0
-        assert!(p.records[0].status == Status::Dispatched, "F-2: position still open");
-        // PROP: LIVE-1 (unaffected by F-2): the executor can still complete it.
-        let mut q = gen::copy(p);
-        assert!(q.settle(x0, 0, true).is_ok(), "LIVE-1: settle(completed) still Ok");
-    }
-    // F-2 (finding): must be SATISFIED.
-    cover!(wedged, "wedge healthy: F-2 reachable (settle(cancelled) Bounds, cancel and observe Pending, B = 0)");
-    wedged
+    let sf = p.settle(x0, 0, false);
+    // PROP: ASYNC-1 REFRESH-1 LIVE-ALL (F-2 fixed)
+    assert!(ca == Err(Error::Pending), "ASYNC-1: the owner's cancel of the in-flight position is Pending");
+    assert!(ob.is_ok(), "REFRESH-1: the owner restates the current values with the position open");
+    assert!(sf.is_ok(), "F-2 fixed: the executor's settle(cancelled) of the position is Ok");
+    assert!(p.records[0].status == Status::Cancelled, "F-2 fixed: the position is released");
+    cover!(true, "wedge healthy: the position releases (F-2 fixed)");
 }
 
-/// A small F-2 instance (plain mode, `f2_small_instance`): one metric in
-/// `[0, 4]` from 2, target 4 (weight 1); a position (recipe 0) reserving +2,
-/// and a hedge
-/// (recipe 1) reserving nothing and completing -3, which is in bounds only
-/// with the position's reservation (4 - 3 = 1, while 2 - 3 = -1 is not).
+/// The small F-2 instance of v1.0 (plain mode, `f2_small_instance`): one
+/// metric in `[0, 4]` from 2, target 4 (weight 1); a position (recipe 0)
+/// reserving +2, and a hedge (recipe 1) reserving nothing and completing -3,
+/// which is in bounds only with the position's reservation (4 - 3 = 1,
+/// while 2 - 3 = -1 is not). v1.1 counts the position's release in the
+/// hedge's envelope, so the hedge is refused (Bounds).
 pub fn f2_instance() -> Config {
     let recipe = |name: &str, reserve: i64, complete: i64| pool_core::Recipe {
         name: name.into(),
@@ -1351,10 +1664,13 @@ pub fn f2_instance() -> Config {
     }
 }
 
-/// The F-2 script from `Pool::new(cfg)`; true iff the wedge is reached.
-pub fn wedge_healthy_on(cfg: Config) -> bool {
+/// The F-2 script from `Pool::new(cfg)`, each step against the spec; if
+/// every step is accepted (the hedge admitted with the position's release
+/// counted), the tail. Returns the results of the five script calls.
+pub fn wedge_healthy_on(cfg: Config) -> Vec<Res> {
+    let mut out = Vec::new();
     if cfg.recipes.len() < 2 {
-        return false;
+        return out;
     }
     let mut p = wedge_new(cfg);
     let mut g = Ghost::init(&p);
@@ -1374,8 +1690,6 @@ pub fn wedge_healthy_on(cfg: Config) -> bool {
         Op::Dispatch { caller: caller(&a1), id: 1, now: 100 },
         Op::Settle { caller: caller(&x1), id: 1, completed: true },
     ];
-    // Each step against the spec, and the reached state against INV with
-    // its ghost.
     let mut reached = true;
     for op in &script {
         let pre = gen::copy(&p);
@@ -1383,18 +1697,20 @@ pub fn wedge_healthy_on(cfg: Config) -> bool {
         let res = spec::apply(&mut p, op);
         assert!(res == x.res, "TX: exact result along the F-2 script");
         g = spec::ghost_step(&g, &pre, op, &x);
+        assert_inv(&p, &g);
         if res.is_err() {
             reached = false;
         }
+        out.push(res);
+        if !reached {
+            return out;
+        }
     }
-    if !reached {
-        return false;
-    }
-    // A healthy INV state: no observe, so B = 0 (PROP: INV-HARD).
+    // A healthy INV state: no observe, so B = 0.
     assert!(spec::healthy_base(&p.config, &g), "F-2: B = 0 (no observe)");
-    assert_inv(&p, &g);
     cover!(true, "wedge healthy: position and hedge dispatched, hedge completed");
-    wedge_healthy_tail(&mut p)
+    wedge_healthy_tail(&mut p);
+    out
 }
 
 /// `h_bmc_from_init` (plain mode): up to `depth` operations of any kind
@@ -1427,7 +1743,8 @@ pub fn bmc_from_init(src: &mut impl Src, depth: usize) {
         if let Some(pre) = &pre {
             // PROP: REF-1 REF-2 REF-3 (plain mode: this body is plain-only;
             // up to `depth` records, so an image of 8)
-            crate::tla::assert_refines::<2, 2, 2, 2, 8>(pre, &g.base, g.k0, &op, &res, &p);
+            let (b, nb, k0) = tla_ghost(pre, &g);
+            crate::tla::assert_refines::<2, 2, 2, 2, 8>(pre, &b[..nb], k0, &op, &res, &p);
         }
         g = h;
         assert!(res == x.res, "TX: exact result along the trace");
@@ -1526,10 +1843,18 @@ pub fn bmc_two(src: &mut impl Src, first: u32, last: Option<u32>) {
         }
     }
     if let Some(cm) = &x0.push {
-        if spec::rec(&p.records, 0) != Some(cm) {
+        if spec::rec(&p, 0) != Some(cm) {
             same = false;
         }
     }
+    let nr = p.config.recipes.len();
+    let mut completed_units = Vec::with_capacity(gen::MAX_R as usize + 1);
+    for r in 0..gen::MAX_R as usize + 1 {
+        if r < nr {
+            completed_units.push(0);
+        }
+    }
+    same = same && x0.cu.is_none() && p.first_id == 0 && spec::eq_u32s(&p.completed_units, &completed_units);
     assert!(same, "TX: exact post-state along the trace");
     let req0 = match &op0 {
         Op::Submit { req, .. } => Some(req.clone()),
@@ -1562,6 +1887,8 @@ pub fn bmc_two(src: &mut impl Src, first: u32, last: Option<u32>) {
         observed_at: x0.observed_at,
         paused: x0.paused,
         records,
+        first_id: 0,
+        completed_units,
     };
     assert_inv(&p, &g1);
     let k1 = match last {
@@ -1594,21 +1921,23 @@ pub fn bmc_two(src: &mut impl Src, first: u32, last: Option<u32>) {
     cover!(two, "bmc: two accepted requests");
 }
 
-/// `h_slot_cycle_0`, `h_slot_cycle_2` (F-3, slot exhaustion): one
-/// submit/cancel cycle by a recipe's actor from a quiet state (no open
-/// record, every metric within `[min, max]`): `Pool::new` (`_0`), or an INV
-/// state with 2 records (`_2`). If the submit is accepted and the version is
-/// below `u32::MAX - 2`, the actor's cancel of the new record is accepted,
-/// the cycle's only lasting effects are one more record, Cancelled, and the
-/// version + 2 (values, `paused`, `observed_at` and the older records as
-/// before), and the same request at the new version is accepted again with
-/// the same reserved values. So an actor can repeat the cycle, each time
-/// one record more, until submit fails `Full` (`h_full_255`: still admitted
-/// at 255 Cancelled records; `h_full_256`: `Full` at 256), and no step
-/// removes a record (LIFE-1, `h_step_*_post`; observe included). As in
-/// `bmc_two`, each call after the first runs on the previous call's
-/// post-state rebuilt with constant shapes, after asserting that the core's
-/// post-state is that state (deviation 20).
+/// `h_slot_cycle_0`, `h_slot_cycle_2` (the F-3 cycle): one submit/cancel
+/// cycle by a recipe's actor from a quiet state (no open record, every
+/// metric within `[min, max]`): `Pool::new` (`_0`), or an INV state with 2
+/// records (`_2`). If the submit is accepted and the version is at least 2
+/// below the cap, the actor's cancel of the new record is accepted, the
+/// cycle's only lasting effects are one more record, Cancelled, and the
+/// version + 2 (values, `paused`, `observed_at`, `first_id`,
+/// `completed_units` and the older records as before), and the same
+/// request at the new version is accepted again with the same reserved
+/// values and the next id. In v1.0 an actor could repeat the cycle until
+/// submit failed `Full` at 256 records, for good (F-3). In v1.1 the cycle
+/// consumes no lifetime capacity: at 256 records with a terminal front the
+/// submit prunes the front (`h_full_256_prune`: Ok, WIN-2), and `Full`
+/// needs an open front (`h_full_256`); plain `f3_slot_exhaustion` runs 300
+/// cycles. As in `bmc_two`, each call after the first runs on the previous
+/// call's post-state rebuilt with constant shapes, after asserting that the
+/// core's post-state is that state (deviation 20).
 pub fn slot_cycle(src: &mut impl Src, from_init: bool) {
     let c = src.cfg();
     let p = if from_init {
@@ -1638,8 +1967,8 @@ pub fn slot_cycle(src: &mut impl Src, from_init: bool) {
         }
     }
     assume!(quiet);
-    // Three effective calls: the version stays below `u32::MAX` (F-5).
-    assume!(p.version < u32::MAX - 2);
+    // Three effective calls, the last a submit: below the cap (F-5).
+    assume!(p.version < VERSION_CAP - 2);
     let op = gen::op(src, &p, SUBMIT, c.val);
     let Op::Submit { caller, req, now } = &op else {
         return;
@@ -1660,7 +1989,9 @@ pub fn slot_cycle(src: &mut impl Src, from_init: bool) {
     let mut same = p.values.len() == n
         && p.version == pre.version + 1
         && p.records.len() == k + 1
-        && p.records.get(k) == Some(&cm);
+        && p.records.get(k) == Some(&cm)
+        && p.first_id == pre.first_id
+        && spec::eq_u32s(&p.completed_units, &pre.completed_units);
     for i in 0..M {
         if i < n && i < p.values.len() && p.values[i] as Z != x.values[i] {
             same = false;
@@ -1691,12 +2022,14 @@ pub fn slot_cycle(src: &mut impl Src, from_init: bool) {
             observed_at: pre.observed_at,
             paused: pre.paused,
             records,
+            first_id: pre.first_id,
+            completed_units: gen::copy_vec(&pre.completed_units, gen::MAX_R as usize + 1),
         }
     };
     let Pool { config, .. } = p;
     let mut q = rebuild(config, &x.values, x.version, Status::Reserved);
     // The cycle's second call: the same caller (the actor) cancels it.
-    let ca = q.cancel(caller, k as u32, now);
+    let ca = q.cancel(caller, pre.first_id + k as u32, now);
     // PROP: F-3 (the cycle completes from a quiet state)
     assert!(ca == Ok(()), "F-3: the actor's cancel of its fresh record is accepted");
     let v0 = vals_of(&pre);
@@ -1728,7 +2061,7 @@ pub fn slot_cycle(src: &mut impl Src, from_init: bool) {
         },
         now,
     );
-    let mut repeat = again == Ok(k as u32 + 1) && q.values.len() == n;
+    let mut repeat = again == Ok(pre.first_id + k as u32 + 1) && q.values.len() == n;
     for i in 0..M {
         if i < n && i < q.values.len() && q.values[i] as Z != x.values[i] {
             repeat = false;
@@ -1749,126 +2082,240 @@ const fn old_record(j: usize) -> Commitment {
     }
 }
 
-/// `K` Cancelled records of recipe 0 with ids `0..K`, evaluated by the
-/// compiler: one constant array.
-const fn old_records<const K: usize>() -> [Commitment; K] {
+/// `K` Cancelled records of recipe 0 with ids `first..first + K`, evaluated
+/// by the compiler: one constant array.
+const fn old_records<const K: usize>(first: usize) -> [Commitment; K] {
     const C: Commitment = old_record(0);
     let mut a = [C; K];
     let mut j = 0;
     while j < K {
-        a[j].id = j as u32;
+        a[j].id = (first + j) as u32;
         j += 1;
     }
     a
 }
 
-/// The 257 records `full` starts from (then truncated to 255 or 256, so the
-/// buffer keeps room for a 257th record: the core's push never reallocates,
-/// on mutant 21 either).
-const OLD_RECORDS: [Commitment; 257] = old_records::<257>();
+/// The 257 records `full` starts from with `first_id = 0` (then truncated to
+/// 255 or 256, so the buffer keeps room for a 257th record: the core's push
+/// never reallocates, on mutant 21 either).
+const OLD_RECORDS: [Commitment; 257] = old_records::<257>(0);
 
-/// `h_full_255`, `h_full_256`: the record limit. With 255 or 256 terminal
-/// records (`at_limit`; either if `None`), submit is exactly as specified:
-/// Full at 256, admitted (when the guards pass) at 255. Under Kani the count
-/// is concrete: with a symbolic count every push was guarded, the length
-/// symbolic from the first record on, and 63 of the 256 pushes took 9
-/// minutes of symbolic execution (RESULTS.md, cost ladder). The records are
-/// one constant array moved into the vector (`Vec::from`, then `truncate`),
-/// not 255 pushes: with the field-sensitivity option of `run.sh` (each byte
-/// of the buffer its own symbol, so that the scans read constants) every
-/// push rewrote all 6,168 bytes of the buffer, and the pushes were most of
-/// the 8.05M steps of symbolic execution (RESULTS.md, deviation 21, cost
-/// ladder 28j).
-pub fn full(src: &mut impl Src, at_limit: Option<bool>) {
+/// The records of `h_full_256_prune`: ids `1..=257` (`first_id = 1`: id 0
+/// was pruned already), truncated to 256.
+const PRUNE_FIRST: u32 = 1;
+const PRUNE_RECORDS: [Commitment; 257] = old_records::<257>(PRUNE_FIRST as usize);
+
+/// Which record-limit harness `full` is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FullAt {
+    /// `h_full_255`: 255 records, the front's status free (open or terminal).
+    Below,
+    /// `h_full_256`: 256 records, an open front: Full.
+    OpenFront,
+    /// `h_full_256_prune`: 256 records with a terminal front, `first_id = 1`
+    /// and `completed_units[0]` free (completions of pruned records).
+    Prune,
+}
+
+/// `h_full_255`, `h_full_256`, `h_full_256_prune`: the window (WIN-1,
+/// WIN-2, WIN-ESC). Submit is exactly as specified at the record limit:
+/// below 256 records never Full, whatever the front; at 256 Full iff the
+/// front record is open; at 256 with a terminal front admitted when the
+/// guards pass, returning `first_id + 256`, the front pruned (the other 255
+/// records shifted, unchanged), `first_id + 1`, the pruned id NotFound and
+/// `completed_units` kept, so a prerequisite met by a pruned completion
+/// still counts (mutant 44). Under Kani the count is concrete: with a
+/// symbolic count every push was guarded, the length symbolic from the
+/// first record on, and 63 of the 256 pushes took 9 minutes of symbolic
+/// execution (RESULTS.md, cost ladder). The records are one constant array
+/// moved into the vector (`Vec::from`, then `truncate`), not 255 pushes:
+/// with the field-sensitivity option of `run.sh` (each byte of the buffer
+/// its own symbol, so that the scans read constants) every push rewrote all
+/// 6,168 bytes of the buffer (RESULTS.md, deviation 21, cost ladder 28j).
+pub fn full(src: &mut impl Src, at: Option<FullAt>) {
     let c = src.cfg();
+    let at = match at {
+        Some(a) => a,
+        None => [FullAt::Below, FullAt::OpenFront, FullAt::Prune][src.below(3) as usize],
+    };
     let cfg = gen::config(src, &c);
     let nm = cfg.metrics.len();
-    let count = match at_limit {
-        Some(true) => 256,
-        Some(false) => 255,
-        None => 255 + src.below(2) as usize,
+    let nr = cfg.recipes.len();
+    let (count, first) = match at {
+        FullAt::Below => (255usize, 0u32),
+        FullAt::OpenFront => (256, 0),
+        FullAt::Prune => (256, PRUNE_FIRST),
     };
-    let old = old_record;
-    let mut records = Vec::from(OLD_RECORDS);
+    let old = |j: usize| {
+        let mut r = old_record(j);
+        r.id = first + j as u32;
+        r
+    };
+    let mut records = Vec::from(if first == 0 { OLD_RECORDS } else { PRUNE_RECORDS });
     records.truncate(count);
+    // The front's status: a concrete-offset write.
+    let front = match at {
+        FullAt::Below => gen::status(src),
+        FullAt::OpenFront => match src.below(4) {
+            0 => Status::Reserved,
+            1 => Status::Dispatched,
+            2 => Status::Active,
+            _ => Status::Unknown,
+        },
+        FullAt::Prune => Status::Cancelled,
+    };
+    records[0].status = front.clone();
     let mut base = Vec::with_capacity(gen::MAX_M as usize);
     for _ in 0..nm {
         base.push(gen::val(src, c.val));
     }
-    // The ghost only feeds INV-WF below (plain mode).
-    #[cfg(not(kani))]
-    let g = Ghost {
-        base: base.clone(),
-        k0: count as u32,
-        eff: None,
-    };
+    let mut completed_units = Vec::with_capacity(gen::MAX_R as usize + 1);
+    for r in 0..gen::MAX_R as usize {
+        if r < nr {
+            // Free for recipe 0 with the prune (completions of pruned
+            // records); otherwise 0 (every retained record is Cancelled).
+            completed_units.push(if at != FullAt::Prune || r != 0 {
+                0
+            } else if src.hint(70) {
+                // Plain mode: usually enough for a requirement (1..=100).
+                100 + src.below(10)
+            } else {
+                src.u32()
+            });
+        }
+    }
+    let cu0 = if nr > 0 { completed_units[0] } else { 0 };
+    let version = src.u32();
+    // WIN-1: every record was a submit.
+    assume!(version as u64 >= first as u64 + count as u64);
     let mut p = Pool {
         config: cfg,
         values: base,
-        version: src.u32(),
+        version,
         observed_at: src.u64(),
         paused: src.bool(),
         records,
+        first_id: first,
+        completed_units,
     };
-    // INV-DEP holds by construction: every record is of recipe 0, which has
-    // no prerequisite (requirements point to earlier recipes). Under Kani it
-    // is not evaluated (quadratic in the 256 records; RESULTS.md, cost
-    // ladder).
+    // The ghost only feeds WIN-1 below (plain mode).
     #[cfg(not(kani))]
-    assert!(spec::inv_dep(&p), "harness: INV-DEP by construction");
+    let g = Ghost {
+        base: p.values.clone(),
+        k0: first,
+        eff: None,
+        pruned: [0; M],
+        done: [0; spec::GR],
+    };
+    #[cfg(not(kani))]
+    assert!(spec::win(&p, &g), "harness: WIN-1 by construction");
     let op = gen::op(src, &p, SUBMIT, c.val);
+    let needs0 = match &op {
+        Op::Submit { req, .. } => matches!(spec::rcp(&p.config, req.recipe), Some(r) if r.requires.iter().any(|(q, _)| *q == 0)),
+        _ => false,
+    };
     // The spec's outcome is computed from the pre-state before the call, and
     // the post-state is compared with it and with the known records: no copy
     // of the pool (a copy reads the 256 records back from the heap, and took
     // most of the symbolic execution; RESULTS.md, cost ladder).
     let x = spec::expected(&p, &op);
-    #[cfg(not(kani))]
-    let h = spec::ghost_step(&g, &p, &op, &x);
     // Under Kani the configuration is not compared (deviation 6: no step
     // changes it, `h_step_submit_post`); at this harness's unwind of 258 the
     // copy and the slice comparisons were unrolled about 257 times each.
     #[cfg(not(kani))]
     let cfg0 = gen::copy_config(&p.config);
+    #[cfg(not(kani))]
+    let h = spec::ghost_step(&g, &p, &op, &x);
     let res = spec::apply(&mut p, &op);
-    // PROP: TX-SUBMIT TX-0 TX-VER at the record limit
+    // PROP: TX-SUBMIT TX-0 TX-VER WIN-1 WIN-2 WIN-ESC at the record limit
     assert!(res == x.res, "TX: exact result at the record limit");
     #[cfg(not(kani))]
     assert!(spec::same_config(&p.config, &cfg0), "TX: configuration unchanged");
+    let pruned = res.is_ok() && at == FullAt::Prune;
+    let s = pruned as usize;
     let mut ok = p.values.len() == nm
         && p.version == x.version
         && p.observed_at == x.observed_at
         && p.paused == x.paused
-        && p.records.len() == count + x.push.is_some() as usize;
+        && p.records.len() + s == count + x.push.is_some() as usize
+        && p.first_id == first + s as u32
+        && p.completed_units.len() == nr
+        && (nr == 0 || p.completed_units[0] == cu0);
     for i in 0..M {
         if i < nm && i < p.values.len() && p.values[i] as spec::Z != x.values[i] {
             ok = false;
         }
     }
-    // A concrete trip count (`count`), not the post-state's length (255 or
-    // 256 after the conditional push).
-    for j in 0..count {
-        if p.records.get(j) != Some(&old(j)) {
-            ok = false;
+    // A concrete trip count, not the post-state's length (after the
+    // conditional push).
+    match at {
+        FullAt::Prune => {
+            // Either nothing moved (an error), or the other 255 records
+            // shifted down by one (the prune).
+            if pruned {
+                for j in 0..255 {
+                    if p.records.get(j) != Some(&old(j + 1)) {
+                        ok = false;
+                    }
+                }
+            } else {
+                for j in 0..256 {
+                    if p.records.get(j) != Some(&old(j)) {
+                        ok = false;
+                    }
+                }
+            }
+        }
+        _ => {
+            for j in 0..count {
+                let want = if j == 0 {
+                    Commitment {
+                        status: front.clone(),
+                        ..old(0)
+                    }
+                } else {
+                    old(j)
+                };
+                if p.records.get(j) != Some(&want) {
+                    ok = false;
+                }
+            }
         }
     }
     if let Some(cm) = &x.push {
-        if p.records.get(count) != Some(cm) {
+        if p.records.get(count - s) != Some(cm) {
             ok = false;
         }
     }
     assert!(ok, "TX: exact post-state at the record limit (unchanged on Err: TX-0)");
-    if res.is_ok() {
-        assert!(p.records.len() == 256, "TX-VER: 256th record");
-        // Under Kani INV-WF of the whole state is not evaluated: the 255
-        // old records are unchanged (above) and well formed by
-        // construction, the new one is the spec's, and the count is 256.
-        // The scan after the conditional push ran at about 4 records a
-        // minute (RESULTS.md, cost ladder).
-        #[cfg(not(kani))]
-        assert!(spec::inv_wf(&p, &h), "INV-WF: at most 256 records");
+    match at {
+        FullAt::Below => {
+            // PROP: WIN-1 (no Full below 256 records, whatever the front)
+            assert!(res != Err(Error::Full), "WIN-1: never Full below 256 records");
+            cover!(res.is_ok(), "full: Ok at 255 records");
+            cover!(res.is_ok() && spec::open(&front), "full: Ok at 255 records with an open front");
+        }
+        FullAt::OpenFront => {
+            // PROP: WIN-ESC (an open front blocks the window: Full once the
+            // earlier guards pass, exactly, above)
+            assert!(res.is_err() && x.push.is_none(), "WIN-ESC: no admission at 256 records with an open front");
+            cover!(res == Err(Error::Full), "full: Full at 256 records with an open front");
+        }
+        FullAt::Prune => {
+            // PROP: WIN-2 WIN-ESC
+            assert!(res != Err(Error::Full), "WIN-ESC: a terminal front is pruned, never Full");
+            if res.is_ok() {
+                assert!(res == Ok(Some(first + 256)), "WIN-2: the new id is first_id + 256");
+                assert!(p.record(first) == Err(Error::NotFound), "WIN-2: the pruned id is NotFound");
+                assert!(p.record(first + 1).is_ok(), "WIN-2: the next id is retained");
+            }
+            cover!(res.is_ok(), "full: Ok with prune");
+            cover!(res.is_ok() && needs0, "full: Ok with prune, prerequisite met by a pruned completion");
+            cover!(res == Err(Error::Prerequisite), "full: Prerequisite with prune (completed_units kept)");
+        }
     }
-    cover!(res == Err(Error::Full), "full: Full at 256 records");
-    cover!(res.is_ok(), "full: Ok at 255 records");
+    #[cfg(not(kani))]
+    assert!(spec::win(&p, &h), "WIN-1: the window after the step");
 }
 
 /// `h_canary`: must FAIL (on this assertion only): the generator and the core
@@ -1881,4 +2328,200 @@ pub fn canary(src: &mut impl Src) {
     let op = gen::op(src, &p, SUBMIT, c.val);
     let res = spec::apply(&mut p, &op);
     assert!(res.is_err(), "canary: no submit is ever accepted");
+}
+
+// ---------------------------------------------------------------------------
+// Window and cap walks (plain mode)
+// ---------------------------------------------------------------------------
+
+/// Plain mode: one step from an INV state with every shared check: the
+/// spec's exact outcome and frame (`_tx`, `_post`), LIVE-ALL, every
+/// invariant after the step with the ghost's update, and REF-1..3 on the
+/// window's image (256 records: the walks fill the window, prune, and meet
+/// prerequisites from pruned completions, which the Kani image `TK`, with
+/// `first_id = 0`, does not reach). The TLA+ ghost of the post-state from
+/// `spec::ghost_step` must be `tla::ghost_after`'s (plan 2.2: the Kani
+/// ghost's `pruned` is the TLA+ fold).
+#[cfg(not(kani))]
+pub fn checked_step(p: &mut Pool, g: &mut Ghost, op: &Op) -> Res {
+    let pre = p.clone();
+    let x = spec::expected(&pre, op);
+    let h = spec::ghost_step(g, &pre, op, &x);
+    let res = spec::apply(p, op);
+    check_tx(&pre, p, op, &res, &x);
+    check_live(&pre, op, &res);
+    check_post(&pre, p, op, &res, &x);
+    assert_inv(p, &h);
+    let (b, nb, k0) = tla_ghost(&pre, g);
+    // The image: 8 metrics, recipes and requirements (the fixtures of the
+    // F-tests), 64 terms (MAX_TERMS), 256 records.
+    crate::tla::assert_refines::<8, 64, 8, 8, 256>(&pre, &b[..nb], k0, op, &res, p); // PROP: REF-1 REF-2 REF-3
+    let ga = crate::tla::ghost_after::<M>(&pre, &b[..nb], k0, op, &res, p);
+    let (b2, nb2, k2) = tla_ghost(p, &h);
+    assert!(
+        ga.base[..ga.nb] == b2[..nb2] && ga.k0 == k2,
+        "REF ghost: spec::ghost_step's ghost is the TLA+ ghost (plan 2.2)"
+    );
+    *g = h;
+    res
+}
+
+#[cfg(not(kani))]
+fn acct_of(s: &str) -> &'static str {
+    spec::ACCTS.iter().copied().find(|a| *a == s).unwrap_or("z_")
+}
+
+/// Plain mode: LIVE-ALL on the open record `id` of `p`: a Reserved record
+/// cancelled by its actor or the owner, an in-flight one settled either way
+/// by its executor; asserted Ok and terminal (with every check of
+/// [`checked_step`]).
+#[cfg(not(kani))]
+pub fn resolve(src: &mut crate::src::Rng, p: &mut Pool, g: &mut Ghost, id: u32) {
+    let completed = src.bool();
+    resolve_as(src, p, g, id, completed)
+}
+
+/// [`resolve`] with the settle's outcome given.
+#[cfg(not(kani))]
+pub fn resolve_as(src: &mut crate::src::Rng, p: &mut Pool, g: &mut Ghost, id: u32, completed: bool) {
+    let c = p.record(id).expect("resolve: a retained record").clone();
+    let r = spec::rcp_of(&p.config, c.recipe);
+    let op = if c.status == Status::Reserved {
+        let who = if src.bool() { acct_of(&p.config.owner) } else { acct_of(&r.actor) };
+        Op::Cancel { caller: who, id, now: p.observed_at }
+    } else {
+        Op::Settle {
+            caller: acct_of(&r.executor),
+            id,
+            completed,
+        }
+    };
+    let res = checked_step(p, g, &op);
+    // PROP: LIVE-ALL
+    assert!(res.is_ok(), "LIVE-ALL: {op:?} on {:?} failed {res:?}", c.status);
+    assert!(spec::terminal(&p.record(id).expect("retained").status), "LIVE-ALL: the record is terminal");
+}
+
+/// Plain mode `window_walk`: `steps` operations of [`gen::window_op`] from
+/// `Pool::new` over [`gen::window_config`], long enough to fill the window
+/// and prune it many times. Every step: [`checked_step`] (exactness, frame,
+/// WIN-1/WIN-2 in `check_post`, LIVE-ALL, the full v1.1 INV including the
+/// ghost's `pruned` and `done` branches: INV-LEDGER and INV-CU across
+/// prunes). Every 20 steps LIVE-ALL on a random open record (on a copy).
+/// Every 120 steps the open records are resolved (mostly released), except
+/// those whose id is 7 mod 64 (so the front is sometimes open when the
+/// window fills), and the owner observes the initial values again (or
+/// refreshes, with such a record open), so that completions do not push the
+/// values into a corner where every submit fails Bounds.
+#[cfg(not(kani))]
+pub fn window_walk(src: &mut crate::src::Rng, steps: usize) {
+    let cfg = gen::window_config(src);
+    let initial: Vec<i64> = cfg.metrics.iter().map(|m| m.initial).collect();
+    let mut p = Pool::new(cfg, 100).expect("valid");
+    let mut g = Ghost::init(&p);
+    assert_inv(&p, &g);
+    for t in 0..steps {
+        if t % 120 == 119 {
+            let open: Vec<u32> = p
+                .records
+                .iter()
+                .filter(|c| spec::open(&c.status) && c.id % 64 != 7)
+                .map(|c| c.id)
+                .collect();
+            for id in open {
+                // Recipe 0 rarely completes (`gen::window_op`).
+                let r0 = matches!(spec::rec(&p, id), Some(c) if c.recipe == 0);
+                let completed = !r0 && src.hint(20);
+                resolve_as(src, &mut p, &mut g, id, completed);
+            }
+            let vals = if spec::any_open(&p.records) { p.values.clone() } else { initial.clone() };
+            let op = Op::Observe {
+                caller: acct_of(&p.config.owner),
+                vals,
+                now: p.observed_at,
+            };
+            if !p.paused && p.version < VERSION_CAP {
+                assert!(checked_step(&mut p, &mut g, &op).is_ok(), "window walk: the owner's observe");
+            }
+            continue;
+        }
+        let op = gen::window_op(src, &p);
+        let pre = p.clone();
+        let res = checked_step(&mut p, &mut g, &op);
+        let pruned = p.first_id != pre.first_id;
+        cover!(pruned, "window walk: a submit prunes the front");
+        cover!(res == Err(Error::Full), "window walk: Full at 256 records with an open front");
+        if let Op::Submit { req, .. } = &op {
+            let r = spec::rcp_of(&pre.config, req.recipe.min(pre.config.recipes.len() as u32 - 1));
+            let by_pruned = r.requires.iter().any(|(q, u)| spec::retained_done(&pre.records, *q) < *u as u64);
+            cover!(
+                res.is_ok() && req.recipe < pre.config.recipes.len() as u32 && by_pruned,
+                "window walk: a prerequisite met by pruned completions"
+            );
+            cover!(res.is_ok() && pre.first_id > 0, "window walk: a submit with first_id > 0");
+        }
+        let id = match &op {
+            Op::Dispatch { id, .. } | Op::Ack { id, .. } | Op::Cancel { id, .. } | Op::Settle { id, .. } => Some(*id),
+            _ => None,
+        };
+        cover!(
+            res == Err(Error::NotFound) && matches!(id, Some(i) if i < pre.first_id),
+            "window walk: NotFound on a pruned id"
+        );
+        cover!(
+            res.is_ok() && matches!(op, Op::Observe { .. }) && spec::any_open(&pre.records),
+            "window walk: a refresh with records open"
+        );
+        if t % 20 == 19 {
+            let open: Vec<u32> = p.records.iter().filter(|c| spec::open(&c.status)).map(|c| c.id).collect();
+            if !open.is_empty() {
+                let id = open[src.below(open.len() as u32) as usize];
+                let (mut q, mut h) = (p.clone(), g.clone());
+                resolve(src, &mut q, &mut h, id);
+            }
+        }
+    }
+}
+
+/// Plain mode `cap_walk`: INV-VERCAP and LIVE-ALL from just below the cap.
+/// A short window walk from `Pool::new` opens some records; the version is
+/// then set to `VERSION_CAP - k` (`k < 24`; INV-VER is no longer tracked,
+/// every other invariant still holds: Σ rem ≤ 768); the walk goes on, with
+/// [`checked_step`] and VER-CAP (submit, dispatch, set_paused and observe
+/// fail at or above the cap); at the end every open record is resolved.
+#[cfg(not(kani))]
+pub fn cap_walk(src: &mut crate::src::Rng, steps: usize) {
+    let cfg = gen::window_config(src);
+    let mut p = Pool::new(cfg, 100).expect("valid");
+    let mut g = Ghost::init(&p);
+    let warm = src.below(40);
+    for _ in 0..warm {
+        let op = gen::window_op(src, &p);
+        let _ = checked_step(&mut p, &mut g, &op);
+    }
+    p.version = VERSION_CAP - src.below(24);
+    g.eff = None;
+    assert_inv(&p, &g);
+    for _ in 0..steps {
+        let op = gen::window_op(src, &p);
+        let pre = p.clone();
+        let res = checked_step(&mut p, &mut g, &op);
+        let starts = matches!(op, Op::Submit { .. } | Op::Dispatch { .. } | Op::Pause { .. } | Op::Observe { .. });
+        if pre.version >= VERSION_CAP && starts {
+            // PROP: VER-CAP
+            assert!(res.is_err() && spec::same_state(&p, &pre), "VER-CAP: nothing starts at or above the cap");
+            cover!(res == Err(Error::Arithmetic), "cap walk: refused at the cap");
+        }
+        cover!(
+            res.is_ok() && pre.version >= VERSION_CAP && matches!(op, Op::Settle { .. } | Op::Cancel { .. }),
+            "cap walk: a record resolved above the cap"
+        );
+    }
+    // PROP: LIVE-ALL INV-VERCAP: every open record still resolves.
+    let open: Vec<u32> = p.records.iter().filter(|c| spec::open(&c.status)).map(|c| c.id).collect();
+    for id in open {
+        resolve(src, &mut p, &mut g, id);
+    }
+    assert!(!spec::any_open(&p.records), "LIVE-ALL: every record terminal");
+    cover!(p.version > VERSION_CAP, "cap walk: resolved records above the cap");
 }

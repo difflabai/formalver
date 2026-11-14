@@ -137,23 +137,29 @@ def status? : PT → Option Status
   | .atom "cancelled" => some .cancelled
   | _ => none
 
-/-- What the trace shows of a state: values, version, observed_at, paused,
-and each record's (recipe, units, expires_at, status); a record's id is its
-index. -/
-abbrev Obs := List Int × Nat × Nat × Bool × List (Nat × Nat × Nat × Status)
+/-- What the trace shows of a state (`s/7`): values, version, observed_at,
+paused, each retained record's (recipe, units, expires_at, status) (the
+window `State.win`: retained record `k` has id `first_id + k`), first_id,
+and completed_units per recipe. -/
+abbrev Obs :=
+  List Int × Nat × Nat × Bool × List (Nat × Nat × Nat × Status) × Nat × List Nat
 
 def crec? : PT → Option (Nat × Nat × Nat × Status)
   | .app "c" [r, u, e, st] => do pure (← r.nat?, ← u.nat?, ← e.nat?, ← status? st)
   | _ => none
 
 def state? : PT → Option Obs
-  | .app "s" [vs, ver, obs, p, cs] => do
-    pure (← ints vs, ← ver.nat?, ← obs.nat?, ← p.bool?, ← (← cs.list?).mapM crec?)
+  | .app "s" [vs, ver, obs, p, cs, fid, cu] => do
+    pure (← ints vs, ← ver.nat?, ← obs.nat?, ← p.bool?, ← (← cs.list?).mapM crec?,
+      ← fid.nat?, ← (← cu.list?).mapM PT.nat?)
   | _ => none
 
-def obs (s : State) : Obs :=
+/-- The model's state as the trace shows it: the window of the history, and
+`completed_units` as `doneU` (the lifetime count, saturated) per recipe. -/
+def obs {A : Type} (cfg : Cfg A) (s : State) : Obs :=
   (s.values, s.version, s.observedAt, s.paused,
-   s.records.map fun c => (c.recipe, c.units, c.expiresAt, c.status))
+   s.win.map (fun c => (c.recipe, c.units, c.expiresAt, c.status)),
+   s.firstId, (List.range cfg.recipes.length).map (doneU s))
 
 def op? : PT → Option (Op String)
   | .app "submit" [c, r, u, v, e, n] => do
@@ -212,8 +218,8 @@ def statusName : Status → String
 def intsText (v : List Int) : String := "[" ++ ",".intercalate (v.map toString) ++ "]"
 
 def obsText (o : Obs) : String :=
-  let (vs, ver, ob, p, cs) := o
+  let (vs, ver, ob, p, cs, fid, cu) := o
   let recs := cs.map fun (r, u, e, st) => s!"c({r},{u},{e},{statusName st})"
-  s!"s({intsText vs},{ver},{ob},{p},[{",".intercalate recs}])"
+  s!"s({intsText vs},{ver},{ob},{p},[{",".intercalate recs}],{fid},[{",".intercalate (cu.map toString)}])"
 
 end Pool.Text

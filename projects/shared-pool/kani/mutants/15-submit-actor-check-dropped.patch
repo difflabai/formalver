@@ -2,7 +2,7 @@
 # candidate: caller not checked against the recipe actor
 --- a/crates/core/src/lib.rs
 +++ b/crates/core/src/lib.rs
-@@ -255,9 +255,6 @@
+@@ -292,9 +292,6 @@
              .recipes
              .get(req.recipe as usize)
              .ok_or(Error::InvalidRecipe)?;

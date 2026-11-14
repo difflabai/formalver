@@ -57,7 +57,8 @@ timeout_s=${KANI_TIMEOUT:-1800}
 # are the largest SAT calls (h_step_settle_inv_3: one call of 1712 s).
 harness_timeout() {
   case "$1" in
-    h_step_*_inv_3) echo "${KANI_TIMEOUT:-7200}" ;;
+    # h_full_256_prune: at the _inv_3 level until measured (W11).
+    h_step_*_inv_3 | h_full_256_prune) echo "${KANI_TIMEOUT:-7200}" ;;
     *) echo "$timeout_s" ;;
   esac
 }
@@ -150,15 +151,16 @@ range_loops='^<std::ops::RangeInclusive<u32> as '
 # bound 2.
 shunt_loops='^<std::slice::Iter<.*pool_core::Term> as std::iter::Iterator>::try_fold::<[(][)], [{]closure@std::iter::adapters::map::map_try_fold'
 
-# `gen::copy_vec`'s loop over values, deltas, requirements, metrics or
-# terms, the slice equality over requirements and terms (`==` in
-# `spec::same_config`) and `spec::prereqs_met`'s loop over a recipe's
-# requirements (at most 3 elements under Kani), in the harnesses with a
+# `gen::copy_vec`'s loop over values, deltas, requirements, metrics, terms
+# or completed units, the slice equality over requirements and terms (`==`
+# in `spec::same_config`) and the spec's loops over a recipe's requirements
+# (`spec::prereqs_met`, `spec::prereqs_met_scan`) and over completed units
+# (`spec::cu_at`; at most 3 elements under Kani), in the harnesses with a
 # large unwind (h_full_*: 258, for the records; h_preview_post: 24): bound
 # 4. CBMC does not fold those vectors' lengths: at 258 each copy was
-# unrolled about 253 times, and `prereqs_met` ran its scan of the 255
-# records once per unrolled requirement.
-copy_loops='^gen::copy_vec::<(i64|[(]u32, u32[)]|pool_core::Metric|pool_core::Term)>$|^<([(]u32, u32[)]|pool_core::Term) as core::slice::cmp::SlicePartialEq<|^spec::prereqs_met$'
+# unrolled about 253 times, and in v1.0 `prereqs_met` ran its scan of the
+# 255 records once per unrolled requirement.
+copy_loops='^gen::copy_vec::<(i64|u32|[(]u32, u32[)]|pool_core::Metric|pool_core::Term)>$|^<([(]u32, u32[)]|pool_core::Term) as core::slice::cmp::SlicePartialEq<|^spec::(prereqs_met|prereqs_met_scan|cu_at)$'
 copy_bound() {
   case $1 in
     h_full_* | h_preview_post) echo 4 ;;
@@ -197,8 +199,17 @@ unwindset() {
                else if (fn ~ re) k = (fn ~ pre && b > 3 ? 3 : b); else if (fn ~ lre) k = 25; else if (fn ~ tre) k = 17; else if (fn ~ vre) k = 5; else if (fn ~ rre) k = 8; else if (cb != "" && fn ~ cre) k = cb
                if (k != "") printf "%s%s:%s", (n++ ? "," : ""), id, k
                id = "" }')
-  [ -n "$ids" ] && echo "-Z unstable-options --cbmc-args --unwindset $ids $(extra_cbmc "$2")"
+  echo "-Z unstable-options --cbmc-args --unwindset ${ids:+$ids,}$memcmp_loop $(extra_cbmc "$2")"
 }
+# The loop of CBMC's own `memcmp` (<builtin-library-memcmp>), which the
+# bytewise slice equalities call: `caller != r.actor` (account names of at
+# most 2 bytes) and, from v1.1.0, observe's `values != self.values`, 8 bytes
+# per value. CBMC links the library after codegen, so the loop is not in the
+# goto binary's --show-loops and gets the harness's bound (6), which
+# observe's comparison of 2 values (16 bytes) exceeds: an unwinding failure
+# (probe P5, v1.1). Bound 8 * 3 + 1, for vectors of up to 3 values. CBMC
+# only warns about the id where memcmp is not linked.
+memcmp_loop='memcmp.0:25'
 
 # codegen <dir>: compile every harness (the goto binaries unwindset reads).
 codegen() {
@@ -209,7 +220,7 @@ harnesses() {
   # Every #[kani::proof] fn h_* in proofs.rs, plus the harnesses the macros
   # generate (probe_* harnesses are excluded).
   { grep -A8 '#\[kani::proof\]' "$here/src/proofs.rs" | sed -n 's/^fn \(h_[a-z0-9_]*\)().*/\1/p'
-    grep -oE '\bh_(version_max|bmc_from_init)_[a-z_]+ = ' "$here/src/proofs.rs" | cut -d' ' -f1
+    grep -oE '\bh_(version_cap|version_max|wf|bmc_from_init)_[a-z_]+ = ' "$here/src/proofs.rs" | cut -d' ' -f1
     grep -oE '\bh_step_[a-z]+_(tx|post|inv|cov)\b' "$here/src/proofs.rs"
     grep -oE '\bh_step_[a-z]+_inv_[0-9]+ = ' "$here/src/proofs.rs" | cut -d' ' -f1
     grep -oE '\bh_ref_[a-z]+ = ' "$here/src/proofs.rs" | cut -d' ' -f1; } | awk '!seen[$0]++'
@@ -221,15 +232,21 @@ family() {
   # One family per body: the step bodies share one cover list (each step's
   # covers are reachable in its own `_cov` harness only).
   case $f in
-    h_step_*) f=h_step ;; h_version_max_*) f=h_version_max ;; h_full_*) f=h_full ;;
+    h_step_*) f=h_step ;; h_version_cap_*) f=h_version_cap ;; h_version_max_*) f=h_version_max ;;
+    h_wf_*) f=h_wf ;; h_full_*) f=h_full ;;
     h_bmc_from_init_*) f=h_bmc_from_init ;; h_slot_cycle_*) f=h_slot_cycle ;;
     h_ref_*) f=h_ref ;;
   esac
   echo "$f"
 }
 
+# Plain-mode test filter (plain and the mutants' plain runs): none.
+# h_ref_traces (conform.rs) replays conformance/traces/core.txt, the v1.1.0
+# corpus in s/7 form, against the core and tla.rs on every call.
+plain_skip=''
+
 do_plain() {
-  (cd "$here" && cargo test --release -q 2>&1) | tee "${PLAIN_LOG:-/dev/null}" | grep -E '^test |test result|panicked|unsatisfied' | grep -vE '\.\.\. ok$'
+  (cd "$here" && cargo test --release -q -- $plain_skip 2>&1) | tee "${PLAIN_LOG:-/dev/null}" | grep -E '^test |test result|panicked|unsatisfied' | grep -vE '\.\.\. ok$'
   return "${PIPESTATUS[0]}"
 }
 
@@ -383,7 +400,7 @@ do_mutants() {
     fi
     if grep -q '^# must-survive' "$p"; then expect=survive; else expect=killed; fi
     harnesses=$(sed -n 's/^# killed-by: //p; s/^# checked-by: //p' "$p")
-    (cd "$work/tree/kani" && cargo test --release -q) >"$work/plain.log" 2>&1
+    (cd "$work/tree/kani" && cargo test --release -q -- $plain_skip) >"$work/plain.log" 2>&1
     rc=$?
     [ -n "${KEEP_LOGS:-}" ] && cp "$work/plain.log" "$KEEP_LOGS/$name.plain.log"
     plain=$(plain_verdict $rc "$work/plain.log")

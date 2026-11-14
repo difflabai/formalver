@@ -56,34 +56,41 @@ c_check(Id, R) :-
 %%% C-1  Authority matrix: api.md table + spec:11 = shell attributes + core caller checks
 %%% ========================================================
 
-c_problems('C-1', Ps, [methods(NM), shell_methods(NS), core_caller_checks(NC), shell_core_calls(NK)]) :-
+c_problems('C-1', Ps, [methods(NM), shell_methods(NS), core_caller_checks(NC), shell_core_calls(NK),
+                        core_reads(NR)]) :-
     findall(P, c1_problem(P), Ps),
     count_where(x, method(_, _, _, _), NM),
     count_where(x, shell_method(_, _, _, _), NS),
     count_where(x, code_caller_check(_, _, _, _, _), NC),
-    count_where(x, shell_core_call(_, _, _, _), NK).
+    count_where(x, shell_core_call(_, _, _, _), NK),
+    count_where(x, ( shell_core_call(_, F, _, _), \+ code_fn(F, _, mut) ), NR).
 
 auth_roles(actor, [actor]).
 auth_roles(executor, [executor]).
 auth_roles(actor_or_owner, [actor, owner]).
 auth_roles(owner, [owner]).
 
-% api:5-18: the documented methods are exactly the shell's #[near] methods.
+% api:7-20: the documented methods are exactly the shell's #[near] methods.
 c1_problem(missing_shell_method(M)) :- method(M, _, _, _), \+ shell_method(M, _, _, _).
 c1_problem(undocumented_shell_method(M)) :- shell_method(M, _, _, _), \+ method(M, _, _, _).
-% api:3: all mutating methods are nonpayable (near-sdk default; #[payable] opts out).
+% api:5: all mutating methods are nonpayable (near-sdk default; #[payable] opts out).
 c1_problem(payable(M)) :- shell_method(M, _, Attrs, _), memberchk(payable, Attrs).
-% api:7, api:18, spec:11: initializer and callback are #[private]; views take &self.
+% api:9, api:20, spec:13: initializer and callback are #[private]; views take &self.
 c1_problem(shape(M, Kind, Attrs, Recv)) :-
     method(M, Kind, _, _), shell_method(M, _, Attrs, Recv),
     \+ kind_shape(Kind, M, Attrs, Recv).
-% spec:11: the wrapper authorizes by immediate predecessor.
+% spec:13: the wrapper authorizes by immediate predecessor.
 c1_problem(caller_helper(H)) :- shell_helper(caller, H, _), H \== predecessor_account_id.
 c1_problem(no_caller_helper) :- \+ shell_helper(caller, _, _).
-% A caller-checked method passes the predecessor to every core call it makes ...
+% Every core function the shell calls exists (Pool::clone is derived, not core code).
+c1_problem(core_call_unknown(M, F)) :-
+    shell_core_call(M, F, _, _), F \== clone, \+ code_fn(F, _, _).
+% A caller-checked method passes the predecessor to every mutating core call it
+% makes (v1.1.0: dispatch, reconcile and on_result also read `record(id)`, a
+% &self lookup that takes no caller; reads carry no authority) ...
 c1_problem(caller_source(M, F, Src)) :-
     method(M, change, Auth, _), auth_roles(Auth, _),
-    shell_core_call(M, F, Src, _), Src \== predecessor.
+    shell_core_call(M, F, Src, _), code_fn(F, _, mut), Src \== predecessor.
 c1_problem(no_core_call(M)) :-
     method(M, change, Auth, _), auth_roles(Auth, _), \+ shell_core_call(M, _, _, _).
 % ... and the core transition it drives checks exactly the documented roles
@@ -95,10 +102,11 @@ c1_problem(core_roles(M, F, expected(Exp), found(Found))) :-
     sort(Found0, Found),
     Found \== [Exp-and].
 c1_problem(core_error(F, E)) :- code_caller_check(F, _, _, _, E), E \== 'Unauthorized'.
-% api:18, spec:38-42: the private callback drives settle and acknowledge only,
-% settle with the recipe's own executor (authenticity: #[private], ASM-CALLBACK).
+% api:20, spec:40-44: the private callback drives settle and acknowledge only
+% (and reads the record), settle with the recipe's own executor (authenticity:
+% #[private], ASM-CALLBACK).
 c1_problem(callback_core(M, F)) :-
-    method(M, callback, _, _), shell_core_call(M, F, _, _), \+ method_core(M, F).
+    method(M, callback, _, _), shell_core_call(M, F, _, _), code_fn(F, _, mut), \+ method_core(M, F).
 c1_problem(callback_core_missing(M, F)) :-
     method(M, callback, _, _), method_core(M, F), \+ shell_core_call(M, F, _, _).
 c1_problem(callback_settle_caller(Src)) :-
@@ -112,15 +120,17 @@ c1_problem(undocumented_core_call(M, F)) :-
     shell_core_call(M, F, _, _), code_fn(F, _, mut), \+ method_core(M, F).
 c1_problem(documented_core_call_missing(M, F)) :-
     method_core(M, F), \+ shell_core_call(M, F, _, _).
-% spec:11: preview conveys no authorization: the core preview cannot mutate.
+% spec:13: preview conveys no authorization: the core preview cannot mutate.
 c1_problem(preview_mutates(R)) :- code_fn(preview, _, R), R \== ref.
 c1_problem(preview_not_view) :- \+ method(preview, view, _, _).
 
 kind_shape(init, _, A, _) :- memberchk(init, A), memberchk(private, A).
 kind_shape(callback, _, A, mut) :- memberchk(private, A), \+ memberchk(init, A).
 kind_shape(view, _, A, ref) :- \+ memberchk(private, A), \+ memberchk(init, A).
-% amb-reconcile-kind: reconcile is open to anyone and changes nothing itself.
-kind_shape(change, reconcile, [], ref) :- \+ shell_core_call(reconcile, _, _, _).
+% amb-reconcile-kind: reconcile is open to anyone and changes nothing itself
+% (it may read the record; it calls no mutating core function).
+kind_shape(change, reconcile, [], ref) :-
+    \+ ( shell_core_call(reconcile, F, _, _), code_fn(F, _, mut) ).
 kind_shape(change, M, [], mut) :- M \== reconcile.
 
 %% caller_check_reachable(+Fn, -Where, -Roles, -Mode): a caller check in Fn or in a
@@ -144,7 +154,14 @@ reach(F, G) :-
 %% (no calls) adjacent repeats of one error collapse: they are one check over
 %% several components. Error sites that cannot fire from an INV state are
 %% marked by unreachable/2 (decision c2-unreachable); they may be skipped or
-%% matched, every other site must match the specification in order.
+%% matched, every other site must match the specification in order. The
+%% specification leg also compares sites, not only outcome names: a guard with
+%% a documented condition (guard_condition/4: the record bound, the version
+%% cap) matches only a site whose extracted `if` condition (code_error_cond/4)
+%% is the same, and no other guard matches such a site. So observe's plain
+%% bump() in place of bump_new() (an Arithmetic site without the cap test), or
+%% a Full test without the open-front conjunct, fails C-2 although the outcome
+%% names still line up. The TLA+ leg has outcome names only.
 
 kind_code(submit,           submit,      none).
 kind_code(dispatch,         dispatch,    none).
@@ -205,32 +222,96 @@ flag_cond(C, _) :- throw(error(domain_error(flag_condition, C), tail_taken)).
 
 %% unreachable(+Item, -Rule): an error site that cannot fire from an INV state.
 unreachable(it('InvalidConfig', [add-_ | _]), add_length).
+% v1.0.0 frames [record-_, release-_]; v1.1.0 record() calls index() (lib.rs:393).
 unreachable(it('NotFound', [record-_, release-_ | _]), release_record).
+unreachable(it('NotFound', [index-_, record-_, release-_ | _]), release_record).
+% v1.1.0: a direct index(id)? in a function that already found the id through
+% record(id)? earlier in its own body (dispatch, acknowledge, release, settle).
+unreachable(it('NotFound', [index-_, F-L | _]), index_again) :-
+    F \== record, code_events(F, Es), member(c(record, L0), Es), L0 < L.
 unreachable(it(E, [energy_terms-_ | _]), energy_terms) :- memberchk(E, ['Bounds', 'Arithmetic']).
 unreachable(it('Arithmetic', [energy-_ | _]), energy_sum).
 unreachable(it('Arithmetic', [add-_, candidate-L | _]), recovery_add) :-
     code_events(candidate, Es), member(c(check_bounds, LB), Es), L > LB.
+% v1.1.0: bump() inside bump_new(), after bump_new's own cap check (an
+% Arithmetic site whose extracted condition is version >= VERSION_CAP).
+unreachable(it('Arithmetic', [bump-_, bump_new-L | _]), bump_below_cap) :-
+    cap_check(bump_new, LC), LC < L.
+% v1.1.0: the plain checked increment of acknowledge, release and settle.
+unreachable(it('Arithmetic', [bump-_, F-_ | _]), bump_reserve) :-
+    memberchk(F, [acknowledge, release, settle]).
+% v1.1.0: submit's own checked additions (lib.rs:362, 363-366), after a call
+% to candidate, whose last check is the cap check (straight-line: every Ok
+% return of candidate passed it, and nothing in between bumps the version).
+unreachable(it('Arithmetic', [submit-L | _]), submit_version_add) :-
+    code_checked_add(submit, L, version), cap_checked_before(submit, L).
+unreachable(it('Arithmetic', [submit-L | _]), submit_id_add) :-
+    code_checked_add(submit, L, first_id), cap_checked_before(submit, L).
+
+%% cap_check(?Fn, ?Line): an Arithmetic site of Fn whose `if` condition is the
+%% documented version cap (the same condition guard_condition/4 gives
+%% version_cap).
+cap_check(Fn, L) :-
+    code_error_cond(Fn, L, 'Arithmetic', CC),
+    once(spec_cond(_, version_cap, SC)), same_conds(SC, CC).
+cap_checked_before(Fn, L) :-
+    code_events(Fn, Es), member(c(G, LG), Es), LG < L, code_events(G, GEs),
+    append(_, [e('Arithmetic', LC)], GEs), cap_check(G, LC).
 
 %% unreachable_rule(Rule, Why, DischargedBy)
 unreachable_rule(add_length, "add's length check: every vector has length n in a valid config and an INV state", ['CFG-2', 'INV-WF']).
 unreachable_rule(release_record, "release looks the record up again after cancel/settle found it", []).
-unreachable_rule(energy_terms, "spec:13: residual <= 2e6, weight <= 1000, <= 64 terms; bounded values cannot overflow", ['NUM-1']).
-unreachable_rule(energy_sum, "spec:13: the sum of <= 64 terms of <= 4e15 fits u64", ['NUM-1']).
-unreachable_rule(recovery_add, "next + complete*units lies inside the envelope that already passed (spec:21: the interval includes the proposed completion)", ['INV-HARD']).
+unreachable_rule(index_again, "the second lookup of an id that record(id) found earlier in the same call; nothing in between removes records", []).
+unreachable_rule(energy_terms, "spec:15: residual <= 2e6, weight <= 1000, <= 64 terms; bounded values cannot overflow", ['NUM-1']).
+unreachable_rule(energy_sum, "spec:15: the sum of <= 64 terms of <= 4e15 fits u64", ['NUM-1']).
+unreachable_rule(recovery_add, "next + complete*units lies inside the envelope that already passed (spec:23: the interval contains the proposed completion)", ['INV-HARD']).
+unreachable_rule(bump_below_cap, "bump_new fails Arithmetic at version >= VERSION_CAP before calling bump, and VERSION_CAP < u32::MAX (C-4 version_reserve), so the increment fits", ['VER-CAP', 'C-4']).
+unreachable_rule(bump_reserve, "spec:50: acknowledgment, settlement and cancellation keep the plain checked increment; version + sum of rem(status) over open records <= u32::MAX, and the call's record is open, so the increment fits", ['INV-VERCAP']).
+unreachable_rule(submit_version_add, "candidate's last check failed Arithmetic at version >= VERSION_CAP (spec:50), so version + 1 fits", ['VER-CAP', 'C-4']).
+unreachable_rule(submit_id_add, "first_id + len(records) <= version < VERSION_CAP (spec:9, spec:27)", ['WIN-1']).
 
-%% spec_outcomes(+Kind, -Outs): guard/5 order, err(E) -> E, noop -> noop.
-spec_outcomes(K, Outs) :- guard_sequence(K, Os), maplist(spec_out, Os, Outs).
+%% spec_outcomes(+Kind, -Items): guard/5 order, as g(GuardId, Outcome, Cond):
+%% err(E) -> E, noop -> noop; Cond the guard's documented condition
+%% (guard_condition/4, doc constants renamed to the code's) or none.
+spec_outcomes(K, Outs) :-
+    guard_ids(K, Gs), guard_sequence(K, Os), maplist(spec_item(K), Gs, Os, Outs).
+spec_item(K, G, O, g(G, X, C)) :-
+    spec_out(O, X), ( spec_cond(K, G, C0) -> C = C0 ; C = none ).
 spec_out(err(E), E).
 spec_out(noop, noop).
+g_out(g(_, X, _), X).
+
+%% spec_cond(?Kind, ?Guard, -Conjuncts): guard_condition/4 with each doc
+%% constant replaced by its code name (doc_code_constant/2, as in C-4).
+spec_cond(K, G, C) :- guard_condition(K, G, C0, _), maplist(code_conj, C0, C).
+code_conj(T, T1) :- T =.. [F, A, D], doc_code_constant(D, Code), !, T1 =.. [F, A, Code].
+code_conj(T, T).
+same_conds(A, B) :- msort_dup(A, A1), msort_dup(B, B1), A1 == B1.
 
 tla_out('Noop', noop) :- !.
 tla_out(E, E).
 
 %% c2_align(+Expected, +Items, -Alignment): every reachable item matches the next
-%% expected outcome in order; an unreachable item may match or be skipped.
-c2_align([], [], []).
-c2_align(S, [It | Cs], [skip(R) | A]) :- unreachable(It, R), c2_align(S, Cs, A).
-c2_align([X | S], [it(X, F) | Cs], [X-F | A]) :- c2_align(S, Cs, A).
+%% expected item in order; an unreachable item may match or be skipped.
+%% Expected items are outcome names (the TLA+ leg) or g/3 (the specification:
+%% site-checked). c2_align/4's first argument is `sites` or `names` (outcome
+%% names only, used to tell a condition mismatch from an order mismatch).
+c2_align(S, Items, A) :- c2_align(sites, S, Items, A).
+
+c2_align(_, [], [], []).
+c2_align(M, S, [It | Cs], [skip(R) | A]) :- unreachable(It, R), c2_align(M, S, Cs, A).
+c2_align(M, [X | S], [it(Y, F) | Cs], [X-F | A]) :- c2_match(M, X, Y, F), c2_align(M, S, Cs, A).
+
+c2_match(_, X, Y, _) :- atom(X), !, X == Y.
+c2_match(names, g(_, X, _), Y, _) :- X == Y.
+c2_match(sites, g(_, X, C), Y, F) :- X == Y, site_ok(C, X, F).
+
+%% site_ok(+SpecCond, +Outcome, +Frames): a guard with a documented condition
+%% matches only a site whose extracted condition is the same; a guard without
+%% one does not match a site whose condition some guard documents.
+site_ok(none, X, [Fn-L | _]) :- !,
+    \+ ( code_error_cond(Fn, L, X, CC), spec_cond(_, _, SC), same_conds(SC, CC) ).
+site_ok(SC, X, [Fn-L | _]) :- code_error_cond(Fn, L, X, CC), same_conds(SC, CC).
 
 c_problems('C-2', Ps, Info) :-
     findall(P, c2_problem(P), Ps),
@@ -239,33 +320,50 @@ c_problems('C-2', Ps, Info) :-
     findall(R, ( op_kind(K), kind_code(K, F, Fl), code_path(F, Fl, Is), member(It, Is), unreachable(It, R) ), Rs0),
     sort(Rs0, Rs),
     (   tla_source(present) -> Tla = tla_leg(compared) ; Tla = tla_leg(gap_no_tla_file) ),
-    Info = [guards_per_kind(Sizes), basis(Basis), unreachable_rules_used(Rs), Tla].
+    findall(K-G-Fn-L, ( op_kind(K), kind_code(K, F, Fl), code_path(F, Fl, Is), spec_outcomes(K, S),
+                        once(c2_align(S, Is, A)), member(g(G, _, C)-[Fn-L | _], A), C \== none ), Conds),
+    length(Conds, NConds),
+    Info = [guards_per_kind(Sizes), basis(Basis), unreachable_rules_used(Rs),
+            conditions_compared(NConds), Tla].
 
-c2_problem(spec_vs_code(K, spec(S), code(Reach))) :-
+%% The specification leg: an order (or outcome) difference is spec_vs_code;
+%% if the outcome names line up but a documented condition does not, the
+%% problem names each guard whose site has another condition (code(none): the
+%% site has no extracted `if` condition, e.g. a plain checked increment).
+c2_problem(P) :-
     op_kind(K), kind_code(K, Fn, Flag),
     code_path(Fn, Flag, Items), spec_outcomes(K, S),
     \+ once(c2_align(S, Items, _)),
-    reachable_outcomes(Items, Reach).
+    (   once(c2_align(names, S, Items, A))
+    ->  findall(G-spec(C)-site(SFn-L)-code(CC),
+                ( member(g(G, X, C)-[SFn-L | Up], A), \+ site_ok(C, X, [SFn-L | Up]),
+                  ( code_error_cond(SFn, L, X, CC0) -> CC = CC0 ; CC = none ) ), Ds),
+        P = condition_vs_code(K, Ds)
+    ;   maplist(g_out, S, Names), reachable_outcomes(Items, Reach),
+        P = spec_vs_code(K, spec(Names), code(Reach))
+    ).
 c2_problem(tla_vs_code(K, tla(T), code(Reach))) :-
     tla_source(present),
     op_kind(K), tla_kind(K, Op), tla_guard_order(Op, T0), maplist(tla_out, T0, T),
     kind_code(K, Fn, Flag), code_path(Fn, Flag, Items),
-    \+ once(c2_align(T, Items, _)),
+    \+ once(c2_align(names, T, Items, _)),
     reachable_outcomes(Items, Reach).
+c2_problem(guard_condition_unknown(K, G)) :-
+    guard_condition(K, G, _, _), \+ guard(K, _, G, _, _).
 c2_problem(tla_missing(Op)) :-
     tla_source(present), op_kind(K), tla_kind(K, Op), \+ tla_guard_order(Op, _).
 c2_problem(tla_unknown_op(Op)) :-
     tla_guard_order(Op, _), \+ tla_kind(_, Op).
-% api:28 lists submit's reasons: exactly the errors reachable in candidate.
-c2_problem(api28_reasons(doc(D), code(C))) :-
-    findall(E, pool_error(E, 'api:28'), D0), sort(D0, D),
+% api:32 lists submit's reasons: exactly the errors reachable in candidate.
+c2_problem(api32_reasons(doc(D), code(C))) :-
+    findall(E, pool_error(E, 'api:32'), D0), sort(D0, D),
     code_path(candidate, none, Items),
     findall(E, ( member(it(E, F), Items), E \== noop, \+ unreachable(it(E, F), _) ), C0), sort(C0, C),
     D \== C.
-% Every Error variant of the code is documented or used by a guard (or is new's InvalidConfig).
+% Every Error variant of the code is named by the docs (v1.1.0 names NotFound,
+% Pending, InvalidState and InvalidConfig too: pool_error/2).
 c2_problem(error_unaccounted(V)) :-
-    code_enum('Error', Vs, _), member(V, Vs),
-    \+ pool_error(V, _), \+ guard(_, _, _, err(V), _), V \== 'InvalidConfig'.
+    code_enum('Error', Vs, _), member(V, Vs), \+ pool_error(V, _).
 c2_problem(error_unknown_to_code(E)) :-
     guard(_, _, _, err(E), _), code_enum('Error', Vs, _), \+ memberchk(E, Vs).
 c2_problem(unreachable_rule_undocumented(R)) :-
@@ -306,7 +404,7 @@ code_life(Op, Flag, From, Out) :-
 first_fired([g(C, O) | Gs], Flag, From, Next, Out) :-
     (   eval(C, Flag, From, Next) -> Out = O ; first_fired(Gs, Flag, From, Next, Out) ).
 
-outcome_of(err(_), reject).
+outcome_of(err(E), reject(E)).
 outcome_of(noop, same).
 outcome_of(tail(G), to(S)) :- code_status_write(G, _, S).
 
@@ -332,29 +430,32 @@ eval(C, _, _, _) :- throw(error(domain_error(status_condition, C), code_life)).
 
 c_problems('C-3', Ps, Info) :-
     findall(P, c3_static_problem(P), P1),
-    c3_trace(P2, Obs, NDivT),
+    c3_trace(P2, Obs),
     append(P1, P2, Ps),
     count_where(x, life_domain(_, _, _), NDom),
-    findall(Op-F-S, ( life_domain(Op, F, S), life(Op, F, S, to(S), _), code_life(Op, F, S, same) ), DivS),
+    findall(Op-F-S, ( life_domain(Op, F, S), life(Op, F, S, SO, _), code_life(Op, F, S, CO), SO \== CO ), Div),
+    length(Div, NDiv),
     findall(Op-F-S, ( life_domain(Op, F, S), life(Op, F, S, _, code_only(_)) ), CodeOnly),
     spec_edges(SE), length(SE, NE),
     findall(Op-F-S, member(Op-F-S-_, Obs), Seen0), sort(Seen0, Seen), length(Seen, NObs),
     (   tla_source(present) -> Tla = tla_leg(compared) ; Tla = tla_leg(gap_no_tla_file) ),
-    Info = [domain(NDom), edges(NE), static_divergences('div-ack-noop-version', DivS),
-            code_only_rows(CodeOnly), trace_domain_coverage(NObs, NDom),
-            trace_divergent_calls('div-ack-noop-version', NDivT), Tla].
+    Info = [domain(NDom), edges(NE), divergences(NDiv), code_only_rows(CodeOnly),
+            trace_domain_coverage(NObs, NDom), Tla].
 
 % The table is total and deterministic over the domain.
 c3_static_problem(spec_missing(Op, F, S)) :- life_domain(Op, F, S), \+ life(Op, F, S, _, _).
 c3_static_problem(spec_ambiguous(Op, F, S, Os)) :-
     life_domain(Op, F, S), findall(O, life(Op, F, S, O, _), Os), Os = [_, _ | _].
 c3_static_problem(code_undetermined(Op, F, S)) :- life_domain(Op, F, S), \+ code_life(Op, F, S, _).
-% Spec = code per (op, flag, status). A listed self-loop that the code treats as
-% a no-op (no version bump) is divergence div-ack-noop-version, not a pass.
+% Spec = code per (op, flag, status), rejects with their error names. v1.1.0:
+% no exception (div-ack-noop-version and div-cancel-terminal-name are closed:
+% spec:41, 43 and api:30 now state what the code does).
 c3_static_problem(mismatch(Op, F, S, spec(SO), code(CO))) :-
     life_domain(Op, F, S), life(Op, F, S, SO, _), code_life(Op, F, S, CO),
-    SO \== CO,
-    \+ ( SO == to(S), CO == same, divergence('div-ack-noop-version', _, _, _) ).
+    SO \== CO.
+% A self-loop listed as a transition would need a version bump on an Ok call that
+% changes nothing; api:30 forbids it, so life/5 must say `same` instead.
+c3_static_problem(listed_self_loop(Op, F, S)) :- life_domain(Op, F, S), life(Op, F, S, to(S), _).
 % Status graph: spec = code = props LIFE-1 = TLA+ Props.tla Edges.
 c3_static_problem(edges(spec(SE), code(CE))) :- spec_edges(SE), code_edges(CE), SE \== CE.
 c3_static_problem(edges(spec(SE), life1(PE))) :- spec_edges(SE), props_edges(PE), SE \== PE.
@@ -369,34 +470,38 @@ spec_edges(E) :- findall(A-B, ( life(_, _, A, to(B), _), A \== B ), E0), sort(E0
 code_edges(E) :- findall(A-B, ( life_domain(Op, F, A), code_life(Op, F, A, to(B)), A \== B ), E0), sort(E0, E).
 props_edges(E) :- findall(A-B, ( status(A), status(B), allowed_status_change(A, B) ), E0), sort(E0, E).
 
-%% c3_trace(-Problems, -Observed, -NDiv): the lifecycle the REAL core shows in
-%% the conformance traces. A call on an existing record that returns Ok shows
-%% to(S) or same; a status error (dispatch/settle InvalidState, cancel Pending)
-%% shows reject; any other error comes from a non-status guard and is skipped.
-c3_trace(Ps, Obs, NDiv) :-
+%% c3_trace(-Problems, -Observed): the lifecycle the REAL core shows in the
+%% conformance traces. A call on an existing record that returns Ok shows
+%% to(S) or same; a status error (dispatch/settle InvalidState, cancel Pending
+%% or InvalidState) shows reject(Error); any other error comes from a
+%% non-status guard and is skipped. A trace without an initial state (v1.1.0
+%% `init_error`, as traces.pl delivers it) has no calls to observe.
+c3_trace(Ps, Obs) :-
     trace_file(File),
-    fold_traces(File, c3_one, c3(0, [], []), c3(NDiv, Ps, Obs0)),
-    sort(Obs0, Obs).
+    fold_traces(File, c3_one, c3([], []), c3(Ps0, Obs0)),
+    sort(Obs0, Obs),
+    (   Obs == [] -> Ps = [trace_leg_vacuous | Ps0] ; Ps = Ps0 ).
 
-c3_one(trace(N, Cfg, _, Init, Calls), c3(D0, P0, O0), c3(D, P, O)) :-
-    trace_to_pool(Cfg, Init, S0),
-    c3_calls(Calls, N, 1, Cfg, S0, D0, D, P0, P, O0, O).
+c3_one(trace(N, Cfg, _, Init, Calls), c3(P0, O0), c3(P, O)) :-
+    (   Init = init_error(_) -> P = P0, O = O0
+    ;   trace_to_pool(Cfg, Init, S0) -> c3_calls(Calls, N, 1, Cfg, S0, P0, P, O0, O)
+    ;   P = [trace_state_unreadable(N) | P0], O = O0
+    ).
 
-c3_calls([], _, _, _, _, D, D, P, P, O, O).
-c3_calls([call(Op, R, Post) | Cs], N, I, Cfg, S0, D0, D, P0, P, O0, O) :-
+c3_calls([], _, _, _, _, P, P, O, O).
+c3_calls([call(Op, R, Post) | Cs], N, I, Cfg, S0, P0, P, O0, O) :-
     trace_to_pool(Cfg, Post, S1),
     (   life_call(Op, Class, Flag, Id), record_of(S0, Id, c(_, _, _, From)),
         observed(Class, R, S1, Id, From, Ob)
     ->  life(Class, Flag, From, Spec, _),
         O1 = [Class-Flag-From-Ob | O0],
-        (   Spec == Ob -> D1 = D0, P1 = P0
-        ;   Spec == to(From), Ob == same -> D1 is D0 + 1, P1 = P0
-        ;   D1 = D0, P1 = [trace_mismatch(N, I, Op, From, spec(Spec), observed(Ob)) | P0]
+        (   Spec == Ob -> P1 = P0
+        ;   P1 = [trace_mismatch(N, I, Op, From, spec(Spec), observed(Ob)) | P0]
         )
-    ;   D1 = D0, P1 = P0, O1 = O0
+    ;   P1 = P0, O1 = O0
     ),
     I1 is I + 1,
-    c3_calls(Cs, N, I1, Cfg, S1, D1, D, P1, P, O1, O).
+    c3_calls(Cs, N, I1, Cfg, S1, P1, P, O1, O).
 
 life_call(dispatch(_, Id, _), dispatch, none, Id).
 life_call(ack(Id, F), ack, F, Id).
@@ -407,10 +512,11 @@ observed(_, R, S1, Id, From, Ob) :-
     ( R == ok ; R = ok(_) ), !,
     record_of(S1, Id, c(_, _, _, To)),
     ( To == From -> Ob = same ; Ob = to(To) ).
-observed(Class, err(E), _, _, _, reject) :- status_error(Class, E).
+observed(Class, err(E), _, _, _, reject(C)) :- status_error(Class, E), camel_snake(C, E).
 
 status_error(dispatch, invalid_state).
 status_error(cancel, pending).
+status_error(cancel, invalid_state).
 status_error(settle, invalid_state).
 
 %%% ========================================================
@@ -422,7 +528,7 @@ c_problems('C-4', Ps, [compared(NC), derived(ND), docs_silent(CO)]) :-
     count_where(x, doc_code_constant(_, _), NC0),
     count_where(x, model_code_constant(_, _), NM),
     NC is NC0 + NM,
-    ND = 4,
+    ND = 5,
     findall(C-V, ( code_constant(C, V, _), \+ doc_code_constant(_, C) ), CO).
 % (CO: code constants the docs do not state; each is compared with model_constant/3.)
 
@@ -430,11 +536,12 @@ doc_code_constant(max_value, 'MAX_VALUE').
 doc_code_constant(max_terms, 'MAX_TERMS').
 doc_code_constant(max_weight, 'MAX_WEIGHT').
 doc_code_constant(max_records, 'MAX_RECORDS').
+doc_code_constant(version_cap, 'VERSION_CAP').        % v1.1.0, spec:50
 
 model_code_constant(max_metrics, 'MAX_METRICS').
 model_code_constant(max_recipes, 'MAX_RECIPES').
 model_code_constant(max_units, 'MAX_UNITS').
-model_code_constant(max_requires, 'MAX_RECIPES').   % lib.rs:120 bounds requires.len() by MAX_RECIPES
+model_code_constant(max_requires, 'MAX_RECIPES').   % lib.rs:135 bounds requires.len() by MAX_RECIPES
 
 c4_problem(doc_vs_code(N, doc(V), code(C, W))) :-
     doc_code_constant(N, C), constant(N, V, _),
@@ -442,22 +549,37 @@ c4_problem(doc_vs_code(N, doc(V), code(C, W))) :-
 c4_problem(model_vs_code(N, model(V), code(C, W))) :-
     model_code_constant(N, C), model_constant(N, V, _),
     (   code_constant(C, W, _) -> V =\= W ; W = missing ).
-% spec:19 / api:26: one day = 86400 s, a literal in candidate.
+% spec:21 / api:30: one day = 86400 s, a literal in candidate.
 c4_problem(expiry_horizon(doc(V), code(Ls))) :-
     constant(expiry_horizon, V, _),
     findall(X, code_literal(candidate, X, _), Ls),
     \+ memberchk(V, Ls).
-% api:9: page max 50, a literal in the shell's get_commitments.
+% api:11: page max 50, a literal in the shell's get_commitments.
 c4_problem(page_max(doc(V), code(Ls))) :-
     constant(page_max, V, _),
     findall(X, shell_literal(get_commitments, X, _), Ls),
     \+ memberchk(V, Ls).
-% handoff:34 version overflow at u32::MAX: the code's version fields are u32.
+% spec:50, api:30, handoff:37: the version is a u32 (the cap is "u32::MAX - 768"):
+% the code's version fields are u32.
 c4_problem(version_width(S, F, T)) :-
     member(S-F, ['Pool'-version, 'Request'-version]),
     \+ code_field(S, F, u32), T = not_u32.
 c4_problem(version_max(doc(V), model(M))) :-
     constant(version_max, V, _), u32_max(M), V =\= M.
+% spec:50, handoff:37: the reserve is three increments per retained record, so
+% VERSION_CAP = u32::MAX - 3 * MAX_RECORDS (derived), and it is below u32::MAX
+% (C-2's bump_below_cap and submit_version_add rely on that).
+c4_problem(version_reserve(doc(C), derived(D))) :-
+    constant(version_cap, C, _), constant(version_max, M, _), constant(max_records, R, _),
+    D is M - 3 * R, C =\= D.
+c4_problem(version_cap_not_below_max(C, M)) :-
+    constant(version_cap, C, _), constant(version_max, M, _), \+ C < M.
+% spec:9 window fields (v1.1.0). Their widths are CODE-ONLY: first_id is a u32
+% id; completed_units is one u32 per recipe, saturating (lib.rs:519; the trace
+% contract's min(u32::MAX, ..)).
+c4_problem(window_field(S, F, T)) :-
+    member(S-F-T, ['Pool'-first_id-u32, 'Pool'-completed_units-vec(u32), 'Commitment'-id-u32]),
+    \+ code_field(S, F, T).
 c4_problem(model_version_width(W)) :- model_constant(version_width, W, _), W =\= 32.
 % Time sums saturate at u64::MAX: the code's time fields are u64.
 c4_problem(time_width(S, F)) :-
@@ -486,6 +608,7 @@ c4_problem(code_constant_unaccounted(C)) :-
 %% Known findings (pool_req known_finding/2): the claim's counterexample must be
 %% REPRODUCED; it is then listed under findings(..) in Info, not as a problem.
 %% If it no longer reproduces, that is a problem (re-examine the finding).
+%% v1.1.0: there is none (F-2 and F-4 are fixed); every claim must hold.
 c_problems('C-5', Ps, Info) :-
     fixture_traces(Ts0),
     findall(release(F, St, Cx, TSt, TCx),
@@ -498,7 +621,8 @@ c_problems('C-5', Ps, Info) :-
                          once(claim_problem(Ts, F, C, Why)) ), Fs),
     Info = [claims(Res0), findings(Fs)].
 
-%% fixture_traces(-Ts): [Name-trace(..)] for traces 1..5, read once.
+%% fixture_traces(-Ts): [Name-trace(..)] for traces 1..5, read once (the v1.1.0
+%% trace contract keeps those numbers: the generator picks the fixtures by name).
 fixture_traces(Ts) :-
     trace_file(File),
     catch(fold_traces(File, keep_fixture, [], _), done(Acc), true),
@@ -516,9 +640,19 @@ fx_trace(Ts, F, T) :- member(F-T, Ts).
 fx_idx(F, Name, I) :- fixture_metric(F, Name, I, _).
 recipes_of(config(_, _, _, _, Rs), Rs).
 
-% Generator order (CODE-ONLY): trace N is fixtures::NAMES[N-1].
-c5_problem(_, fixture_order(F, N)) :-
-    fixture(F, N, _), fixture_names(Ns, _), \+ nth1(N, Ns, F).
+% v1.1.0 (conformance/src/main.rs, trace contract): traces 1-5 are the fixtures
+% chosen by name, no longer fixtures::NAMES[N-1] (NAMES now starts with the
+% station, trace 212). Every fixture/3 is in NAMES, and every NAMES entry is a
+% fixture/3 or a recorded fixture without claims.
+c5_problem(_, fixture_not_in_code(F)) :-
+    fixture(F, _, _), fixture_names(Ns, _), \+ memberchk(F, Ns).
+c5_problem(_, fixture_unaccounted(F)) :-
+    fixture_names(Ns, _), member(F, Ns), \+ fixture(F, _, _), \+ fixture_without_claims(F, _).
+c5_problem(_, fixture_trace_number_repeated(N)) :-
+    fixture(F, N, _), fixture(G, N, _), F @< G.
+% The release search must admit something, or release_never_blocked is vacuous.
+c5_problem(Ts, release_search_vacuous(F)) :-
+    member(release(F, [pairs_admitted(0) | _], _, _, _), Ts).
 c5_problem(Ts, fixture_trace_missing(F)) :- fixture(F, _, _), \+ fx_cfg(Ts, F, _).
 c5_problem(Ts, metric_index(F, Name, I)) :-
     fixture_metric(F, Name, I, _), fx_cfg(Ts, F, config(_, _, Ms, _, _)),
@@ -555,7 +689,7 @@ sum_named(F, Names, Vec, S) :-
 
 %% claim_problem(+Ts, +Fixture, +Claim, -Why): enumerates what is wrong.
 claim_problem(Ts, F, conserved(Names, Total), Why) :-
-    fx_trace(Ts, F, trace(_, Cfg, _, s(V0, _, _, _, _), Calls)),
+    fx_trace(Ts, F, trace(_, Cfg, _, Init, Calls)), st_parts(Init, V0, _, _, _),
     recipes_of(Cfg, Rs),
     (   sum_named(F, Names, V0, S0), S0 =\= Total, Why = initial_sum(S0)
     ;   nth0(J, Rs, R), member(K, [reserve, complete]), eff(K, R, E),
@@ -626,7 +760,8 @@ claim_problem(Ts, F, release_never_blocked, Why) :-
         ;   TCx = [C | _], length(TCx, N), Why = release_blocked_in_trace(count(N), first(C))
         )
     ).
-% CASH-SELF-ENFORCED: Config::validate compares the two roles (extracted).
+% CASH-SELF-ENFORCED: Config::validate compares the two roles (extracted;
+% v1.1.0 lib.rs:130 `r.actor == r.executor` => InvalidConfig).
 claim_problem(_, _, validate_rejects(A-B), Why) :-
     code_role_checks(validate, Ps), \+ memberchk(A-B, Ps),
     Why = validate_accepts(A = B, code_role_checks(validate, Ps)).
@@ -638,7 +773,9 @@ claim_problem(_, _, validate_rejects(A-B), Why) :-
 %%     X, with the other record Y left Reserved or dispatched and settled
 %%     completed by its executor: release X by its actor's cancel, and by
 %%     dispatch + its executor's settle(false). A release that is not Ok is a
-%%     counterexample (spec:46, last sentence).
+%%     counterexample (v1.1.0 spec:48 "the checked inverse cannot fail in a
+%%     reachable state", spec:70 for risk; at v1.0.0 the claim was
+%%     spec@v1.0.0:46's last sentence, broken in risk: F-2).
 %% (b) Every state of the fixture's own trace before its first observe (so the
 %%     base is the fixture's in-bounds initial values): every open record's
 %%     release (cancel if Reserved, settle(false) by the executor if in flight)
@@ -657,7 +794,7 @@ release_results(trace(_, Cfg, Now, Init, Calls), [pairs_admitted(NP), releases_t
     findall(A-R, ( member(A-R, Atts), R \== ok ), Cx),
     states_before_observe(Init, Calls, Sts),
     length(Sts, NS),
-    findall(K-rel(J, St0, R), ( nth0(K, Sts, St), trace_to_pool(Cfg, St, S), trace_release(Cfg, S, Now, rel(J, St0, R)) ), TAtts),
+    findall(K-rel(Id, St0, R), ( nth0(K, Sts, St), trace_to_pool(Cfg, St, S), trace_release(Cfg, St, S, Now, rel(Id, St0, R)) ), TAtts),
     length(TAtts, NT),
     findall(state(K)-Rel, ( member(K-Rel, TAtts), Rel = rel(_, _, R), R \== ok ), TCx).
 
@@ -686,20 +823,42 @@ before_obs([call(Op, R, St) | Cs], Out) :-
     ;   Out = [St | Out1], before_obs(Cs, Out1)
     ).
 
-trace_release(Cfg, S, Now, rel(J, St, R)) :-
-    pool_records(S, Rs), nth0(J, Rs, c(RI, _, _, St)), open_status(St),
-    (   St == reserved -> actor_of(Cfg, RI, A), step(S, cancel(A, J, Now), R, _)
-    ;   executor_of(Cfg, RI, X), step(S, settle(X, J, false), R, _)
+%% trace_release(+Cfg, +TraceState, +Pool, +Now, -rel(Id, Status, Result)):
+%% an open record of the trace state and its release in the model (Pool is
+%% trace_to_pool of the same state): cancel by the actor if Reserved, else
+%% settle(false) by the executor.
+trace_release(Cfg, TSt, S, Now, rel(Id, St, R)) :-
+    trace_open_record(TSt, Id, RI, St),
+    (   St == reserved -> actor_of(Cfg, RI, A), step(S, cancel(A, Id, Now), R, _)
+    ;   executor_of(Cfg, RI, X), step(S, settle(X, Id, false), R, _)
     ).
 
+%% trace_open_record(+TraceState, -Id, -Recipe, -Status): an open record of
+%% the trace state with its id. Record j of the state has id FirstId + j
+%% (spec:9, spec:27: the window keeps the most recent records; s/7's sixth
+%% position); a v1.0.0 s/5 state has no pruned prefix (FirstId 0). The list
+%% index alone is the id only while FirstId = 0.
+trace_open_record(TSt, Id, RI, St) :-
+    st_parts(TSt, _, _, _, Rs), st_first_id(TSt, F),
+    nth0(J, Rs, c(RI, _, _, St)), open_status(St), Id is F + J.
+
 %% conserve_walk: every non-observe call keeps sum(Names); report the first that does not.
-conserve_walk([call(Op, _, s(V1, _, _, _, _)) | Cs], F, Names, V0, I, Why) :-
+conserve_walk([call(Op, _, St) | Cs], F, Names, V0, I, Why) :-
+    st_parts(St, V1, _, _, _),
     sum_named(F, Names, V0, S0), sum_named(F, Names, V1, S1),
     (   Op \= observe(_, _, _), S0 =\= S1 -> Why = not_conserved_by_call(I, Op, S0, S1)
     ;   I1 is I + 1, conserve_walk(Cs, F, Names, V1, I1, Why)
     ).
 
-%% RISK-HEADROOM (spec:66, handoff:23): in every state of the risk trace and for
+%% st_parts(+TraceState, -Values, -Version, -ObservedAt, -Records): the fields
+%% C-5 reads, from v1.0.0's s/5 or v1.1.0's s/7 (the trace contract adds
+%% FirstId and DoneUnits after the five unchanged positions).
+st_parts(s(V, N, O, _, R), V, N, O, R).
+st_parts(s(V, N, O, _, R, _, _), V, N, O, R).
+st_first_id(s(_, _, _, _, _), 0).
+st_first_id(s(_, _, _, _, _, F, _), F).
+
+%% RISK-HEADROOM (spec:70, handoff:23): in every state of the risk trace and for
 %% every (recipe, units), (a) the envelope's high endpoint is the same with and
 %% without the open records' negative completion parts (pending hedges add
 %% nothing to capacity), and (b) a request admissible with them is admissible
@@ -708,7 +867,7 @@ headroom_problem(trace(_, Cfg, _, Init, Calls), Why) :-
     findall(St, ( St = Init ; member(call(_, _, St), Calls) ), Sts),
     recipes_of(Cfg, Rs), length(Rs, NR), NR1 is NR - 1,
     member(St, Sts), trace_to_pool(Cfg, St, S),
-    St = s(V, Ver, Obs, _, Recs),
+    st_parts(St, V, Ver, Obs, Recs),
     between(0, NR1, RI), nth0(RI, Rs, r(A, _, _, _, MU, _)),
     between(1, MU, U),
     recipe_of(Cfg, RI, r(_, _, Res, _, _, _)),
@@ -732,9 +891,9 @@ claim_info(Ts, F, conserved(Names, _), [non_observe_calls(N), first_observe_at(K
 claim_info(Ts, F, pending_negative_no_headroom, [states(NS), states_with_pending_negative(NP), admissible_requests(NA)]) :- !,
     fx_trace(Ts, F, trace(_, Cfg, _, Init, Calls)),
     findall(St, ( St = Init ; member(call(_, _, St), Calls) ), Sts), length(Sts, NS),
-    count_where(x, ( member(St, Sts), St = s(_, _, _, _, Recs), pending_negative(Cfg, Recs) ), NP),
+    count_where(x, ( member(St, Sts), st_parts(St, _, _, _, Recs), pending_negative(Cfg, Recs) ), NP),
     recipes_of(Cfg, Rs), length(Rs, NR), NR1 is NR - 1,
-    count_where(x, ( member(St, Sts), trace_to_pool(Cfg, St, S), St = s(_, Ver, Obs, _, _),
+    count_where(x, ( member(St, Sts), trace_to_pool(Cfg, St, S), st_parts(St, _, Ver, Obs, _),
                           between(0, NR1, RI), nth0(RI, Rs, r(A, _, _, _, MU, _)), between(1, MU, U),
                           Exp is Obs + 1, admissible(S, A, req(RI, U, Ver, Exp, Obs)) ), NA).
 claim_info(Ts, F, release_never_blocked, [St, TSt, blocked(NC), trace_blocked(NT)]) :- !,
@@ -773,10 +932,13 @@ c_problems('C-6', Ps, Info) :-
     count_where(x, property(_, _, _), NP),
     count_where(x, requirement(_, _, _), NR),
     count_where(x, threat(_, _, _, _), NT),
-    count_where(x, finding(_, _, _, _), NF),
+    count_where(x, finding(_, _, _, _, open), NFO),
+    count_where(x, finding(_, _, _, _, fixed(_, _)), NFX),
+    count_where(x, divergence(_, _, _, _), NDO),
+    count_where(x, closed_divergence(_, _, _, _, _), NDC),
     findall(L-N, ( layer(L), count_where(x, ( property(_, Ls, _), memberchk(L, Ls) ), N) ), PerLayer),
     Info = [properties(NP), strategy_rows(NS), layers_equal(NL), requirements(NR), threats(NT),
-            findings(NF), per_layer(PerLayer)].
+            findings(open(NFO), fixed(NFX)), divergences(open(NDO), closed(NDC)), per_layer(PerLayer)].
 
 c6_problem(no_layer(Id)) :- property(Id, [], _).
 c6_problem(unknown_layer(Id, L)) :- property(Id, Ls, _), member(L, Ls), \+ layer(L).
@@ -796,11 +958,27 @@ c6_problem(evidence_for_non_prolog_property(P)) :-
     prolog_evidence(P, _), \+ ( property(P, Ls, _), memberchk(prolog, Ls) ).
 c6_problem(divergence_untraced(D)) :-
     divergence(D, Cite, _, _), \+ atom(Cite).
-% Every confirmed finding is named in some threat's residual (threat_model.pl).
+c6_problem(closed_divergence_untraced(D)) :-
+    closed_divergence(D, Old, New, _, _), \+ ( atom(Old), atom(New) ).
+% Every OPEN finding is named in some threat's residual (threat_model.pl).
 c6_problem(finding_without_threat(F)) :-
-    finding(F, _, _, _), atom_chars(F, FC),
-    \+ ( threat(_, _, _, Res), Res \== none, append(_, Tail, Res), append(FC, After, Tail),
-         \+ ( After = [D | _], char_code(D, K), K >= 0'0, K =< 0'9 ) ).
+    finding(F, _, _, _, open), \+ named_in_residual(F).
+% A fixed finding names the catalogue properties that show the fix (at least
+% one); none of them may still list it as a residual.
+c6_problem(fixed_finding_without_evidence(F)) :- finding(F, _, _, _, fixed(_, [])).
+c6_problem(fixed_finding_unknown_property(F, P)) :-
+    finding(F, _, _, _, fixed(_, Ps)), member(P, Ps), \+ property(P, _, _).
+c6_problem(fixed_finding_still_residual(F)) :-
+    finding(F, _, _, _, fixed(_, _)), named_in_residual(F).
+c6_problem(finding_status(F, S)) :-
+    finding(F, _, _, _, S), \+ ( S == open ; S = fixed(V, Ps), atom(V), ground(Ps), length(Ps, _) ).
+
+%% named_in_residual(+F): F (e.g. 'F-2', not 'F-2b' or 'F-21') occurs in a residual.
+named_in_residual(F) :-
+    atom_chars(F, FC),
+    threat(_, _, _, Res), Res \== none, append(_, Tail, Res), append(FC, After, Tail),
+    \+ ( After = [D | _], char_code(D, K),
+         ( K >= 0'0, K =< 0'9 ; K >= 0'a, K =< 0'z ) ), !.
 
 strategy_path(P) :- root_path("../strategy.md", P).
 

@@ -7,5 +7,6 @@ import PoolLean.Facts
 import PoolLean.Inv
 import PoolLean.StepProps
 import PoolLean.Live
-import PoolLean.Witness
 import PoolLean.Calls
+import PoolLean.Window
+import PoolLean.Witness

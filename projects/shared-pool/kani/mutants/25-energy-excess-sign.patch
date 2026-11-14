@@ -2,7 +2,7 @@
 # energy_terms: Excess measured below the target (sign flip)
 --- a/crates/core/src/lib.rs
 +++ b/crates/core/src/lib.rs
-@@ -159,7 +159,7 @@
+@@ -177,7 +177,7 @@
                  let d = values[t.metric as usize] - t.target;
                  let r = match t.shape {
                      Shape::Target => d.unsigned_abs(),

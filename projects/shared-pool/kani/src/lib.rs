@@ -4,10 +4,10 @@
 //! a proof**). `cargo kani` runs the same bodies symbolically (`proofs.rs`):
 //! that is the bounded proof.
 //!
-//! Verified: shared-pool-controls v1.0.0 (contract code byte-identical to the
-//! pin). Pin: difflabai/shared-pool-controls PR #1 head
-//! `a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7`, `crates/core/src/lib.rs`
-//! sha256 `9a4eb36cc9690d353f8ec78e4eec6e389a895caccab24ced54994b8a8e7505c4`.
+//! Verified: shared-pool-controls v1.1.0. Pin: difflabai/shared-pool-controls
+//! `57b3f02d18e85149db3c1035431368c4e07a4d8a` (the merge commit of PR #4; its
+//! tree is the PR head `6fcbd56`), `crates/core/src/lib.rs` sha256
+//! `c3bb825b91f7c277dee8651beafd45955f7cf8935c858f928b6a1b62d607ba48`.
 
 #![cfg_attr(kani, feature(allocator_api))]
 

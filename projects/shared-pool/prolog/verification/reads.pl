@@ -10,8 +10,10 @@
 %%   allowed    preview_allowed/3
 %%   reason     `allowed`, or the first failing submit guard (classify/3 on the
 %%              submit op, as step/4 walks it). The last guard,
-%%              version_overflow, is not part of candidate; it passes at every
-%%              recorded version (all far below u32::MAX).
+%%              version_cap, is candidate's last check too (v1.1.0,
+%%              lib.rs:319-320): at the 12 states of reads.txt at VERSION_CAP
+%%              or u32::MAX, a request that passes every other check is
+%%              refused Arithmetic.
 %%   candidate  values + reserve * units by add_vec/4 when the recipe exists
 %%              and units =< MAX_UNITS, else none. preview computes it whether
 %%              or not the request is allowed.

@@ -3,7 +3,7 @@
 # expect: test_reads RD-PREVIEW/RD-BEST differential
 --- a/prolog/model/pool_machine.pl
 +++ b/prolog/model/pool_machine.pl
-@@ -502,7 +502,7 @@
+@@ -605,7 +605,7 @@
      model_constant(max_units, MaxU, _), Hi is min(U, MaxU),
      pool_config(S, C),
      findall(E-Neg, ( between(1, Hi, K),
