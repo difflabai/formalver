@@ -32,8 +32,9 @@ Exit 0: every required class occurs, no forbidden one does, no state at the
 cap. Exit 1: otherwise (the classes missing or forbidden are listed). Exit 2:
 the file does not parse, or the lists differ from src/main.rs.
 
-On the v1.0.0 corpus (tag shared-pool-v1.0.0) it exits 1; on the v1.1.0
-corpus, 0. Standard library only.
+On the v1.0.0 corpus (traces/core.txt at commit a072a2d, the v1.0.0
+verification's head) it exits 1; on the v1.1.0 corpus, 0. Standard library
+only.
 """
 
 import re

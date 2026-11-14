@@ -537,20 +537,21 @@ fn release_arith() -> (Config, Vec<Op>) {
         max_age_seconds: 0,
     };
     let q = |recipe, units, version| Request { recipe, units, version, expires_at: 500 };
+    // Results are v1.1.0's; [v1.0.0: ...] is the old core's, for the record.
     let ops = vec![
         Op::Submit("a1".into(), q(0, 1, 0), 100),   // m0 = -1e6
-        Op::Submit("a1".into(), q(1, 100, 1), 100), // envelope high -1e6 + 1.5e6
-        Op::Dispatch("a1".into(), 1, 100),
-        Op::Ack(1, true),
-        Op::Settle("x1".into(), 1, true),           // m0 = 5e5
-        Op::Cancel("a1".into(), 0, 101),            // release: 1.5e6, Arithmetic
-        Op::Cancel("o".into(), 0, 101),
-        Op::Dispatch("a1".into(), 0, 101),
-        Op::Ack(0, true),
-        Op::Settle("x1".into(), 0, false),          // release again: Arithmetic
-        Op::Observe("o".into(), vec![500_000, 0], 102), // Pending
-        Op::Settle("x1".into(), 0, true),           // completion still works
-        Op::Observe("o".into(), vec![500_000, 0], 103),
+        Op::Submit("a1".into(), q(1, 100, 1), 100), // high -1e6 + 1e6 (A's release) + 1.5e6: Arithmetic [v1.0.0: Ok(1)]
+        Op::Dispatch("a1".into(), 1, 100),          // NotFound [v1.0.0: Ok]
+        Op::Ack(1, true),                           // NotFound [v1.0.0: Ok]
+        Op::Settle("x1".into(), 1, true),           // NotFound [v1.0.0: Ok, m0 = 5e5]
+        Op::Cancel("a1".into(), 0, 101),            // release: m0 = 0, Ok [v1.0.0: 1.5e6, Arithmetic]
+        Op::Cancel("o".into(), 0, 101),             // already Cancelled: Ok, no change [v1.0.0: Arithmetic]
+        Op::Dispatch("a1".into(), 0, 101),          // InvalidState [v1.0.0: Ok]
+        Op::Ack(0, true),                           // late ack of a Cancelled record: Ok, no change [v1.0.0: Ok]
+        Op::Settle("x1".into(), 0, false),          // Cancelled: Ok, no change [v1.0.0: release again, Arithmetic]
+        Op::Observe("o".into(), vec![500_000, 0], 102), // none open: Ok [v1.0.0: Pending]
+        Op::Settle("x1".into(), 0, true),           // InvalidState [v1.0.0: Ok, completion still worked]
+        Op::Observe("o".into(), vec![500_000, 0], 103), // Ok
     ];
     (c, ops)
 }
