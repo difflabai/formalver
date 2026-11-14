@@ -206,6 +206,11 @@ else
 fi
 
 # --- SURF-3(a): build.sh itself --------------------------------------------
+# build.sh writes artifacts/build.json only when its checker passes and never
+# deletes an old one, so remove it first: the check below must read this
+# run's manifest, not a stale one. If build.sh then fails (exit 2), the
+# mirror is left without build.json (artifacts/ is gitignored upstream); the
+# next successful run of this script or of build.sh writes it again.
 rm -f "$src/artifacts/build.json"
 if ! (cd "$src" && env -u CARGO_TARGET_DIR -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTUP_TOOLCHAIN ./scripts/build.sh) >"$work/buildsh.log" 2>&1; then
   tail -n 30 "$work/buildsh.log"

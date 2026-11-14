@@ -100,7 +100,7 @@ equals the one found. Checked 2026-11-14: 0 problems (catalogue 118 IDs,
 | SH-5 | pass (NT-F1 fixed) | `sh5_core_errors_are_panics_with_the_error_string` on both paths, including a crafted state (`first_id = u32::MAX`) where the preview allows a submit the core refuses with Arithmetic: the shell panics with it and writes nothing; `nt_f1_documented_build_reports_every_panic_message`: the documented build reports the error string (the Plain build, the negative control, still traps bare); SURF-3: build.sh refuses a wasm without `panic_utf8`; mutants s07, s13, s14, s25 |
 | SH-6 | pass | `sh6_dispatch_promise_shape` (`promise_create` execute 30 Tgas, `promise_then` on_result 30 Tgas, `promise_return` of the callback); mutants s11, s27, s28 |
 | SH-7 | pass | `sh7_reconcile_guard_and_promise_shape`; mutants s05, s15, s28 |
-| SH-8 | pass (host, wasm, window) | `sh8_store_diff_host`, `sh8_store_diff_wasm`, `sh8_store_diff_window`; `conformance_traces_through_the_shell` with the v1.1.0 corpus (W10 patch, below) |
+| SH-8 | pass (host, wasm, window); traces pending W10 | `sh8_store_diff_host`, `sh8_store_diff_wasm`, `sh8_store_diff_window`. `conformance_traces_through_the_shell` fails on the committed tree, whose corpus is still v1.0.0; it passes only with the v1.1.0 corpus and the W10 patch, in a scratch copy (see "Expected failure" below) |
 | SH-9 | pass | `sh9_views_and_paging_by_id_through_the_window`, `sh9_pruned_ids_are_not_found_and_pages_are_by_id`; mutants s06, s26 |
 | SH-10 | pass (NT-F2 fixed) | `sh10_mutating_methods_reject_attached_deposits`, `nt_f2_reconcile_rejects_an_attached_deposit`; mutants s12, s22 |
 | SH-11 | pass | `wasm-surface.sh` SURF-1: `pool_contract` exports its 12 methods, `contract_source_metadata` and `memory` (14), `pool_executor` its 8 methods (`on_settled` new) and the same two (10), as in `../wasm-surface.expected`; no upgrade, migrate or reset export |
@@ -115,7 +115,7 @@ equals the one found. Checked 2026-11-14: 0 problems (catalogue 118 IDs,
 | EX-6 | pass | `ex6_window_forgets_and_caps`, `ex6_window_constants_match_the_lock`, `ex6_random_differential_against_the_model`; mutants s31-s34, s36, s37, s00b |
 | EX-7 | pass (mocked runtime) | `ex7_d1_confirmed_failed_executes_stay_within_256` (EX-7 checked after every transaction), `ex6_window_constants_match_the_lock`; mutant s34, s00b. The sandbox half is RT-D1 |
 | EX-8 | pass | `ex8_on_settled_protocol`, `ex8_callbacks_in_any_order`, `ex1_executor_wrappers` (privacy on wasm); mutants s29, s30, s35, s38, s00b |
-| LIVE-2 (F-1) | regression pass | `wedge.rs`: the F-1 hedge is refused with Bounds; trace 0 of the v1.1.0 corpus |
+| LIVE-2 (F-1) | regression pass | `wedge.rs`: the F-1 hedge is refused with Bounds. Trace 0 of the v1.1.0 corpus is pending W10 (the committed v1.0.0 trace 0 expects the hedge to be accepted) |
 
 ## Expected failure until the v1.1.0 corpus is committed
 
