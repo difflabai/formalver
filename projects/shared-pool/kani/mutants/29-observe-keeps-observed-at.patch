@@ -3,9 +3,9 @@
 # never refreshed)
 --- a/crates/core/src/lib.rs
 +++ b/crates/core/src/lib.rs
-@@ -470,7 +470,6 @@
+@@ -544,7 +544,6 @@
          self.energy(&values)?;
-         self.bump()?;
+         self.bump_new()?;
          self.values = values;
 -        self.observed_at = now;
          Ok(())

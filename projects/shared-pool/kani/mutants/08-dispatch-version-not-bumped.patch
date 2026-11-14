@@ -2,11 +2,11 @@
 # dispatch: version not incremented
 --- a/crates/core/src/lib.rs
 +++ b/crates/core/src/lib.rs
-@@ -366,7 +366,6 @@
-         {
+@@ -428,7 +428,6 @@
              return Err(Error::SnapshotExpired);
          }
--        self.bump()?;
-         self.records[id as usize].status = Status::Dispatched;
+         let k = self.index(id)?;
+-        self.bump_new()?;
+         self.records[k].status = Status::Dispatched;
          Ok(())
      }

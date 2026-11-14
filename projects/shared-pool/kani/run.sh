@@ -199,8 +199,17 @@ unwindset() {
                else if (fn ~ re) k = (fn ~ pre && b > 3 ? 3 : b); else if (fn ~ lre) k = 25; else if (fn ~ tre) k = 17; else if (fn ~ vre) k = 5; else if (fn ~ rre) k = 8; else if (cb != "" && fn ~ cre) k = cb
                if (k != "") printf "%s%s:%s", (n++ ? "," : ""), id, k
                id = "" }')
-  [ -n "$ids" ] && echo "-Z unstable-options --cbmc-args --unwindset $ids $(extra_cbmc "$2")"
+  echo "-Z unstable-options --cbmc-args --unwindset ${ids:+$ids,}$memcmp_loop $(extra_cbmc "$2")"
 }
+# The loop of CBMC's own `memcmp` (<builtin-library-memcmp>), which the
+# bytewise slice equalities call: `caller != r.actor` (account names of at
+# most 2 bytes) and, from v1.1.0, observe's `values != self.values`, 8 bytes
+# per value. CBMC links the library after codegen, so the loop is not in the
+# goto binary's --show-loops and gets the harness's bound (6), which
+# observe's comparison of 2 values (16 bytes) exceeds: an unwinding failure
+# (probe P5, v1.1). Bound 8 * 3 + 1, for vectors of up to 3 values. CBMC
+# only warns about the id where memcmp is not linked.
+memcmp_loop='memcmp.0:25'
 
 # codegen <dir>: compile every harness (the goto binaries unwindset reads).
 codegen() {
@@ -234,8 +243,9 @@ family() {
 # Plain-mode test filter. h_ref_traces (conform.rs) replays
 # conformance/traces/core.txt, which is still the v1.0.0 corpus in s/5 form:
 # against the v1.1.0 core it fails from trace 0 (the F-1 hedge is now
-# refused). It is skipped until the corpus is regenerated and conform.rs
-# reads s/7 (v1.1 W10, which also drops this filter).
+# refused). It is skipped until the corpus is regenerated, conform.rs reads
+# s/7 (v1.1 W10) and tla.rs is the v1.1 transcription (its REF-1..3 checks
+# run on every call); whichever of those lands last drops this filter.
 plain_skip='--skip h_ref_traces'
 
 do_plain() {

@@ -2,7 +2,7 @@
 # settle: the opposite terminal outcome is applied (Completed can be released)
 --- a/crates/core/src/lib.rs
 +++ b/crates/core/src/lib.rs
-@@ -431,10 +431,7 @@
+@@ -500,10 +500,7 @@
          {
              return Ok(());
          }

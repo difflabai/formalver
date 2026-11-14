@@ -2,7 +2,7 @@
 # envelope: Reserved records are left out (pending hedges ignored)
 --- a/crates/core/src/lib.rs
 +++ b/crates/core/src/lib.rs
-@@ -204,7 +204,7 @@
+@@ -233,7 +233,7 @@
              Ok(())
          };
          for c in &self.records {
