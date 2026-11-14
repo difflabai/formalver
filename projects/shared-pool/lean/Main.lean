@@ -7,13 +7,14 @@ pool-lean: runs the Lean machine against the other layers.
       (values, version, observed_at, paused, the retained records, first_id,
       completed_units) must be equal. `init` needs `validate` to accept the
       config and `init_error(invalid_config)` needs it to refuse.
-  pool-lean guards
-      LEAN-GUARD: each call's guard order (`Guard.guardOrder`), one line per
-      call kind.
+
+It imports the machine and the parser only, not `PoolLean.Guard`: a mutant
+of Machine.lean that breaks only Guard's proofs still builds and replays
+here (`run.sh mutants` reports its replay result, not a build failure). The
+guard order (LEAN-GUARD) is printed by `pool-lean-guards` (Guards.lean).
 -/
 import PoolLean.Machine
 import PoolLean.Text
-import PoolLean.Guard
 
 open Pool Pool.Text
 
@@ -82,15 +83,9 @@ def replay (path : String) : IO UInt32 := do
   IO.println s!"REF-5L: {traces} traces ({refused} refused at init, by validate as by the core), {steps} calls ({oks} Ok) replayed on the Lean machine, every result and post-state equal"
   return 0
 
-def guardsCmd : IO UInt32 := do
-  for k in Guard.kinds do
-    IO.println s!"lean_guard_order({Guard.kindName k}, [{", ".intercalate ((Guard.guardOrder k).map Guard.outName)}])."
-  return 0
-
 def main (args : List String) : IO UInt32 := do
   match args with
   | ["replay", path] => replay path
-  | ["guards"] => guardsCmd
   | _ =>
-    IO.eprintln "usage: pool-lean replay <traces.txt> | guards"
+    IO.eprintln "usage: pool-lean replay <traces.txt>"
     return 2

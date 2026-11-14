@@ -353,10 +353,11 @@ pub const WF_C: u8 = 2;
 /// small; `completed_units` free (one per recipe); values free and bounded
 /// (not ledger-derived); the version free, or `u32::MAX` with `Ver::Max`.
 /// The ghost is a placeholder (`eff: None`): only the `_tx`/`_post` checks
-/// run on WF states. It exercises the paths INV makes dead: `index` with
-/// `first_id > 0`, pruned ids, the id overflow, the plain increment at
-/// `u32::MAX`, a release that fails Bounds or Arithmetic, the saturating
-/// count.
+/// run on WF states, and in plain mode REF-1..3 with the placeholder as the
+/// TLA+ ghost (`checks::wf_step`). It exercises the paths INV makes dead:
+/// `index` with `first_id > 0`, pruned ids, the id overflow, the plain
+/// increment at `u32::MAX`, a release that fails Bounds or Arithmetic, the
+/// saturating count.
 pub fn wf_state(src: &mut impl Src, c: &Cfg) -> Option<(Pool, Ghost)> {
     let cfg = config(src, c);
     let nm = cfg.metrics.len();

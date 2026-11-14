@@ -7,7 +7,8 @@
 //! of the window and cap walks, and every step of every conformance trace)
 //! check that one call of the real core refines the TLA+ spec, for every
 //! INV state within the step bounds and every operation of the step
-//! domains:
+//! domains (in plain mode `h_wf` also checks it on WF states, which reach
+//! `SubmitErr`'s id overflow and `Settle`'s `DoneCap`):
 //!
 //! - REF-1 (guard exactness): the core's error is the TLA+ error operator's
 //!   (`SubmitErr`, `DispatchErr`, `AckErr`, `CancelErr`, `SettleErr`,

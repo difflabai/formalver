@@ -729,7 +729,8 @@ pub fn version_max(src: &mut impl Src, kind: Option<u32>) {
 /// TX exactness, TX-0, TX-NOOP, TX-VER and the exact post-state, on the
 /// paths INV makes dead: `index` with `first_id > 0` and pruned ids, the id
 /// overflow, a release that fails Bounds or Arithmetic, the saturating
-/// count. No INV, no LIVE-ALL (WF states need not be reachable).
+/// count. In plain mode also REF-1..3 (`PART_REF`). No INV, no LIVE-ALL
+/// (WF states need not be reachable).
 pub fn wf_step(src: &mut impl Src, kind: Option<u32>) {
     let c = src.cfg();
     let Some((mut p, _g)) = gen::wf_state(src, &c) else {
@@ -745,6 +746,30 @@ pub fn wf_step(src: &mut impl Src, kind: Option<u32>) {
     let res = spec::apply(&mut p, &op);
     if c.part & PART_TX != 0 {
         check_tx(&pre, &p, &op, &res, &x);
+    }
+    // Plain mode only (the Kani `h_wf_*` code is unchanged; their REF is
+    // not measured). REF-1..3 on WF states, with the placeholder ghost as
+    // the TLA+ ghost: the only REF checks that reach the transcription's
+    // id-overflow exit (`SubmitErr`'s last `Arithmetic`) and `DoneCap`
+    // (`Settle`'s `Min(@ + units, DoneCap)`), which INV states and the
+    // conformance traces do not.
+    #[cfg(not(kani))]
+    {
+        if c.part & PART_REF != 0 {
+            let (b, nb, k0) = tla_ghost(&pre, &_g);
+            let w = crate::tla::assert_refines::<2, 2, 2, 2, 4>(&pre, &b[..nb], k0, &op, &res, &p); // PROP: REF-1 REF-2 REF-3
+            let over = |r: u32, u: u32| pre.completed_units[r as usize] as u64 + u as u64 > u32::MAX as u64;
+            cover!(
+                w == crate::tla::TErr::Arithmetic && x.why == Why::IdOverflow,
+                "ref wf submit: Arithmetic (id overflow, firstId + NR > MaxVersion)"
+            );
+            cover!(
+                w == crate::tla::TErr::Ok
+                    && matches!(&op, Op::Settle { id, completed: true, .. }
+                        if matches!(spec::rec(&pre, *id), Some(r) if over(r.recipe, r.units))),
+                "ref wf settle(true): doneU saturates (@ + units > DoneCap)"
+            );
+        }
     }
     if c.part & PART_POST != 0 {
         // PROP: TX-SUBMIT TX-DISPATCH TX-ACK TX-CANCEL TX-SETTLE (post-state on WF states)

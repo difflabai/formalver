@@ -21,6 +21,11 @@
 #            both are tried and reported. Replay kills count only when the
 #            unmutated machine replays the corpus (checked first); otherwise
 #            they are reported as not meaningful and build alone decides.
+#            The replay executable `pool-lean` (Main.lean) imports only
+#            Machine and Text, so a mutant that breaks a proof module still
+#            replays; if `pool-lean` itself does not build, the mutant is
+#            reported "no replay (pool-lean does not build)", never as a
+#            replay kill.
 #            A fix-revert mutant with a property probe
 #            (mutants/probes/<name>.lean) is also killed by "property" when
 #            the probe compiles on the mutant; every probe must fail to
@@ -91,7 +96,7 @@ check_build() {
   if [ $rc -eq 0 ] && grep -q "declaration uses 'sorry'" "$log"; then rc=1; fi
   report build $rc "every theorem proved, no sorry" "$log"
   local hits="$logs/hygiene.log"
-  scan "$lean/PoolLean" "$lean/PoolLean.lean" "$lean/Main.lean" "$lean/Audit.lean" "$lean/canary" "$lean/regression" >"$hits"
+  scan "$lean/PoolLean" "$lean/PoolLean.lean" "$lean/Main.lean" "$lean/Guards.lean" "$lean/Audit.lean" "$lean/canary" "$lean/regression" >"$hits"
   [ ! -s "$hits" ]; report hygiene $? "no forbidden constructs in the sources" "$hits"
 }
 
@@ -132,7 +137,7 @@ check_replay() {
 }
 
 check_mutants() {
-  local m name tmp log how survived=0 base=1
+  local m name tmp log how note survived=0 base=1
   if ! { (cd "$lean" && lake build pool-lean) && (cd "$lean" && lake exe pool-lean replay "$traces"); } >"$logs/mutant-baseline.log" 2>&1; then
     base=0
     echo "NOTE mutants: the unmutated machine does not replay $traces; replay kills are not meaningful, build decides (log $logs/mutant-baseline.log)"
@@ -154,9 +159,13 @@ check_mutants() {
       rm -rf "$tmp"
       continue
     fi
-    how=""
-    if [ $base -eq 1 ] && ! { (cd "$tmp" && lake build pool-lean) && (cd "$tmp" && lake exe pool-lean replay "$traces"); } >>"$log" 2>&1; then
-      how="replay"
+    how="" note=""
+    if [ $base -eq 1 ]; then
+      if ! (cd "$tmp" && lake build pool-lean) >>"$log" 2>&1; then
+        note="; no replay (pool-lean does not build)"
+      elif ! (cd "$tmp" && lake exe pool-lean replay "$traces") >>"$log" 2>&1; then
+        how="replay"
+      fi
     fi
     if ! (cd "$tmp" && lake build) >"$log.build" 2>&1 || grep -q "declaration uses 'sorry'" "$log.build"; then
       how="${how:+$how, }build ($(grep -oE '^error: [A-Za-z/]+\.lean' "$log.build" | sed 's/^error: //' | sort -u | tr '\n' ' ' | sed 's/ $//'))"
@@ -168,9 +177,9 @@ check_mutants() {
     fi
     if [ -z "$how" ]; then
       survived=1
-      report "mutant $name" 1 "survived" "$log"
+      report "mutant $name" 1 "survived$note" "$log"
     else
-      echo "PASS mutant $name: killed by $how"
+      echo "PASS mutant $name: killed by $how$note"
     fi
     rm -rf "$tmp"
   done

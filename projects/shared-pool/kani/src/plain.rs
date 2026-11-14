@@ -102,7 +102,9 @@ fn h_version_max() {
 }
 
 /// `h_wf_*`: WF states (`first_id`, `completed_units`, values and version
-/// free).
+/// free), REF-1..3 included: its covers require a submit refused at the id
+/// overflow and a completing settle whose `completed_units` saturates, the
+/// two `tla.rs` lines no INV state and no conformance trace reaches.
 #[test]
 fn h_wf() {
     run_with("h_wf", 0x2a, 1_000_000, BASE, 0, &|s: &mut Rng| checks::wf_step(s, None));
