@@ -12,8 +12,8 @@ and python3 for `extract.py` (run with `-I`, stdlib only). Property
 catalogue: `projects/shared-pool/strategy.md` §5 (118 IDs), which C-6 reads.
 Run: `projects/shared-pool/prolog/run.sh` (optional `PROLOG_LOGS=<dir>`).
 Last full run: 2026-11-14, in a scratch copy with the candidate corpus, the
-trace-reader patch and the TLA layer's v1.1.0 `SharedPool.tla` (see "State
-at this commit"): every step passes and all 47 mutants are killed, in about
+trace-reader patch and the TLA layer's v1.1.0 `SharedPool.tla` (the
+committed file): every step passes and all 47 mutants are killed, in about
 30 minutes (suites 182 s, mutants 1,591 s summed, most of it the MC-1
 mutants). It ran in two parts: steps 1-4 with the 45 model, requirements and
 code mutants, then steps 1-4 again with the 2 reads mutants.
@@ -67,7 +67,7 @@ traces, the COV-2 reads differential and the step/4 unit tests).
 |---|---|---|---|
 | `extract.py --check` | C-1..C-4 inputs | extracted facts regenerate with no diff | |
 | Authority: api.md table + spec:11 = the shell's `#[near]` attributes, receivers and caller sources + the core's caller checks | C-1 | pass | 12 methods, 12 shell methods, 6 core caller checks, 17 shell → core calls (7 reads) |
-| Guard order: `guard/5` (docs order) = each entry point's code path = TLA+ `GuardOrder`; the documented Full and version-cap conditions = the code's | C-2 | pass (the TLA leg with the TLA layer's v1.1.0 `GuardOrder`, whose cancel row gains InvalidState; see "State at this commit") | 8 op kinds, 57 guards (49 doc, 8 doc_condition; submit 15, dispatch 7, ack 4, cancel 9, settle 8 + 8, pause 2, observe 4); 10 unreachable-site rules; 5 conditions compared |
+| Guard order: `guard/5` (docs order) = each entry point's code path = TLA+ `GuardOrder`; the documented Full and version-cap conditions = the code's | C-2 | pass (the TLA leg reads the v1.1.0 `GuardOrder`, whose cancel row gains InvalidState) | 8 op kinds, 57 guards (49 doc, 8 doc_condition; submit 15, dispatch 7, ack 4, cancel 9, settle 8 + 8, pause 2, observe 4); 10 unreachable-site rules; 5 conditions compared |
 | Lifecycle: `life/5` = the code's status guards = TLA+ `Edges` = the props LIFE-1 graph = the status changes seen in the real traces | C-3 | pass, no divergence (v1.0.0's `div-ack-noop-version` and `div-cancel-terminal-name` closed) | 36 rows, 11 edges, 3 code-only rows (ack of Reserved both ways, ack(false) of Active); all 36 rows observed in the traces |
 | Constants: docs = code; derived bounds; the model's code-only bounds = code | C-4 | pass | 9 compared (VERSION_CAP = 4294966527), 5 derived |
 | Fixture claims on trace configs 1-5 | C-5 | pass, no finding reproduced (F-2, F-4 fixed) | 23 claims; release search 1,308 / 1,308 / 36 / 28 / 81 admitted pairs (gpu / friday / inventory / hiring / risk), 10,464 / 10,464 / 288 / 224 / 648 releases tried, 0 blocked; on trace states 179 / 167 / 67 / 26 / 9 releases, 0 blocked; RISK-HEADROOM 46 states, 464 admissible requests |
@@ -277,12 +277,10 @@ check (no prerequisite is admitted after its record was pruned), by
 
 ## State at this commit
 
-The model, props, MC-1 and the unit tests are at v1.1.0. The trace reader
-(`traces.pl`, `mc2.pl`, `reads.pl`) and `test_mc2.pl` still read the
-committed v1.0.0 corpus (s/5); they change together with the corpus swap.
-Until then `test_mc2`, `test_reads`, and C-3's and C-5's trace legs fail
-(the v1.0.0 states do not convert to `pool/8`), and C-2's TLA leg fails until
-the TLA layer's v1.1.0 `SharedPool.tla` (`GuardOrder.cancel` with
-InvalidState) is committed and `extracted/tla_facts.pl` is regenerated from
-it. With the candidate corpus, the reader patch and that TLA file, `run.sh`
-passes (numbers above).
+The model, props, MC-1 and the unit tests are at v1.1.0, and C-2 reads the
+TLA layer's v1.1.0 `GuardOrder`. The trace reader (`traces.pl`, `mc2.pl`,
+`reads.pl`) and `test_mc2.pl` still read the committed v1.0.0 corpus (s/5);
+they change together with the corpus swap. Until then `test_mc2`,
+`test_reads`, and C-3's and C-5's trace legs fail (the v1.0.0 states do not
+convert to `pool/8`). With the candidate corpus and the reader patch,
+`run.sh` passes (numbers above).
