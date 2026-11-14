@@ -1,10 +1,10 @@
-Mutant m16_executor_dedupe_dropped: EX-2: execute no longer deduplicates a replayed id (a second job is pushed).
+Mutant s16_executor_dedupe_dropped: EX-2: execute no longer deduplicates a replayed id (a second job is pushed).
 Applied with `patch -p1` from the source-mirror root by near-tests/run-mutants.sh;
 the near-tests suite must fail on it.
 
 --- a/crates/executor/src/lib.rs
 +++ b/crates/executor/src/lib.rs
-@@ -42,10 +42,6 @@
+@@ -65,10 +65,6 @@
              self.lock,
              "only lock may execute"
          );
@@ -12,6 +12,6 @@ the near-tests suite must fail on it.
 -            assert!(j.recipe == recipe && j.units == units, "payload mismatch");
 -            return j.status.clone();
 -        }
-         assert!(self.jobs.len() < 256, "full");
-         assert_ne!(self.mode, "panic", "injected failure");
-         let status = if self.mode == "reject" {
+         // A forgotten id belongs to a pruned record: never start it.
+         if u64::from(id) + WINDOW <= u64::from(self.newest) {
+             return "cancelled".into();

@@ -1,4 +1,4 @@
-Mutant m09_new_not_private: SH-2: anyone may initialise the pool.
+Mutant s09_new_not_private: SH-2: anyone may initialise the pool.
 Applied with `patch -p1` from the source-mirror root by near-tests/run-mutants.sh;
 the near-tests suite must fail on it.
 

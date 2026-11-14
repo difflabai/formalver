@@ -277,13 +277,13 @@ fn shell_op(op: &T, now: &mut u64, k: usize) -> (Ctx, Op) {
             // The executor's answer: "active" acknowledges; "unknown" or a
             // failed execute leave the record Unknown.
             let result = if a[1].boolean() {
-                Some("active".to_string())
+                Some("active")
             } else if k % 2 == 0 {
-                Some("unknown".to_string())
+                Some("unknown")
             } else {
                 None
             };
-            (Ctx::new(POOL, Z, ts(*now)), Op::OnResult { id, result })
+            (Ctx::new(POOL, Z, ts(*now)), Op::cb(id, result))
         }
         n => panic!("unknown op {n}"),
     }

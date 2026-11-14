@@ -1,10 +1,10 @@
-Mutant m07_settle_emits_no_event: SH-5/SH-8: settle forgets its "settled" event.
+Mutant s07_settle_emits_no_event: SH-5/SH-8: settle forgets its "settled" event.
 Applied with `patch -p1` from the source-mirror root by near-tests/run-mutants.sh;
 the near-tests suite must fail on it.
 
 --- a/crates/contract/src/lib.rs
 +++ b/crates/contract/src/lib.rs
-@@ -138,10 +138,6 @@
+@@ -145,10 +145,6 @@
      }
      pub fn settle(&mut self, id: u32, completed: bool) {
          must(self.pool.settle(&caller(), id, completed));

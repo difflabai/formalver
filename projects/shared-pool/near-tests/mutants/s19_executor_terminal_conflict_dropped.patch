@@ -1,10 +1,10 @@
-Mutant m19_executor_terminal_conflict_dropped: EX-4: finish may replace a terminal outcome with the other one.
+Mutant s19_executor_terminal_conflict_dropped: EX-4: finish may replace a terminal outcome with the other one.
 Applied with `patch -p1` from the source-mirror root by near-tests/run-mutants.sh;
 the near-tests suite must fail on it.
 
 --- a/crates/executor/src/lib.rs
 +++ b/crates/executor/src/lib.rs
-@@ -82,10 +82,6 @@
+@@ -113,10 +113,6 @@
              .find(|j| j.id == id)
              .expect("unknown job");
          let next = if completed { "completed" } else { "cancelled" };
@@ -13,5 +13,5 @@ the near-tests suite must fail on it.
 -            "terminal outcome conflict"
 -        );
          j.status = next.into();
-         self.notify(id, completed)
+         self.notify(id, completed);
      }

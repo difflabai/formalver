@@ -1,4 +1,4 @@
-Mutant m10_now_rounds_up: SH-1: now() rounds the block timestamp up to the next second.
+Mutant s10_now_rounds_up: SH-1: now() rounds the block timestamp up to the next second.
 Applied with `patch -p1` from the source-mirror root by near-tests/run-mutants.sh;
 the near-tests suite must fail on it.
 

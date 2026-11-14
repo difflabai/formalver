@@ -1,4 +1,4 @@
-Mutant m02_caller_is_signer: SH-1: caller() is the signer instead of the predecessor.
+Mutant s02_caller_is_signer: SH-1: caller() is the signer instead of the predecessor.
 Applied with `patch -p1` from the source-mirror root by near-tests/run-mutants.sh;
 the near-tests suite must fail on it.
 

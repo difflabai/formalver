@@ -3,10 +3,11 @@
 //!
 //! Upstream: difflabai/shared-pool-controls `crates/contract/src/lib.rs`,
 //!           `crates/executor/src/lib.rs`, `crates/core/src/lib.rs`
-//! Pin:      a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7 (PR #1 head)
-//! sha256:   contract/src/lib.rs 6ee32c1e4b05934c69ef4a338c58f13f658fc55b3bc132c832ae762c9fe29784
-//!           executor/src/lib.rs 917d0dcc667a7f55f963313b495e5bf8067f22f80b206543f12b8332e1d005c5
-//!           core/src/lib.rs     9a4eb36cc9690d353f8ec78e4eec6e389a895caccab24ced54994b8a8e7505c4
+//! Pin:      v1.1.0, 57b3f02d18e85149db3c1035431368c4e07a4d8a (merge of PR #4;
+//!           tree identical to the PR head 6fcbd56)
+//! sha256:   contract/src/lib.rs 3810d18d9afa6ba3a6fc6dac9c2e897acc343d8e532bd13b2c2bbc81da20c03c
+//!           executor/src/lib.rs a2d63842c23d760882b36b1d0548062b6b4fe24f49b7ce5fda7c492cbe129198
+//!           core/src/lib.rs     c3bb825b91f7c277dee8651beafd45955f7cf8935c858f928b6a1b62d607ba48
 //!
 //! Two ways to run the shell, both against near-sdk 5.29.1's mocked runtime
 //! (the real `VMLogic` of near-vm-runner 0.37.4):
@@ -15,18 +16,18 @@
 //!   Rust functions. Every call starts from storage (`state_read`, Borsh) and a
 //!   successful call ends with `state_write`; a panicking call is discarded with
 //!   every write (ASM-ATOMIC). Fast: used by `store_diff.rs` (SH-8).
-//! - **Wasm path** (`wasm_call`, `Net`): the pinned wasm itself, built with
-//!   `cargo build --target wasm32-unknown-unknown --release` exactly as
-//!   upstream `scripts/build.sh` does ("plain"), or with `RUSTFLAGS=--cfg near`
-//!   as cargo-near does ("near"), run by the wasmi interpreter. Every `env`
-//!   import is forwarded to the same mocked `VMLogic` (pointers translated
-//!   between wasm memory and host memory). This exercises the code near-sdk
-//!   generates only for wasm32: `#[init]` (init once), `#[private]`, the
-//!   nonpayable deposit checks, JSON argument and return encoding, and
-//!   `#[callback_result]` reading the promise result injected with
-//!   `testing_env!`. Any import other than the ones the shell legitimately
-//!   uses (deploy, delete, add-key, transfer, stake, ... are imported because
-//!   near-sdk's `Promise` links them) traps as `forbidden host call`.
+//! - **Wasm path** (`wasm_call`, `Net`): the pinned wasm itself, built exactly
+//!   as upstream `scripts/build.sh` builds it (`RUSTFLAGS="--cfg near"`,
+//!   `cargo build --target wasm32-unknown-unknown --release --locked`; build
+//!   `Near`; `wasm-surface.sh` SURF-3(a) checks the bytes equal build.sh's),
+//!   run by the wasmi interpreter. Every `env` import is forwarded to the same
+//!   mocked `VMLogic` (pointers translated between wasm memory and host
+//!   memory). This exercises the code near-sdk generates only for wasm32:
+//!   `#[init]` (init once), `#[private]`, the nonpayable deposit checks and
+//!   JSON argument and return encoding. Any import other than the ones the
+//!   shell legitimately uses traps as `forbidden host call`. The no-cfg build
+//!   (`Plain`, v1.0.0's documented build) is kept only as a negative control
+//!   (NT-F1, SURF-3(b)); it is not in `Build::all()`.
 //!
 //! Expected values are built here from the core (`pool_core::Pool`, the same
 //! pinned crate) and from docs/api.md's names, never from the contract's
@@ -38,7 +39,8 @@ use near_sdk::mock::{MockAction, Receipt};
 use near_sdk::serde_json::{self, json, Value};
 use near_sdk::test_utils::VMContextBuilder;
 use near_sdk::{env, test_vm_config, AccountId, MockedBlockchain, NearToken, PromiseResult};
-use near_sdk::{PromiseError, RuntimeFeesConfig};
+use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
+use near_sdk::RuntimeFeesConfig;
 use pool_contract::Contract;
 use pool_core::{Commitment, Config, Decision, Error, Metric, Pool, Recipe, Request, Shape, Status, Term};
 use std::cell::Cell;
@@ -355,13 +357,57 @@ pub fn pool_of(storage: &Storage) -> Pool {
 // Operations: the contract's methods, and their expected effect from the core
 // ---------------------------------------------------------------------------
 
+/// One promise result a callback receives (near-sdk's `PromiseResult` is not
+/// `Clone`): the raw bytes of a successful call, or a failed call.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Res {
+    Ok(Vec<u8>),
+    Failed,
+}
+
+impl Res {
+    /// The executor's usual answer: one JSON string.
+    pub fn ok_str(s: &str) -> Res {
+        Res::Ok(serde_json::to_vec(s).unwrap())
+    }
+    /// Any bytes (a number, `null`, an object, invalid UTF-8, ...).
+    pub fn raw(b: &[u8]) -> Res {
+        Res::Ok(b.to_vec())
+    }
+    pub fn failed() -> Res {
+        Res::Failed
+    }
+    pub fn pr(&self) -> PromiseResult {
+        match self {
+            Res::Ok(b) => PromiseResult::Successful(b.clone()),
+            Res::Failed => PromiseResult::Failed,
+        }
+    }
+}
+
+pub fn prs(r: &[Res]) -> Vec<PromiseResult> {
+    r.iter().map(Res::pr).collect()
+}
+
+/// docs/api.md:40 (NT-F4): the status `on_result` reads from its promise
+/// results. Exactly one result, a successful call, at most 64 bytes, and one
+/// JSON string: that string. Anything else (a failed call, no result, two
+/// results, more than 64 bytes, a number, `null`, an object, invalid bytes)
+/// is "unknown".
+pub fn outcome_of(results: &[Res]) -> String {
+    match results {
+        [Res::Ok(b)] if b.len() <= 64 => serde_json::from_slice::<String>(b).unwrap_or_else(|_| "unknown".into()),
+        _ => "unknown".into(),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Op {
     Submit { req: Request },
     Dispatch { id: u32 },
     Reconcile { id: u32 },
-    /// The private callback with its promise result (`None` = PromiseError).
-    OnResult { id: u32, result: Option<String> },
+    /// The private callback with its raw promise results.
+    OnResult { id: u32, results: Vec<Res> },
     Settle { id: u32, completed: bool },
     Cancel { id: u32 },
     Pause { paused: bool },
@@ -369,6 +415,14 @@ pub enum Op {
 }
 
 impl Op {
+    /// `on_result(id)` after an executor answer: `Some(s)` the JSON string
+    /// `s`, `None` a failed call (execute panicked).
+    pub fn cb(id: u32, result: Option<&str>) -> Op {
+        Op::OnResult {
+            id,
+            results: vec![result.map_or(Res::Failed, Res::ok_str)],
+        }
+    }
     pub fn method(&self) -> &'static str {
         match self {
             Op::Submit { .. } => "submit",
@@ -396,10 +450,7 @@ impl Op {
     /// The promise results a callback receives.
     pub fn results(&self) -> Vec<PromiseResult> {
         match self {
-            Op::OnResult { result: Some(s), .. } => {
-                vec![PromiseResult::Successful(serde_json::to_vec(s).unwrap())]
-            }
-            Op::OnResult { result: None, .. } => vec![PromiseResult::Failed],
+            Op::OnResult { results, .. } => prs(results),
             _ => vec![],
         }
     }
@@ -568,7 +619,7 @@ pub fn core_step(pool: &mut Pool, ctx: &Ctx, op: &Op) -> Expect {
         Op::Dispatch { id } => match pool.dispatch(caller, *id, now) {
             Err(e) => guest(e),
             Ok(()) => {
-                let c = &pool.records[*id as usize];
+                let c = pool.record(*id).expect("dispatched record");
                 Expect {
                     result: Ok(Value::Null),
                     events: vec![],
@@ -585,18 +636,22 @@ pub fn core_step(pool: &mut Pool, ctx: &Ctx, op: &Op) -> Expect {
                 }
             }
         },
-        Op::Reconcile { id } => match pool.records.get(*id as usize) {
-            None => Expect {
-                result: Err(Fail::Rust("NotFound".into())),
-                events: vec![],
-                calls: vec![],
-            },
-            Some(c) if !matches!(c.status, Status::Dispatched | Status::Active | Status::Unknown) => Expect {
+        // docs/api.md:5: reconcile is nonpayable too (NT-F2 fixed: the shell's
+        // own check, first); a missing or pruned id is the core's NotFound
+        // through `must` (a Guest panic); the status guard is an `assert!`.
+        Op::Reconcile { .. } if ctx.deposit > 0 => Expect {
+            result: Err(Fail::Guest(RECONCILE_DEPOSIT.into())),
+            events: vec![],
+            calls: vec![],
+        },
+        Op::Reconcile { id } => match pool.record(*id) {
+            Err(e) => guest(e),
+            Ok(c) if !matches!(c.status, Status::Dispatched | Status::Active | Status::Unknown) => Expect {
                 result: Err(Fail::Rust("InvalidState".into())),
                 events: vec![],
                 calls: vec![],
             },
-            Some(c) => Expect {
+            Ok(c) => Expect {
                 result: Ok(Value::Null),
                 events: vec![],
                 calls: vec![
@@ -605,19 +660,19 @@ pub fn core_step(pool: &mut Pool, ctx: &Ctx, op: &Op) -> Expect {
                 ],
             },
         },
-        Op::OnResult { id, result } => {
-            let Some(c) = pool.records.get(*id as usize) else {
-                return Expect {
-                    result: Err(Fail::Rust("NotFound".into())),
-                    events: vec![],
-                    calls: vec![],
-                };
+        Op::OnResult { id, results } => {
+            // docs/api.md:40: anything but one JSON string of at most 64
+            // bytes is "unknown". docs/api.md:20: the callback never panics on
+            // its input; a result for an id with no record (never issued, or
+            // pruned) changes nothing and is logged with error NotFound.
+            let status = outcome_of(results);
+            let Ok(c) = pool.record(*id) else {
+                return unit("reconciled", json!({ "id": id, "outcome": status, "error": "NotFound" }));
             };
             let exec = executor_of(pool, c);
             // docs/api.md: "completed" and "cancelled" are authoritative
             // terminal evidence; "active" acknowledges; runtime failures and
             // unexpected strings become Unknown.
-            let status = result.clone().unwrap_or_else(|| "unknown".into());
             let r = match status.as_str() {
                 "completed" => pool.settle(&exec, *id, true),
                 "cancelled" => pool.settle(&exec, *id, false),
@@ -651,20 +706,26 @@ pub fn core_step(pool: &mut Pool, ctx: &Ctx, op: &Op) -> Expect {
 /// Runs `op` through the contract's public method on the host path. The
 /// return value is serialized to JSON (`null` for unit and Promise returns).
 pub fn contract_step(ctx: &Ctx, storage: Storage, op: &Op) -> Outcome<Value> {
+    let results = op.results();
     let op = op.clone();
     let write = !matches!(op, Op::Reconcile { .. }); // reconcile is &self
-    call(ctx, storage, vec![], write, move |c| match op {
+    call(ctx, storage, results, write, move |c| match op {
         Op::Submit { req } => serde_json::to_value(c.submit(req)).unwrap(),
+        // Both return unit in v1.1.0; the receipt's result is the callback,
+        // through promise_return (NT-F3).
         Op::Dispatch { id } => {
-            drop(c.dispatch(id));
+            c.dispatch(id);
             Value::Null
         }
         Op::Reconcile { id } => {
-            drop(c.reconcile(id));
+            c.reconcile(id);
             Value::Null
         }
-        Op::OnResult { id, result } => {
-            c.on_result(id, result.ok_or(PromiseError::Failed));
+        Op::OnResult { id, .. } => {
+            #[cfg(not(nt_v100_contract))]
+            c.on_result(id);
+            #[cfg(nt_v100_contract)]
+            c.on_result(id, v100_callback_result());
             Value::Null
         }
         Op::Settle { id, completed } => {
@@ -686,14 +747,70 @@ pub fn contract_step(ctx: &Ctx, storage: Storage, op: &Op) -> Outcome<Value> {
     })
 }
 
+/// Historical mutant s00a only (`run-mutants.sh` builds the harness with
+/// `--cfg nt_v100_contract`): the v1.0.0 `on_result(id, #[callback_result]
+/// result: Result<String, PromiseError>)` takes the argument near-sdk
+/// 5.29.1's wrapper would read (near-sdk-macros attr_sig_info.rs:293-298).
+#[cfg(nt_v100_contract)]
+fn v100_callback_result() -> Result<String, near_sdk::PromiseError> {
+    near_sdk::env::promise_result_checked(0, usize::MAX).map(|data| {
+        serde_json::from_slice(&data)
+            .unwrap_or_else(|e| near_sdk::env::panic_str(&format!("Failed to deserialize callback using JSON. Error: `{e}`")))
+    })
+}
+
 /// One differential step on the host path: runs `op` on the contract (from
 /// `storage`) and on the core (`pool`), and checks equal results, panics,
 /// events, receipts and stored state (Borsh of the core's pool).
 pub fn step(storage: Storage, pool: &mut Pool, ctx: &Ctx, op: &Op, what: &str) -> Outcome<Value> {
+    step_opt(storage, pool, ctx, op, what, true)
+}
+
+/// LIVE-ALL at the shell (F-1, F-2, F-2b fixed in v1.1.0): in a reachable
+/// state no release or settlement fails `Bounds` or `Arithmetic`, whether it
+/// comes as `cancel`, `settle` or the `on_result` callback. `exp` is the
+/// core's effect of `op`; a crafted state (`Sim::edit`) may be unreachable,
+/// so its steps skip this check.
+pub fn check_live_all(op: &Op, exp: &Expect, what: &str) {
+    let bad = |e: &str| matches!(e, "Bounds" | "Arithmetic");
+    match (op, &exp.result) {
+        (Op::Cancel { .. } | Op::Settle { .. }, Err(Fail::Guest(e))) => {
+            assert!(!bad(e), "{what}: LIVE-ALL: {} failed {e}", op.method())
+        }
+        (Op::OnResult { .. }, Ok(_)) => {
+            let e = &exp.events[0]["data"][0]["error"];
+            assert!(!e.as_str().is_some_and(bad), "{what}: LIVE-ALL: on_result recorded {e}");
+        }
+        _ => {}
+    }
+}
+
+/// reconcile's deposit check (NT-F2 fixed, docs/api.md:5).
+pub const RECONCILE_DEPOSIT: &str = "Method reconcile doesn't accept deposit";
+
+/// The failure the host path reports for the expected `f`. near-sdk 5.29.1's
+/// `require!(c, m)` (src/utils/mod.rs:67-75) is `assert!(c, "{}", m)` when
+/// debug_assertions are on, as in this host test build, and
+/// `env::panic_str(m)` in the release wasm. The contract's one `require!` is
+/// reconcile's deposit check, so on the host path that failure is a Rust
+/// panic with the same message. The documented build's is a Guest panic
+/// (checked on the wasm path and in `nt_f1`).
+pub fn on_host(f: Fail) -> Fail {
+    match f {
+        Fail::Guest(m) if m == RECONCILE_DEPOSIT => Fail::Rust(m),
+        f => f,
+    }
+}
+
+/// `step`, with the LIVE-ALL check only when `live_all` (a reachable state).
+pub fn step_opt(storage: Storage, pool: &mut Pool, ctx: &Ctx, op: &Op, what: &str, live_all: bool) -> Outcome<Value> {
     let before = pool.clone();
     let out = contract_step(ctx, storage.clone(), op);
     let exp = core_step(pool, ctx, op);
-    assert_eq!(out.result, exp.result, "{what}: result");
+    if live_all {
+        check_live_all(op, &exp, what);
+    }
+    assert_eq!(out.result, exp.result.clone().map_err(on_host), "{what}: result");
     let events: Vec<Value> = out.logs.iter().map(|l| parse_event(l)).collect();
     assert_eq!(events, exp.events, "{what}: events");
     assert_eq!(calls_of(&out.receipts), exp.calls, "{what}: receipts");
@@ -711,10 +828,22 @@ pub fn step(storage: Storage, pool: &mut Pool, ctx: &Ctx, op: &Op, what: &str) -
 pub fn check_views(storage: &Storage, pool: &Pool, rng: &mut Rng, now: u64, what: &str) {
     let got = view(storage, now, |c| c.get_pool());
     assert_eq!(got, *pool, "{what}: get_pool");
-    let n = pool.records.len() as u32;
-    let mut pages = vec![(0, 0), (0, 50), (0, 51), (0, u32::MAX), (n, 50), (n + 1, 1), (u32::MAX, u32::MAX)];
+    let first = pool.first_id;
+    let next = first + pool.records.len() as u32;
+    let mut pages = vec![
+        (0, 0),
+        (0, 50),
+        (0, 51),
+        (0, u32::MAX),
+        (first.saturating_sub(1), 3),
+        (first, 50),
+        (next, 50),
+        (next.saturating_add(1), 1),
+        (u32::MAX, u32::MAX),
+    ];
     for _ in 0..3 {
-        pages.push((rng.below(n as u64 + 2) as u32, rng.below(60) as u32));
+        let from = first.saturating_sub(2) + rng.below(next as u64 - first.saturating_sub(2) as u64 + 3) as u32;
+        pages.push((from, rng.below(60) as u32));
     }
     for (from, limit) in pages {
         let got = view(storage, now, |c| c.get_commitments(from, limit));
@@ -729,11 +858,10 @@ pub fn check_views(storage: &Storage, pool: &Pool, rng: &mut Rng, now: u64, what
     }
 }
 
-/// docs/api.md: "Read page, max 50", records from `from`.
+/// docs/api.md:11: "Read page, max 50, from id `from`. Ids below `first_id`
+/// were pruned; a page starting there begins at `first_id`."
 pub fn expected_page(pool: &Pool, from: u32, limit: u32) -> Vec<Commitment> {
-    let from = (from as usize).min(pool.records.len());
-    let end = (from + (limit.min(50) as usize)).min(pool.records.len());
-    pool.records[from..end].to_vec()
+    pool.records.iter().filter(|c| c.id >= from).take(limit.min(50) as usize).cloned().collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -970,12 +1098,37 @@ pub fn random_request(rng: &mut Rng, pool: &Pool, now: u64) -> Request {
     }
 }
 
+/// Random raw promise results for `on_result`: mostly one status string, and
+/// every malformed shape docs/api.md:40 maps to "unknown".
+pub fn random_results(rng: &mut Rng) -> Vec<Res> {
+    let one = match rng.below(24) {
+        0..=6 => Res::ok_str("active"),
+        7..=11 => Res::ok_str("completed"),
+        12..=14 => Res::ok_str("cancelled"),
+        15 => Res::ok_str("unknown"),
+        16 => Res::ok_str(rng.pick(&["garbage", "Completed", "", " completed", "bogus"])),
+        17 => Res::raw(rng.pick(&[&b"7"[..], b"null", b"{}", b"[\"completed\"]", b"completed", b"", b"\"compl\xffeted\""])),
+        18 => {
+            // "completed" padded with trailing JSON whitespace: 64 bytes are
+            // read, 65 are "unknown" (upstream nt_f4 test).
+            let pad = rng.range(0, 1) as usize;
+            Res::raw(format!("\"completed\"{}", " ".repeat(53 + pad)).as_bytes())
+        }
+        19 => Res::raw(format!("\"{}\"", "x".repeat(10_000)).as_bytes()),
+        20 => return vec![],
+        21 => return vec![Res::ok_str("completed"), Res::ok_str("completed")],
+        _ => Res::failed(),
+    };
+    vec![one]
+}
+
 /// A random next call, biased toward calls whose guards pass, with every
 /// shell path reachable (relayed calls, on_result outcomes, reconcile).
 pub fn random_step(rng: &mut Rng, pool: &Pool, ts_ns: u64) -> (Ctx, Op) {
     let cfg = &pool.config;
     let now = ts_ns / 1_000_000_000;
     let accts = accounts_of(cfg);
+    let first = pool.first_id as i64;
     let nrec = pool.records.len() as i64;
     let open: Vec<u32> = pool
         .records
@@ -983,13 +1136,17 @@ pub fn random_step(rng: &mut Rng, pool: &Pool, ts_ns: u64) -> (Ctx, Op) {
         .filter(|c| !matches!(c.status, Status::Completed | Status::Cancelled))
         .map(|c| c.id)
         .collect();
+    // Ids are `first_id + k` (v1.1.0 window); ids below `first_id` were
+    // pruned, and one past the newest was never issued.
     let id = |rng: &mut Rng| -> u32 {
-        if nrec == 0 || rng.chance(5) {
-            rng.range(0, nrec + 1) as u32
+        if first > 0 && rng.chance(3) {
+            rng.range(0, first - 1) as u32
+        } else if nrec == 0 || rng.chance(5) {
+            rng.range(first, first + nrec + 1) as u32
         } else if !open.is_empty() && rng.chance(80) {
             *rng.pick(&open)
         } else {
-            rng.range(0, nrec - 1) as u32
+            rng.range(first, first + nrec - 1) as u32
         }
     };
     // The predecessor decides; the signer is usually the same account, and
@@ -1000,8 +1157,8 @@ pub fn random_step(rng: &mut Rng, pool: &Pool, ts_ns: u64) -> (Ctx, Op) {
     };
     let other = |rng: &mut Rng| rng.pick(&accts).clone();
     let role = |rng: &mut Rng, i: u32, pick: fn(&Recipe) -> &String, pct: u64| -> String {
-        match pool.records.get(i as usize) {
-            Some(c) if rng.chance(pct) => pick(&cfg.recipes[c.recipe as usize]).clone(),
+        match pool.record(i) {
+            Ok(c) if rng.chance(pct) => pick(&cfg.recipes[c.recipe as usize]).clone(),
             _ => rng.pick(&accts).clone(),
         }
     };
@@ -1018,25 +1175,24 @@ pub fn random_step(rng: &mut Rng, pool: &Pool, ts_ns: u64) -> (Ctx, Op) {
         let who = role(rng, i, |r| &r.actor, 85);
         (ctx(rng, &who), Op::Dispatch { id: i })
     } else if k < 50 {
+        // NT-F2 fixed: an attached deposit is refused, first (docs/api.md:5).
         let i = id(rng);
         let who = other(rng);
-        (ctx(rng, &who), Op::Reconcile { id: i })
+        let c = ctx(rng, &who);
+        let c = if rng.chance(4) { c.with_deposit(1) } else { c };
+        (c, Op::Reconcile { id: i })
     } else if k < 62 {
         // The private callback (the pool calls itself after execute/status).
+        // The callback reads the raw promise results itself (NT-F4 fixed):
+        // anything but exactly one JSON string of at most 64 bytes is
+        // "unknown" (docs/api.md:40).
         let i = id(rng);
-        let result = match rng.below(12) {
-            0..=3 => Some("active".to_string()),
-            4..=6 => Some("completed".to_string()),
-            7 | 8 => Some("cancelled".to_string()),
-            9 => Some("unknown".to_string()),
-            10 => Some(rng.pick(&["garbage", "Completed", "", " completed"]).to_string()),
-            _ => None,
-        };
-        (Ctx::new(POOL, rng.pick(&accts), ts_ns), Op::OnResult { id: i, result })
+        let results = random_results(rng);
+        (Ctx::new(POOL, rng.pick(&accts), ts_ns), Op::OnResult { id: i, results })
     } else if k < 68 {
         let i = id(rng);
-        let who = match pool.records.get(i as usize) {
-            Some(c) if rng.chance(80) => {
+        let who = match pool.record(i) {
+            Ok(c) if rng.chance(80) => {
                 if rng.chance(70) {
                     cfg.recipes[c.recipe as usize].actor.clone()
                 } else {
@@ -1083,16 +1239,21 @@ pub fn random_step(rng: &mut Rng, pool: &Pool, ts_ns: u64) -> (Ctx, Op) {
 /// How the wasm under test was built.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Build {
-    /// upstream `scripts/build.sh`: `cargo build --target wasm32-unknown-unknown
-    /// --release --locked` (no `--cfg near`).
+    /// `cargo build --target wasm32-unknown-unknown --release --locked` with
+    /// no `--cfg near`: the v1.0.0 documented build (NT-F1). v1.1.0's
+    /// build.sh refuses it (SURF-3(b)(i)); it is kept only as that negative
+    /// control and for the NT-F1 regression test.
     Plain,
-    /// `RUSTFLAGS=--cfg near`, as cargo-near builds (near-sdk's on-chain cfg).
+    /// upstream `scripts/build.sh` at v1.1.0: `RUSTFLAGS=--cfg near`, as
+    /// cargo-near builds (near-sdk's on-chain cfg). SURF-3(a) checks its bytes
+    /// equal build.sh's `artifacts/build.json`.
     Near,
 }
 
 impl Build {
-    pub fn all() -> [Build; 2] {
-        [Build::Plain, Build::Near]
+    /// The build under test: the documented one (NT-F1 fixed).
+    pub fn all() -> [Build; 1] {
+        [Build::Near]
     }
     fn tag(self) -> &'static str {
         match self {
@@ -1146,7 +1307,11 @@ fn wasm_dir(build: Build) -> PathBuf {
             .join(build.tag());
         let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
         let mut cmd = std::process::Command::new(cargo);
-        cmd.args(["build", "--manifest-path"])
+        // From the source-mirror root, as build.sh runs: the same
+        // rust-toolchain.toml and cargo configuration (SURF-3(a) checks the
+        // bytes are build.sh's).
+        cmd.current_dir(here.join("../source-mirror"))
+            .args(["build", "--manifest-path"])
             .arg(&manifest)
             .args([
                 "--target",
@@ -1244,6 +1409,9 @@ const BRIDGED: &[&str] = &[
     "panic",
     "promise_result",
     "promise_results_count",
+    "promise_create",
+    "promise_then",
+    // v1.0.0's Promise type (NT-F3): kept so the historical mutant s00a runs.
     "promise_batch_create",
     "promise_batch_then",
     "promise_batch_action_function_call",
@@ -1400,6 +1568,32 @@ fn bridge(l: &mut wasmi::Linker<Host>) {
         log_call!(c, "promise_results_count");
         unsafe { sys::promise_results_count() }
     })
+    .unwrap();
+    l.func_wrap(
+        "env",
+        "promise_create",
+        |mut c: C, al: u64, ap: u64, fl: u64, fp: u64, gl: u64, gp: u64, amt: u64, gas: u64| -> R<u64> {
+            log_call!(c, "promise_create");
+            let a = rd(&c, ap, al)?;
+            let f = rd(&c, fp, fl)?;
+            let g = rd(&c, gp, gl)?;
+            let m = rd(&c, amt, 16)?;
+            Ok(unsafe { sys::promise_create(al, p(&a), fl, p(&f), gl, p(&g), p(&m), gas) })
+        },
+    )
+    .unwrap();
+    l.func_wrap(
+        "env",
+        "promise_then",
+        |mut c: C, idx: u64, al: u64, ap: u64, fl: u64, fp: u64, gl: u64, gp: u64, amt: u64, gas: u64| -> R<u64> {
+            log_call!(c, "promise_then");
+            let a = rd(&c, ap, al)?;
+            let f = rd(&c, fp, fl)?;
+            let g = rd(&c, gp, gl)?;
+            let m = rd(&c, amt, 16)?;
+            Ok(unsafe { sys::promise_then(idx, al, p(&a), fl, p(&f), gl, p(&g), p(&m), gas) })
+        },
+    )
     .unwrap();
     l.func_wrap("env", "promise_batch_create", |mut c: C, al: u64, ap: u64| -> R<u64> {
         log_call!(c, "promise_batch_create");
@@ -1614,9 +1808,25 @@ pub fn assert_wasm_fail(build: Build, out: &WasmOutcome, exp: &Fail, before: &St
 /// One differential step on the wasm path: the same checks as `step`, with
 /// the JSON return of the real wrappers.
 pub fn wasm_diff_step(build: Build, storage: Storage, pool: &mut Pool, ctx: &Ctx, op: &Op, what: &str) -> WasmOutcome {
+    wasm_diff_step_opt(build, storage, pool, ctx, op, what, true)
+}
+
+/// `wasm_diff_step`, with the LIVE-ALL check only when `live_all`.
+pub fn wasm_diff_step_opt(
+    build: Build,
+    storage: Storage,
+    pool: &mut Pool,
+    ctx: &Ctx,
+    op: &Op,
+    what: &str,
+    live_all: bool,
+) -> WasmOutcome {
     let before = pool.clone();
     let out = wasm_step(build, ctx, storage.clone(), op);
     let exp = core_step(pool, ctx, op);
+    if live_all {
+        check_live_all(op, &exp, what);
+    }
     assert!(out.forbidden.is_empty(), "{what}: forbidden host calls {:?}", out.forbidden);
     match &exp.result {
         Ok(v) => {
@@ -1624,17 +1834,14 @@ pub fn wasm_diff_step(build: Build, storage: Storage, pool: &mut Pool, ctx: &Ctx
             if !v.is_null() {
                 assert_eq!(&out.json(), v, "{what}: return value");
             } else if matches!(op, Op::Dispatch { .. } | Op::Reconcile { .. }) {
-                // The Promise is returned: near-sdk serializes it as `null`
-                // (value_return) and then, when it is dropped, calls
-                // promise_return, which replaces the value as the receipt's
-                // result (the last return wins in the runtime).
-                assert!(out.promise_return.is_some(), "{what}: promise not returned");
-                let pos = |n: &str| out.host_calls.iter().rposition(|c| *c == n);
-                assert!(
-                    pos("value_return").map_or(true, |v| Some(v) < pos("promise_return")),
-                    "{what}: value_return after promise_return: {:?}",
-                    out.host_calls
-                );
+                // v1.1.0 (NT-F3): `call_then_callback` returns the callback
+                // (promise index 1: the executor call is 0) with
+                // promise_return, and the method returns unit, so no
+                // value_return. docs/api.md:3-4: "Promise to executor
+                // execute, then on_result".
+                assert_eq!(out.promise_return, Some(1), "{what}: the callback is not the returned promise");
+                assert!(!out.called("value_return"), "{what}: value_return beside promise_return: {:?}", out.host_calls);
+                assert_eq!(out.result.as_ref().unwrap(), &None, "{what}: value returned");
             } else {
                 assert_eq!(out.result.as_ref().unwrap(), &None, "{what}: unit method returned a value");
             }
@@ -1660,7 +1867,9 @@ pub fn wasm_diff_step(build: Build, storage: Storage, pool: &mut Pool, ctx: &Ctx
 
 /// The pool and executor wasm deployed side by side, with a FIFO of receipts
 /// executed in order: a callback receipt runs after the receipt it depends
-/// on, with that receipt's result as its promise result (ASM-CALLBACK).
+/// on, with that receipt's result as its promise result (ASM-CALLBACK). A
+/// receipt that returns a promise (`promise_return`) has that promise's
+/// result as its own: that is how the transaction's result is found.
 pub struct Net {
     pub build: Build,
     pub pool: Storage,
@@ -1669,6 +1878,9 @@ pub struct Net {
     pub now: u64,
     /// Every executed receipt: (receiver, method, outcome summary).
     pub trace: Vec<(String, String, Result<Option<Vec<u8>>, WasmFail>, Vec<String>)>,
+    /// The last `tx`'s result: its first receipt's, following
+    /// `promise_return` to the returned receipt (`Err(())`: it failed).
+    pub result: Option<Result<Vec<u8>, ()>>,
 }
 
 pub struct Pending {
@@ -1701,6 +1913,7 @@ impl Net {
             exec_id: exec_id.into(),
             now,
             trace: vec![],
+            result: None,
         }
     }
 
@@ -1720,15 +1933,19 @@ impl Net {
         let first = self.exec_one(signer, receiver, method, &serde_json::to_vec(&args).unwrap(), vec![]);
         let mut queue: Vec<(Pending, Option<usize>)> = vec![];
         let mut results: Vec<Option<Result<Vec<u8>, ()>>> = vec![];
-        let base = 0usize;
-        Self::enqueue(&mut queue, &mut results, receiver, &first, base);
+        // Queue position of the promise each executed receipt returned.
+        let ret_of = |out: &WasmOutcome, off: usize| out.promise_return.map(|k| off + k as usize);
+        let first_ret = if first.result.is_ok() { ret_of(&first, 0) } else { None };
+        let mut rets: Vec<Option<usize>> = vec![];
+        Self::enqueue(&mut queue, &mut results, receiver, &first, 0);
+        rets.resize(queue.len(), None);
         let mut i = 0;
         while i < queue.len() {
             let (p, _) = &queue[i];
             let deps: Vec<PromiseResult> = p
                 .deps
                 .iter()
-                .map(|d| match results[*d].clone().expect("dependency ran first") {
+                .map(|d| match self.final_result(&results, &rets, *d) {
                     Ok(v) => PromiseResult::Successful(v),
                     Err(()) => PromiseResult::Failed,
                 })
@@ -1740,10 +1957,27 @@ impl Net {
                 Err(_) => Err(()),
             });
             let off = queue.len();
+            if out.result.is_ok() {
+                rets[i] = ret_of(&out, off);
+            }
             Self::enqueue(&mut queue, &mut results, &recv, &out, off);
+            rets.resize(queue.len(), None);
             i += 1;
         }
+        self.result = Some(match (&first.result, first_ret) {
+            (Err(_), _) => Err(()),
+            (Ok(_), Some(r)) => self.final_result(&results, &rets, r),
+            (Ok(v), None) => Ok(v.clone().unwrap_or_default()),
+        });
         first
+    }
+
+    /// The result of queued receipt `i`, or of the promise it returned.
+    fn final_result(&self, results: &[Option<Result<Vec<u8>, ()>>], rets: &[Option<usize>], mut i: usize) -> Result<Vec<u8>, ()> {
+        while let Some(j) = rets[i] {
+            i = j;
+        }
+        results[i].clone().expect("dependency ran first")
     }
 
     fn enqueue(
@@ -1785,12 +2019,102 @@ impl Net {
         pool_of(&self.pool)
     }
 
+    /// The executor's stored state (Borsh mirror; `newest` is private).
+    pub fn exec_state(&self) -> ExecM {
+        decode_exec(&self.exec)
+    }
+
     /// The executor's jobs through its `get_jobs` view.
     pub fn jobs(&self) -> Value {
         let w = wasm(self.build, "pool_executor");
         let out = wasm_call(w, &Ctx::by(Z, self.now).on(&self.exec_id), self.exec.clone(), vec![], "get_jobs", b"{}");
         out.json()
     }
+}
+
+// ---------------------------------------------------------------------------
+// The executor's state (its fields are private upstream)
+// ---------------------------------------------------------------------------
+
+#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq)]
+#[borsh(crate = "near_sdk::borsh")]
+pub struct JobM {
+    pub id: u32,
+    pub recipe: u32,
+    pub units: u32,
+    pub status: String,
+}
+
+/// Borsh mirror of v1.1.0's `Executor { lock, operator, jobs, mode, newest }`
+/// (crates/executor/src/lib.rs:25-36).
+#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq)]
+#[borsh(crate = "near_sdk::borsh")]
+pub struct ExecM {
+    pub lock: AccountId,
+    pub operator: AccountId,
+    pub jobs: Vec<JobM>,
+    pub mode: String,
+    pub newest: u32,
+}
+
+pub fn job(id: u32, recipe: u32, units: u32, status: &str) -> JobM {
+    JobM {
+        id,
+        recipe,
+        units,
+        status: status.into(),
+    }
+}
+
+/// `new({lock: pool, operator})`.
+pub fn fresh_exec() -> ExecM {
+    ExecM {
+        lock: acct(POOL),
+        operator: acct(OPERATOR),
+        jobs: vec![],
+        mode: "normal".into(),
+        newest: 0,
+    }
+}
+
+pub fn decode_exec(s: &Storage) -> ExecM {
+    assert_eq!(s.len(), 1, "executor storage is one STATE key");
+    #[cfg(not(nt_v100_executor))]
+    let m: ExecM = borsh::from_slice(&s[STATE_KEY]).expect("Borsh mirror of Executor");
+    #[cfg(nt_v100_executor)]
+    let m = {
+        let v: ExecV100 = borsh::from_slice(&s[STATE_KEY]).expect("Borsh mirror of the v1.0.0 Executor");
+        let newest = v.jobs.iter().map(|j| j.id).max().unwrap_or(0);
+        ExecM { lock: v.lock, operator: v.operator, jobs: v.jobs, mode: v.mode, newest }
+    };
+    assert_eq!(encode_exec(&m)[STATE_KEY], s[STATE_KEY], "mirror round trip");
+    m
+}
+
+pub fn encode_exec(m: &ExecM) -> Storage {
+    let mut s = Storage::new();
+    #[cfg(not(nt_v100_executor))]
+    s.insert(STATE_KEY.to_vec(), borsh::to_vec(m).unwrap());
+    #[cfg(nt_v100_executor)]
+    s.insert(
+        STATE_KEY.to_vec(),
+        borsh::to_vec(&ExecV100 { lock: m.lock.clone(), operator: m.operator.clone(), jobs: m.jobs.clone(), mode: m.mode.clone() }).unwrap(),
+    );
+    s
+}
+
+/// Historical mutant s00b only (`--cfg nt_v100_executor`): v1.0.0's
+/// `Executor { lock, operator, jobs, mode }` has no `newest`. The mirror
+/// reads it as the largest job id (v1.0.0 forgets no job) and drops it on
+/// encoding, so the tests compare the four stored fields.
+#[cfg(nt_v100_executor)]
+#[derive(BorshSerialize, BorshDeserialize)]
+#[borsh(crate = "near_sdk::borsh")]
+struct ExecV100 {
+    lock: AccountId,
+    operator: AccountId,
+    jobs: Vec<JobM>,
+    mode: String,
 }
 
 /// Runs `f` on a thread with a 256 MiB stack (wasmi in a debug test build
@@ -1816,8 +2140,10 @@ pub enum Path {
     Wasm(Build),
 }
 
-pub fn paths() -> [Path; 3] {
-    [Path::Host, Path::Wasm(Build::Plain), Path::Wasm(Build::Near)]
+/// The host path and the documented build (NT-F1 fixed: build.sh builds with
+/// `--cfg near`; the plain build is only SURF-3(b)'s negative control).
+pub fn paths() -> [Path; 2] {
+    [Path::Host, Path::Wasm(Build::Near)]
 }
 
 /// What one checked step returned (already compared with the core).
@@ -1850,6 +2176,8 @@ pub struct Sim {
     pub storage: Storage,
     pub pool: Pool,
     pub n: usize,
+    /// The state is reachable (no `edit`), so every step checks LIVE-ALL.
+    pub live_all: bool,
 }
 
 impl Sim {
@@ -1860,7 +2188,13 @@ impl Sim {
         };
         let pool = Pool::new(cfg, now).expect("valid config");
         assert_eq!(storage, storage_of(&pool), "new() stored state");
-        Sim { path, storage, pool, n: 0 }
+        Sim {
+            path,
+            storage,
+            pool,
+            n: 0,
+            live_all: true,
+        }
     }
 
     pub fn run(&mut self, ctx: &Ctx, op: Op) -> Ran {
@@ -1869,10 +2203,15 @@ impl Sim {
         let exp = core_step(&mut self.pool.clone(), ctx, &op);
         match self.path {
             Path::Host => {
-                let out = step(self.storage.clone(), &mut self.pool, ctx, &op, &what);
+                let out = step_opt(self.storage.clone(), &mut self.pool, ctx, &op, &what, self.live_all);
                 self.storage = out.storage;
                 Ran {
-                    result: out.result,
+                    // As on the wasm path: the core's failure, which the
+                    // host was checked to report (see `on_host`).
+                    result: match out.result {
+                        Ok(v) => Ok(v),
+                        Err(_) => Err(exp.result.clone().expect_err("checked")),
+                    },
                     events: out.logs.iter().map(|l| parse_event(l)).collect(),
                     calls: calls_of(&out.receipts),
                     host_calls: vec![],
@@ -1880,7 +2219,7 @@ impl Sim {
                 }
             }
             Path::Wasm(b) => {
-                let out = wasm_diff_step(b, self.storage.clone(), &mut self.pool, ctx, &op, &what);
+                let out = wasm_diff_step_opt(b, self.storage.clone(), &mut self.pool, ctx, &op, &what, self.live_all);
                 self.storage = out.storage.clone();
                 Ran {
                     result: match &out.result {
@@ -1914,13 +2253,17 @@ impl Sim {
 
     /// Rewrites the stored state (a crafted, well-formed state: the core
     /// decides on it exactly as on a reachable one).
+    /// LIVE-ALL is not checked from then on: a crafted state may be one no
+    /// call sequence reaches.
     pub fn edit(&mut self, f: impl FnOnce(&mut Pool)) {
         f(&mut self.pool);
         self.storage = storage_of(&self.pool);
+        self.live_all = false;
     }
 
+    /// The stored status of record `id` (by id: `first_id + k`).
     pub fn status(&self, id: u32) -> Status {
-        pool_of(&self.storage).records[id as usize].status.clone()
+        pool_of(&self.storage).record(id).expect("retained record").status.clone()
     }
 }
 

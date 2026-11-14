@@ -1,17 +1,24 @@
 # shared-pool near-tests: results
 
 Shell layer of the shared-pool verification (near-approval strategy.md
-section 9 pattern). Target: difflabai/shared-pool-controls v1.0.0, whose
-contract code is byte-identical to the pin, a head of PR #1,
-`a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7` (`../source-mirror`; strategy.md
-section 13); contract
-`crates/contract/src/lib.rs` sha256 `6ee32c1e…9784`, executor
-`crates/executor/src/lib.rs` `917d0dcc…05c5`, core `9a4eb36c…05c4`.
-Toolchain 1.98, near-sdk 5.29.1 (`unit-testing`), mocked runtime =
-near-vm-runner 0.37.4 `VMLogic`.
+section 9 pattern). Target: difflabai/shared-pool-controls v1.1.0, the
+`../source-mirror` gitlink at `57b3f02d18e85149db3c1035431368c4e07a4d8a`
+(the merge of upstream PR #4; its tree equals the PR head `6fcbd56`).
+Sources (sha256): contract `crates/contract/src/lib.rs` `3810d18d…c03c`,
+executor `crates/executor/src/lib.rs` `a2d63842…9198`, core
+`crates/core/src/lib.rs` `c3bb825b…ba48`, `scripts/build.sh` `429b63ea…1f3e`.
+Toolchain 1.98.1 (the mirror's `rust-toolchain.toml`), near-sdk 5.29.1
+(`unit-testing`), mocked runtime = near-vm-runner 0.37.4 `VMLogic`, wasmi
+2.0.0.
+
+The v1.0.0 record of this layer (four findings NT-F1..NT-F4, the F-1
+wedge reproduced through the shell, 21 mutants) is in git history at
+`a072a2d`. v1.1.0 fixes all of them; their witnesses are inverted here
+into regression tests, and the historical mutants s00a/s00b (below) show
+that those tests fail on the v1.0.0 contract and executor.
 
 Run: `./run.sh test | surface | mutants` (or `./run.sh` for all three).
-`test` and the default `all` first run `check-tags.py`, the PROP-tag check
+`test` and the default `all` first run `check-tags.py`, the tag check
 (below); any problem it reports fails the run.
 
 ## How the shell is exercised
@@ -19,229 +26,223 @@ Run: `./run.sh test | surface | mutants` (or `./run.sh` for all three).
 - **Host path**: the `#[near]` methods called as Rust functions. Every call
   starts from storage (`state_read`, Borsh) and ends with `state_write` on
   success; a panic discards every write and receipt.
-- **Wasm path**: the real wasm, run by the wasmi 2.0 interpreter with every
-  `env` import forwarded to the same mocked `VMLogic`. This covers the code
-  near-sdk generates only for wasm32: `#[init]` (init once), `#[private]`,
-  the nonpayable deposit checks, JSON argument/return encoding and
-  `#[callback_result]`. Two builds:
-  - `Plain`: `cargo build --target wasm32-unknown-unknown --release --locked`,
-    exactly upstream `scripts/build.sh`;
-  - `Near`: the same with `RUSTFLAGS="--cfg near"`, as cargo-near builds.
-  Any import other than the ones the shell uses (deploy, delete, add-key,
-  transfer, stake, global-contract, ...) traps as a forbidden host call;
-  every wasm call asserts none happened.
+- **Wasm path**: the real wasm of the documented build, run by the wasmi
+  interpreter with every `env` import forwarded to the same mocked
+  `VMLogic`. The documented build is upstream `scripts/build.sh`:
+  `RUSTFLAGS="--cfg near"`, `cargo build --target wasm32-unknown-unknown
+  --release --locked` from the mirror root (`Build::Near`). `./run.sh
+  surface` (SURF-3(a)) runs build.sh itself and checks that its
+  `artifacts/build.json` hashes are these files. The no-cfg build
+  (`Build::Plain`) is only the NT-F1 negative control. This covers the code
+  near-sdk generates only for wasm32: `#[init]`, `#[private]`, the
+  nonpayable deposit checks and JSON argument/return encoding. Any import
+  outside the shell's set traps as a forbidden host call; every wasm call
+  asserts none happened.
 - **Receipt router** (`Net`): pool and executor wasm side by side; outgoing
-  receipts run FIFO, a callback gets its dependency's result. Used for
+  receipts run FIFO, a callback gets its dependency's result, and the
+  transaction's result follows `promise_return`. Used for
   `dispatch -> execute -> on_result`, `reconcile -> status -> on_result`,
-  `finish/confirm_not_executed -> settle`.
-- Expected values come from `pool_core::Pool` (same pinned crate) and from
-  docs/api.md, never from the contract's output.
-- `Cargo.lock`: `tests/lockfile.rs` checks the 280 packages of the code under
+  `finish/confirm_not_executed -> settle -> on_settled`.
+- Expected values come from `pool_core::Pool` (same pinned crate), from a
+  reference model of the executor written from docs/api.md ("Executor
+  protocol"), and from docs/api.md, never from the contract's output.
+- `require!(c, m)` is `assert!` on the host test build (debug assertions)
+  and `env::panic_str` in the release wasm: reconcile's deposit check is a
+  Rust panic on the host path and a guest panic on the wasm path, with the
+  same message (`common::on_host`).
+- `Cargo.lock`: `tests/lockfile.rs` checks the packages of the code under
   test resolve exactly as in the mirror's lockfile; the only extra packages
-  are wasmi and its 8 dependencies (harness only).
+  are wasmi and its dependencies (harness only).
 
-## Test suite (`./run.sh test`, 29 tests, ~30 s wall)
+## Test suite (`./run.sh test`, 38 tests)
 
 | File | Properties | What |
 |---|---|---|
-| `tests/shell.rs` (14) | SH-1..SH-7, SH-9, SH-10, RD-PREVIEW (shell half); NT-F1 under SH-5, NT-F2 under SH-10, NT-F4 under SH-3 | exact scenarios on host + both wasm builds |
-| `tests/store_diff.rs` (2) | SH-8 (+SH-1, SH-3..SH-7, SH-9, RD-PREVIEW) | 2,000 x 40 random calls on the host path (fixtures, wedge, open, random configs), Borsh reload every call, results, panic messages, events, receipts, stored bytes and views (get_pool, get_commitments edges, preview) every call; 300 x 40 per wasm build with JSON views every 4 calls; coverage of 46 required outcomes |
-| `tests/traces.rs` (1) | SH-8 (+SH-3, SH-4, SH-5), LIVE-2 (F-1, trace 0) | all 212 conformance traces (8,804 calls, incl. `Arithmetic`, `Full` and release `Arithmetic` in traces 206-208, and F-2's `Bounds` form, F-4 and F-6 in traces 209-211) replayed through the shell on host + both wasm builds: every result and post-state equals the trace |
-| `tests/executor.rs` (8) | EX-1..EX-5 (+SH-3, SH-6, SH-7 end to end; RT-RACE, pool side) | executor alone on host + both builds (state checked against a Borsh mirror), executor wrappers, end-to-end normal/reject/unknown/panic flows through the router, settle-before-callback race |
-| `tests/wedge.rs` (3) | LIVE-2 (F-1), LIVE-1 (control), RT-WEDGE (mocked runtime), +SH-3, SH-5, EX-4, EX-5 | F-1 through the shell (host + both builds), control without the disturbing observe, F-1 end to end with the executor |
-| `tests/lockfile.rs` (1) | precondition of the 16 near-tests IDs the tests check (scope tag; not SH-11) | lockfile equality |
+| `tests/shell.rs` (15) | SH-1..SH-7, SH-9, SH-10, RD-PREVIEW (shell half), LIVE-ALL at the shell | exact scenarios on the host path and the documented build. The v1.0.0 finding witnesses are inverted: `nt_f1_documented_build_reports_every_panic_message` (SH-5), `nt_f2_reconcile_rejects_an_attached_deposit` (SH-10), `sh3_non_string_promise_results_become_unknown` (SH-3; upstream's 16 raw-result cases). F-3 through the shell: `sh9_views_and_paging_by_id_through_the_window` (300 submits, first_id 44, pages by id), `sh9_pruned_ids_are_not_found_and_pages_are_by_id` (every id-taking method on a pruned id) |
+| `tests/store_diff.rs` (3) | SH-8 (+SH-1, SH-3..SH-7, SH-9, RD-PREVIEW, LIVE-ALL) | 2,000 x 40 random calls on the host path and 300 x 40 on the documented build, Borsh reload every call; results, panic messages, events, receipts, stored bytes and views; required coverage. `sh8_store_diff_window`: 4 host + 1 wasm sequences of 1,500 submit-heavy calls past the 256-record window (prunes, pruned ids, ids `first_id + k`) |
+| `tests/traces.rs` (1) | SH-8 (+SH-3, SH-4, SH-5), LIVE-2, LIVE-ALL | the conformance traces replayed through the shell on both paths. Expected to fail until the v1.1.0 corpus is committed (see "Expected failure" below) |
+| `tests/executor.rs` (14) | EX-1..EX-8 (+SH-3, SH-6, SH-7 end to end; RT-RACE, pool side) | executor alone on both paths (stored bytes checked against a Borsh mirror; window tests against the reference model), its wrappers (`on_settled` private), notify's two receipts (`settle` 40 Tgas, then `on_settled` 10 Tgas, `promise_return` of the settle), the window (`WINDOW == MAX_RECORDS`, `MAX_JOBS >= 2*WINDOW` read from the pinned source), a random differential against the model (24 x 400, a third from near the cap), end-to-end flows, and `ex7_d1_*`, upstream's sandbox D-1 test in the mocked runtime (300 failed executes confirmed; EX-7 after every transaction; final first_id 44, then 46) |
+| `tests/wedge.rs` (3) | LIVE-2 (F-1), LIVE-1 (control), RT-WEDGE (mocked runtime), +SH-3, SH-5, EX-4, EX-5 | the F-1 hedge refused with Bounds through the shell, the curing hedge admitted and resolvable from every state; control; end to end with the executor, F-1 refused and the F-2 `risk` run whose credit release stays Ok |
+| `tests/scenarios.rs` (1) | SCN-1 | the six published `scenarios/<name>/{config,trace}.json` equal a re-derivation from `pool_core` (preview, submit, dispatch, acknowledge, settle at the fixed epoch 1,794,441,600) |
+| `tests/lockfile.rs` (1) | precondition of the near-tests IDs the tests check (scope tag) | lockfile equality |
 
 Tags: each test has its own tag line directly above `#[test]`, naming
 the catalogue IDs (`prolog/requirements/traceability.pl`, `property/3`)
 that test checks; each file header lists the union. `run.sh`,
 `run-mutants.sh` and `wasm-surface.sh` tag what they run. Finding IDs are
 not tags: each finding sits under the property it breaks (F-1 under
-LIVE-2). Five tags name other layers' properties as cross-references:
-LIVE-1, LIVE-2, RT-WEDGE and RT-RACE (mocked-runtime analogues in
-`wedge.rs` and `executor.rs`) and ASM-DEPLOY (wasm surface).
-`tests/lockfile.rs` checks the content of no property. It carries the 16
-near-tests IDs its tests check only as the scope of its precondition. The
-17th, SH-11, is checked by `wasm-surface.sh`, which builds from the mirror
-and does not use this crate's lockfile.
+LIVE-2). Tags that name other layers' properties are cross-references:
+LIVE-1, LIVE-2, LIVE-ALL, RT-WEDGE and RT-RACE (mocked-runtime analogues)
+and ASM-DEPLOY (wasm surface). `tests/lockfile.rs` checks the content of
+no property; it carries the near-tests IDs its tests check only as the
+scope of its precondition. SH-11 and SH-12 are checked by
+`wasm-surface.sh`, which builds from the mirror.
 
-`check-tags.py` (python3 -I, standard library only, paths relative to the
-script, under a second) checks these rules: every `PROP:` line is a comment
-tag of IDs only, each ID in `property/3`; every `#[test]` has its own tag
-line directly above it; every property whose layers include near-tests is
-tagged on a test that checks it (lockfile.rs's scope tag does not count) or
-on the tag line of a `wasm-surface.sh` check SURF-n (SH-11's only check);
-each file header equals the union of its tests' tags; `run.sh`,
-`run-mutants.sh` and `wasm-surface.sh` carry tags, and SURF-1 and SURF-2
-each have a tag line; no SURF-n is used as a tag; and the tag set
-`check-status.sh` extracts equals the one found. It exits 1 and lists every
-problem otherwise. Checked 2026-11-12: 0 problems (41 tag lines in 9
-files, 29 tests, 21 distinct IDs). On a temporary copy, an unknown ID added
-to one tag line (`SH-99`) gives exit 1 with 2 problems (not in the
-catalogue; header differs from the union), and deleting the tag line above
-`sh2_new_is_private_and_initialises_once` gives exit 1 with 3 problems
-(no tag line; header differs; SH-2 untagged); `run.sh test` exits 1 on the
-first even with a cargo that passes. Re-checked 2026-11-12 after SH-11 was
-added to the catalogue and to SURF-1's tag line: 0 problems (41 tag lines
-in 9 files, 29 tests, 22 distinct IDs; catalogue 97 IDs, 17 in layer
-near-tests). On a temporary copy, dropping SH-11 from SURF-1's tag line
-gives exit 1 with 1 problem (SH-11 has no test or SURF-n check).
+`check-tags.py` (python3 -I, standard library only, under a second) checks:
+every tag line is a comment of IDs only, each ID in `property/3`; every
+`#[test]` has its own tag line; every property whose layers include
+near-tests is tagged on a test that checks it (lockfile.rs does not count)
+or on the tag line of a `wasm-surface.sh` check SURF-n; each file header
+equals the union of its tests' tags; `run.sh`, `run-mutants.sh` and
+`wasm-surface.sh` carry tags, and SURF-1, SURF-2 and SURF-3 each have a tag
+line; no SURF-n is used as a tag; the tag set `check-status.sh` extracts
+equals the one found. Checked 2026-11-13: 0 problems (catalogue 118 IDs,
+22 in layer near-tests; 38 tests tagged; 28 distinct IDs).
 
-Last run (2026-11-11): all 29 pass. Re-run 2026-11-12 after the tag-only
-change: all 29 pass (27 s); `./run.sh surface` unchanged. Re-run
-2026-11-12 with the 212 traces: `./run.sh test` passes the tag check (0
-problems) and all 29 tests (27 s wall). Coverage of the default SH-8 host run
-(80,000 calls) includes every submit reason except Full and Arithmetic
-(unreachable within 40 calls / values of +-1000; both are covered by
-`sh4`/`sh5` on crafted states), every dispatch/settle/cancel/observe error,
-reconcile NotFound/InvalidState/Ok, and every on_result outcome class
-including `completed:Bounds` and `cancelled:Bounds` (F-1 shapes).
-
-## Property results
+## Property results (v1.1.0)
 
 | ID | Result | Evidence |
 |---|---|---|
-| SH-1 | pass | `sh1_caller_is_the_predecessor_not_the_signer` (relayed calls by `relay.near` signed by the actor are the relay's; every method), `sh1_now_is_the_block_timestamp_in_whole_seconds` (149.999999999 s is second 149; expiry/horizon/observed_at), 15% relayed calls in SH-8; mutants m02, m10 |
-| SH-2 | pass | `sh2_new_is_private_and_initialises_once`: `new` by any other predecessor fails (`Method new is private`) before reading input; by the pool stores exactly Borsh(`Pool::new`); a second `new` fails (`The contract has already been initialized`) without writing; uninitialised reads fail; invalid config/account names fail; mutant m09 |
-| SH-3 | pass | `sh3_on_result_is_private` (5 foreign predecessors, before input/promise result are read), `sh3_on_result_maps_the_status_string` (completed/cancelled/active/unknown/garbage/""/"Completed"/" completed"/PromiseError from Dispatched, Unknown, Active, terminal), `sh3_non_string_promise_results_fail_the_callback` (NT-F4); mutants m01, m03, m04, m08, m14 |
-| SH-4 | pass | `sh4_rejected_submit_returns_the_decision_and_writes_nothing`: 15 rejection cases (every reason incl. Full at 256 records, Arithmetic, disturbed-state Energy) return the exact core decision, `id: null`, a `decision` event, and identical state bytes; admitted submits return the core id; mutant m13 |
-| SH-5 | finding (NT-F1) | host path and `--cfg near` wasm: every core error of every method panics with exactly the error string and changes nothing (`sh5_core_errors_are_panics_with_the_error_string`, SH-8). The documented build (`scripts/build.sh`) reports no message at all: NT-F1 |
-| SH-6 | pass | `sh6_dispatch_promise_shape`: `execute{id,recipe,units}` to the recipe's executor, 30 Tgas, 0 deposit, then `on_result{id}` to the pool, 30 Tgas, depending on it; the callback promise is returned; no event; mutant m11 |
-| SH-7 | pass | `sh7_reconcile_guard_and_promise_shape`: NotFound / InvalidState for Reserved, Completed, Cancelled; `status{id}` 10 Tgas then `on_result` for Dispatched/Unknown/Active, by anyone, no state write; mutants m05, m15 |
-| SH-8 | pass | `sh8_store_diff_host` (80,000 calls), `sh8_store_diff_wasm` (12,000 calls per build), `conformance_traces_through_the_shell` (8,804 calls x 3 paths) |
-| SH-9 | pass | `sh9_views_and_paging_at_256_records`: 12 x 7 (from, limit) edge pairs at 256 records incl. u32::MAX, JSON views on wasm; views every call in SH-8; mutant m06 |
-| RD-PREVIEW | pass (shell half) | the `preview` view equals `pool_core::Pool::preview` (same pinned crate) on a contract reloaded from storage: 2 random requests after every call of `sh8_store_diff_host`, one per 4 calls per build in `sh8_store_diff_wasm` (JSON, no write), 3 crafted requests at 256 records in `sh9_views_and_paging_at_256_records` (JSON, no write). The core half (allowed <=> candidate Ok; allowed and version < u32::MAX => submit Ok) belongs to the Kani and Prolog layers. No mutant targets it |
-| SH-10 | pass (NT-F2) | `sh10_mutating_methods_reject_attached_deposits`: `new`, `submit`, `dispatch`, `settle`, `cancel`, `set_paused`, `observe`, `on_result` reject 1 yocto and 1 NEAR (`Method X doesn't accept deposit`) before reading input; mutant m12. `reconcile` (a `&self` call method) accepts and keeps a deposit: NT-F2 |
-| SH-11 | pass (NT-F3) | `wasm-surface.sh` SURF-1 (`./run.sh surface`), both builds: `pool_contract` exports exactly the 12 documented methods plus `contract_source_metadata` and `memory`, `pool_executor` its 7 methods plus the same two, as in `../wasm-surface.expected`; no upgrade, migrate or reset export. The imports still include transfer, deploy and add-key host functions (SURF-2 expected-fail, NT-F3), so the funds-transfer half of S-NOADMIN rests on source review |
-| EX-1 | pass | `ex1_only_the_lock_executes` (6 foreign predecessors incl. signer = lock), `ex1_executor_wrappers` (new private, init once, deposits); mutant m17 |
-| EX-2 | pass | `ex2_payload_binding_and_dedupe`: replay returns the recorded status in every mode without a second job, other payload `payload mismatch`, modes reject/unknown/panic, `full` at 256 jobs; mutants m16, m21 |
-| EX-3 | pass | `ex3_only_the_operator_attests`: finish/confirm/set_mode by 5 other predecessors fail; invalid modes fail; mutant m18 |
-| EX-4 | pass | `ex4_terminal_conflict_rejected`: same outcome idempotent (re-notifies), opposite outcome `terminal outcome conflict`, unknown job, `job exists`; mutant m19 |
-| EX-5 | pass | `ex5_notify_calls_lock_settle`: `settle{id,completed}` to the lock fixed at init, 40 Tgas, 0 deposit; end-to-end flows; mutant m20 |
-| F-1 (LIVE-2) | finding (reproduced) | `wedge.rs` and trace 0, tagged LIVE-2 because F-1 is its counterexample: see below |
+| SH-1 | pass | `sh1_caller_is_the_predecessor_not_the_signer`, `sh1_now_is_the_block_timestamp_in_whole_seconds`, 15% relayed calls in SH-8; mutants s02, s10 |
+| SH-2 | pass | `sh2_new_is_private_and_initialises_once`; mutant s09 |
+| SH-3 | pass (NT-F4 fixed) | `sh3_on_result_is_private`, `sh3_on_result_maps_the_status_string`, `sh3_non_string_promise_results_become_unknown` (a failed call, no result, two results, more than 64 bytes, or anything but one JSON string is "unknown"), the NotFound event for a missing or pruned id (`sh9_pruned_*`); mutants s01, s03, s04, s08, s14, s23, s24, s25 |
+| SH-4 | pass | `sh4_rejected_submit_returns_the_decision_and_writes_nothing`; mutant s13 |
+| SH-5 | pass (NT-F1 fixed) | `sh5_core_errors_are_panics_with_the_error_string` on both paths; `nt_f1_documented_build_reports_every_panic_message`: the documented build reports the error string (the Plain build, the negative control, still traps bare); SURF-3: build.sh refuses a wasm without `panic_utf8` |
+| SH-6 | pass | `sh6_dispatch_promise_shape` (`promise_create` execute 30 Tgas, `promise_then` on_result 30 Tgas, `promise_return` of the callback); mutants s11, s27, s28 |
+| SH-7 | pass | `sh7_reconcile_guard_and_promise_shape`; mutants s05, s15, s28 |
+| SH-8 | pass (host, wasm, window) | `sh8_store_diff_host`, `sh8_store_diff_wasm`, `sh8_store_diff_window`; `conformance_traces_through_the_shell` with the v1.1.0 corpus (W10 patch, below) |
+| SH-9 | pass | `sh9_views_and_paging_by_id_through_the_window`, `sh9_pruned_ids_are_not_found_and_pages_are_by_id`; mutants s06, s26 |
+| SH-10 | pass (NT-F2 fixed) | `sh10_mutating_methods_reject_attached_deposits`, `nt_f2_reconcile_rejects_an_attached_deposit`; mutants s12, s22 |
+| SH-11 | pass | `wasm-surface.sh` SURF-1: `pool_contract` exports its 12 methods, `contract_source_metadata` and `memory` (14), `pool_executor` its 8 methods (`on_settled` new) and the same two (10), as in `../wasm-surface.expected`; no upgrade, migrate or reset export |
+| SH-12 | pass (NT-F3 fixed) | SURF-2: no forbidden import (deploy, keys, transfer, stake, accounts, global contracts, `promise_batch_*`); SURF-3(a): the imports equal build.sh's `ALLOWED` exactly (contract 18, executor 16) |
+| RD-PREVIEW | pass (shell half) | the `preview` view equals `Pool::preview` in SH-8 and at the window (`sh9_views_*`). No mutant targets it |
+| SCN-1 | pass | `scn1_published_scenarios_are_the_core` (6 scenarios) |
+| EX-1 | pass | `ex1_only_the_lock_executes`, `ex1_executor_wrappers`; mutant s17 |
+| EX-2 | pass | `ex2_payload_binding_and_dedupe` (512-job crafted state), the differential; mutants s16, s21 |
+| EX-3 | pass | `ex3_only_the_operator_attests`; mutant s18 |
+| EX-4 | pass | `ex4_terminal_conflict_rejected`; mutant s19 |
+| EX-5 | pass | `ex5_notify_calls_lock_settle`, end-to-end flows; mutants s20, s35 |
+| EX-6 | pass | `ex6_window_forgets_and_caps`, `ex6_window_constants_match_the_lock`, `ex6_random_differential_against_the_model`; mutants s31-s34, s36, s37, s00b |
+| EX-7 | pass (mocked runtime) | `ex7_d1_confirmed_failed_executes_stay_within_256` (EX-7 checked after every transaction), `ex6_window_constants_match_the_lock`; mutant s34, s00b. The sandbox half is RT-D1 |
+| EX-8 | pass | `ex8_on_settled_protocol`, `ex8_callbacks_in_any_order`, `ex1_executor_wrappers` (privacy on wasm); mutants s29, s30, s35, s38, s00b |
+| LIVE-2 (F-1) | regression pass | `wedge.rs`: the F-1 hedge is refused with Bounds; trace 0 of the v1.1.0 corpus |
 
-## Findings
+## Expected failure until the v1.1.0 corpus is committed
 
-**NT-F1 (medium): the documented build drops every failure message.**
-`scripts/build.sh` builds without `--cfg near`. near-sdk 5.29.1 then
-compiles its pure-Rust fallbacks, where `env::panic_str` is `eprintln!` +
-`panic!()` instead of the `panic_utf8` host call; the wasm does not even
-import `panic_utf8` (`../wasm-surface.expected`). Every failure (core errors
-through `must`, `#[private]`, deposit and init checks, `expect`/`assert!`,
-argument errors) becomes a bare `unreachable` trap. State is still reverted
-and every access check still fails closed (all shell tests pass on the
-Plain build with "no message" expected), but clients cannot tell
-`Unauthorized` from `Bounds` from `Stale`, and the sandbox tests, which only
-check `is_failure()`, cannot notice. The `--cfg near` build reports
-`Smart contract panicked: <error>` as the docs assume.
-Reproducer: `cargo test --locked --test shell nt_f1_upstream_build_drops_every_panic_message`
-(plain build: `observe` by z.near traps "wasm `unreachable` instruction
-executed" with no panic message; near build: panic message `Unauthorized`).
-Fix: build with cargo-near or `RUSTFLAGS="--cfg near"`.
-
-**NT-F2 (low): `reconcile` accepts and keeps attached deposits.** It is a
-`&self` method, so near-sdk generates no deposit check (the views neither).
-api.md: "All mutating methods are nonpayable". The outgoing calls carry 0,
-so the deposit stays with the pool. Reproducer:
-`cargo test --locked --test shell nt_f2_reconcile_accepts_and_keeps_an_attached_deposit`.
-
-**NT-F3 (informational): the wasm imports deploy, delete-account,
-add-key, transfer, stake, gas-key and global-contract host functions**
-(15 per file, both contracts, both builds), linked by near-sdk's generic
-`Promise` action code. Source review shows only `function_call` actions are
-built, and no wasm call in this suite (more than 50,000) reached one (each would
-trap as forbidden), but the import surface alone cannot rule out an escape
-hatch the way it does for near-approval. `wasm-surface.sh` records them
-(SURF-2 expected-fail).
-
-**NT-F4 (low): a promise result that is not a JSON string fails the
-callback.** api.md: "Runtime failures and unexpected strings become Unknown
-in the wrapper". Unexpected strings do; a non-string JSON value or invalid
-JSON makes `#[callback_result]` panic (`Failed to deserialize callback using
-JSON`), so the record stays where it was (e.g. Dispatched) instead of
-Unknown. The pinned executor always returns strings; a production adapter
-returning e.g. an object would leave records Dispatched (reconcile retries
-the same failure; the executor's `settle` still works). Reproducer:
-`cargo test --locked --test shell sh3_non_string_promise_results_fail_the_callback`.
-
-**F-1 (brief) reproduced through the shell.** `wedge.rs`: after `observe
-[12,5]`, the hedge is admitted (values [10,5]), dispatched, and from each of
-Dispatched, Unknown and Active: `settle(true)` and `settle(false)` fail
-`Bounds`, `on_result` "completed"/"cancelled" record `error: "Bounds"`,
-`cancel` and `observe` fail `Pending`, version unchanged. End to end with
-the executor (both builds): the operator's `finish(0, true)` succeeds at
-the executor (job "completed") but its `settle` receipt fails `Bounds` at
-the pool, so the executor and the lock disagree permanently; `finish(0,
-false)` then fails `terminal outcome conflict`, `reconcile` reads
-"completed" and records `Bounds`. Control: the same recipe from the
-undisturbed baseline settles. Trace 0 replays identically on all paths.
-
-Observations (not findings): a rejected `submit` rewrites `STATE` with the
-same bytes (a `&mut self` method; costs gas only); `dispatch`/`reconcile`
-call `value_return("null")` before `promise_return` (near-sdk's Promise
-serialization; the promise wins); outgoing calls use static gas (weight 0);
-anyone's `reconcile` can bump a record's version at most twice
-(Dispatched -> Unknown -> Active), bounded.
+`tests/traces.rs::conformance_traces_through_the_shell` replays
+`../conformance/traces/core.txt`, which is still the v1.0.0 corpus (212
+traces, state `s/5`). On v1.1.0 it fails at trace 0 call 1: the F-1 hedge
+submit, `ok(0)` in the v1.0.0 corpus, is refused with Bounds. The v1.0.0
+corpus also expects acks of missing ids to fail and trace 210 (actor ==
+executor) to be accepted. The parser and replayer for the v1.1.0 corpus
+(216 traces, `s/7` with first_id and completed_units, `init_error` for
+trace 210, NotFound acks as events) are a separate patch applied with the
+corpus; with that patch and the candidate corpus the test passes on both
+paths (8,865 calls of 216 traces each). `run-mutants.sh` leaves this test
+out with `NT_SKIP_TRACES=1` until then.
 
 ## Wasm surface (`./run.sh surface`)
 
-`wasm-surface.sh` builds both builds and compares with
-`../wasm-surface.expected`: SURF-1 (exports and imports with class
-promise/forbidden/other) passes; SURF-2 (no forbidden imports) fails with
-exactly the recorded imports (NT-F3) and is reported as expected-fail.
-SURF-1 and SURF-2 are local names, not catalogue IDs. SURF-1 is SH-11's
-check (the exports are the documented methods plus
-`contract_source_metadata`, with no upgrade, migrate or reset method), and
-is also tagged SH-5 (the plain build imports no `panic_utf8`: NT-F1) and
-ASM-DEPLOY (the in-contract half: no upgrade export). SURF-2 is tagged ASM-DEPLOY: had it held,
-the contracts could not deploy code, delete the account or add keys. It
-fails (NT-F3), so ASM-DEPLOY stays an assumption.
-pool_contract exports: `new get_pool get_commitments preview submit dispatch
-reconcile on_result settle cancel set_paused observe contract_source_metadata`
-and memory. promise imports: `promise_and promise_batch_create
-promise_batch_then promise_batch_action_function_call(_weight)
-promise_result promise_return` (executor: no `promise_result`).
-`panic_utf8`: imported only by the `--cfg near` build (NT-F1).
+`wasm-surface.sh` builds the documented build once and checks, all three
+must hold (exit 0; 1 a check fails; 2 a build fails):
+
+- SURF-1 (SH-11, SH-5, ASM-DEPLOY): the surface (exports, imports, class
+  `promise` or `-`) equals `../wasm-surface.expected`, regenerated for
+  v1.1.0.
+- SURF-2 (SH-12, ASM-DEPLOY): no forbidden import. The local list equals
+  build.sh's `FORBIDDEN` plus the `promise_batch_` prefix.
+- SURF-3 (SH-5, SH-12): (a) upstream `scripts/build.sh` run in the mirror
+  (CARGO_TARGET_DIR, RUSTFLAGS, CARGO_ENCODED_RUSTFLAGS and RUSTUP_TOOLCHAIN
+  unset) passes; `artifacts/build.json` has `dirty: false`, `source_commit`
+  equal to the gitlink pin and `rustflags: "--cfg near"`; its sha256 values
+  equal this layer's wasm (contract `e6383aab…e2ea`, 377,358 bytes;
+  executor `b92f1469…4e83`, 223,068 bytes; rustc 1.98.1); each wasm's
+  imports equal build.sh's `ALLOWED` set exactly (no extra, no unused
+  entry: contract 18, executor 16). (b) build.sh's own checker (the
+  heredoc, extracted and run with `python3 -I` in scratch dirs) exits 1
+  with the expected message for the no-cfg wasm ("does not import
+  env.panic_utf8"), a synthetic module importing
+  `promise_batch_action_transfer` ("imports host functions for actions
+  other than function calls") and one importing `promise_yield_create`
+  ("has imports that are not in the reviewed list").
+
+ASM-DEPLOY: the in-contract half is now checked (no deploy, key, transfer,
+stake, account or global-contract import, no upgrade export). What remains
+assumed is the account holder's own keys and redeploys.
+
+Last run 2026-11-13 (`--update`, then the check): exit 0; the mirror's git
+status stays clean (`target/` and `artifacts/` are gitignored upstream).
 
 ## Mutants (`./run.sh mutants`)
 
-Unpatched control: passes. 21 mutants (15 of `crates/contract/src/lib.rs`, 6 of
-`crates/executor/src/lib.rs`), each applied with `patch -p1` to a temporary
-copy of the source; both wasm builds are rebuilt before the suite runs
-(host store_diff 300 x 40, wasm 40 x 40 per build). Last run 2026-11-11:
-**21/21 killed**, 9 min.
+41 mutants, each applied with `patch -s -p1` (no fuzz) to a temporary copy
+of the source; the unpatched copy runs first as the control. Per mutant,
+the documented build (`--cfg near`) of the patched tree is rebuilt before
+the suite runs (a build failure is ERROR, never a kill); the no-cfg wasm,
+used only by `nt_f1_*`, is built once from the unpatched tree. Sizes: host
+store_diff 300 x 40, wasm 40 x 40, everything else at its default.
 
-| Mutant | Crate | Change | Verdict | Failing tests |
+- s01-s21: v1.0.0's m01-m21, re-based on v1.1.0 (`s` for shell, so the
+  names do not clash with the Prolog model mutants). s08 is now "a
+  `Failed` promise result reads as active" in the raw-result parse.
+- s22-s38 (s32 split into s32a in `execute` and s32b in
+  `confirm_not_executed`): reverts of the v1.1.0 fixes (NT-F2, NT-F4, F-3
+  in the lock and in the executor, NT-F3's `promise_return`, D-1's
+  `on_settled`).
+- s00a, s00b: historical mutants, the v1.0.0 production code of the
+  contract and of the executor (`6f61616`) over the v1.1.0 core. They
+  build against v1.1.0 (the contract uses only `records`, and `record()`
+  is additive). The harness needs two cfg shims for them, set by
+  `run-mutants.sh` from the patch header: `nt_v100_contract` passes the
+  `#[callback_result]` argument of v1.0.0's `on_result` on the host path;
+  `nt_v100_executor` reads v1.0.0's executor state (no `newest`) and has
+  no host `on_settled`. Ordinary builds set neither.
+
+Until the v1.1.0 corpus is committed, the run uses `NT_SKIP_TRACES=1`
+(`tests/traces.rs` left out; see "Expected failure").
+
+| Mutant | Crate | Breaks | Change | Verdict and failing tests |
 |---|---|---|---|---|
-| m01_on_result_not_private | contract | SH-3: on_result accepts any predecessor | killed | `sh3_on_result_is_private` |
-| m02_caller_is_signer | contract | SH-1: caller() is the signer instead of the predecessor | killed | `sh1_caller_is_the_predecessor_not_the_signer`, `sh8_store_diff_host`, `sh8_store_diff_wasm` |
-| m03_swap_completed_cancelled | contract | SH-3: on_result maps completed and cancelled to the opposite settlement | killed | `ex5_end_to_end_normal_reject_unknown_panic`, `ex5_settle_before_callback_is_absorbed`, `sh3_on_result_maps_the_status_string` (+2) |
-| m04_unknown_settles_cancelled | contract | SH-3: an "unknown" status is treated as definitive non-execution | killed | `conformance_traces_through_the_shell`, `ex5_end_to_end_normal_reject_unknown_panic`, `ex5_settle_before_callback_is_absorbed` (+5) |
-| m05_reconcile_without_status_guard | contract | SH-7: reconcile no longer refuses records that are not in flight | killed | `sh7_reconcile_guard_and_promise_shape`, `sh8_store_diff_host`, `sh8_store_diff_wasm` |
-| m06_get_commitments_limit_100 | contract | SH-9: get_commitments pages up to 100 records | killed | `sh9_views_and_paging_at_256_records` |
-| m07_settle_emits_no_event | contract | SH-5/SH-8: settle forgets its "settled" event | killed | `conformance_traces_through_the_shell`, `ex5_settle_before_callback_is_absorbed`, `f1_control_without_the_disturbing_observe` (+5) |
-| m08_on_result_promise_error_is_active | contract | SH-3: a failed execute (PromiseError) acknowledges the record as Active | killed | `conformance_traces_through_the_shell`, `ex5_end_to_end_normal_reject_unknown_panic`, `ex5_settle_before_callback_is_absorbed` (+5) |
-| m09_new_not_private | contract | SH-2: anyone may initialise the pool | killed | `sh2_new_is_private_and_initialises_once` |
-| m10_now_rounds_up | contract | SH-1: now() rounds the block timestamp up to the next second | killed | `conformance_traces_through_the_shell`, `ex5_settle_before_callback_is_absorbed`, `f1_control_without_the_disturbing_observe` (+17) |
-| m11_execute_sent_to_actor | contract | SH-6: dispatch sends execute to the recipe's actor instead of its executor | killed | `conformance_traces_through_the_shell`, `ex5_end_to_end_normal_reject_unknown_panic`, `ex5_settle_before_callback_is_absorbed` (+15) |
-| m12_submit_payable | contract | SH-10: submit accepts an attached deposit | killed | `sh10_mutating_methods_reject_attached_deposits` |
-| m13_submit_ignores_preview | contract | SH-4/SH-5: submit tries the core directly and swallows its error (the version-overflow panic is lost) | killed | `sh5_core_errors_are_panics_with_the_error_string` |
-| m14_on_result_panics_on_core_error | contract | SH-3/SH-5: on_result panics on a core error instead of reporting it in the event | killed | `f1_wedge_end_to_end_with_the_executor`, `f1_wedge_through_the_shell`, `sh8_store_diff_host` (+1) |
-| m15_reconcile_status_gas_30 | contract | SH-7: reconcile attaches 30 Tgas to status instead of 10 | killed | `f1_wedge_through_the_shell`, `sh7_reconcile_guard_and_promise_shape`, `sh8_store_diff_host` (+1) |
-| m16_executor_dedupe_dropped | executor | EX-2: execute no longer deduplicates a replayed id (a second job is pushed) | killed | `ex2_payload_binding_and_dedupe`, `ex4_terminal_conflict_rejected` |
-| m17_executor_lock_is_signer | executor | EX-1: execute checks the signer, not the predecessor | killed | `ex1_only_the_lock_executes` |
-| m18_executor_set_mode_unguarded | executor | EX-3: anyone may set the executor's mode | killed | `ex3_only_the_operator_attests` |
-| m19_executor_terminal_conflict_dropped | executor | EX-4: finish may replace a terminal outcome with the other one | killed | `ex4_terminal_conflict_rejected`, `f1_wedge_end_to_end_with_the_executor` |
-| m20_executor_notify_inverted | executor | EX-5: notify reports the opposite outcome to the lock | killed | `ex5_end_to_end_normal_reject_unknown_panic`, `ex5_notify_calls_lock_settle` |
-| m21_executor_payload_unbound | executor | EX-2: a replayed id with another payload returns the recorded status | killed | `ex2_payload_binding_and_dedupe` |
+| s00a_v100_contract | contract | SH-3/SH-10/SH-12 | the v1.0.0 contract (NT-F2, NT-F3, NT-F4 unfixed; Promise type) | pending |
+| s00b_v100_executor | executor | EX-6/EX-7/EX-8 | the v1.0.0 executor (no window, 256-job cap, no on_settled; Promise type) | pending |
+| s01_on_result_not_private | contract | SH-3 | on_result accepts any predecessor | pending |
+| s02_caller_is_signer | contract | SH-1 | caller() is the signer instead of the predecessor | pending |
+| s03_swap_completed_cancelled | contract | SH-3 | on_result maps completed and cancelled to the opposite settlement | pending |
+| s04_unknown_settles_cancelled | contract | SH-3 | an "unknown" status is treated as definitive non-execution | pending |
+| s05_reconcile_without_status_guard | contract | SH-7 | reconcile no longer refuses records that are not in flight | pending |
+| s06_get_commitments_limit_100 | contract | SH-9 | get_commitments pages up to 100 records | pending |
+| s07_settle_emits_no_event | contract | SH-5/SH-8 | settle forgets its "settled" event | pending |
+| s08_on_result_promise_error_is_active | contract | SH-3 | a failed execute (PromiseError::Failed) acknowledges the record as Active | pending |
+| s09_new_not_private | contract | SH-2 | anyone may initialise the pool | pending |
+| s10_now_rounds_up | contract | SH-1 | now() rounds the block timestamp up to the next second | pending |
+| s11_execute_sent_to_actor | contract | SH-6 | dispatch sends execute to the recipe's actor instead of its executor | pending |
+| s12_submit_payable | contract | SH-10 | submit accepts an attached deposit | pending |
+| s13_submit_ignores_preview | contract | SH-4/SH-5 | submit tries the core directly and swallows its error (the version-overflow panic is lost) | pending |
+| s14_on_result_panics_on_core_error | contract | SH-3/SH-5 | on_result panics on a core error instead of reporting it in the event | pending |
+| s15_reconcile_status_gas_30 | contract | SH-7 | reconcile attaches 30 Tgas to status instead of 10 | pending |
+| s16_executor_dedupe_dropped | executor | EX-2 | execute no longer deduplicates a replayed id (a second job is pushed) | pending |
+| s17_executor_lock_is_signer | executor | EX-1 | execute checks the signer, not the predecessor | pending |
+| s18_executor_set_mode_unguarded | executor | EX-3 | anyone may set the executor's mode | pending |
+| s19_executor_terminal_conflict_dropped | executor | EX-4 | finish may replace a terminal outcome with the other one | pending |
+| s20_executor_notify_inverted | executor | EX-5 | notify reports the opposite outcome to the lock | pending |
+| s21_executor_payload_unbound | executor | EX-2 | a replayed id with another payload returns the recorded status | pending |
+| s22_reconcile_takes_a_deposit | contract | SH-10 | reconcile's deposit check is removed (NT-F2 reverted) | pending |
+| s23_on_result_reads_65_bytes | contract | SH-3 | on_result accepts a 65-byte promise result | pending |
+| s24_on_result_any_result_count | contract | SH-3 | on_result reads result 0 of a callback with two or more promise results | pending |
+| s25_on_result_not_found_panics | contract | SH-3/SH-5 | on_result of a missing record panics NotFound again (NT-F4 reverted) | pending |
+| s26_get_commitments_skip_from | contract | SH-9 | get_commitments skips `from` records, not `from - first_id` (pages by index, not id) | pending |
+| s27_dispatch_indexes_records | contract | SH-6 | dispatch reads records[id], the index, not the record with that id | pending |
+| s28_promise_return_is_the_call | contract | SH-6/SH-7 | dispatch and reconcile return the executor call, not the on_result callback | pending |
+| s29_on_settled_advances_on_failed | executor | EX-8 | on_settled advances even when the lock's settle failed | pending |
+| s30_on_settled_not_private | executor | EX-8 | on_settled accepts any predecessor | pending |
+| s31_retain_keeps_the_boundary | executor | EX-6 | advance keeps the job exactly WINDOW below newest (`>=`) | pending |
+| s32a_execute_stale_off_by_one | executor | EX-6 | execute starts an id exactly WINDOW below newest (`<`, not `<=`) | pending |
+| s32b_confirm_stale_off_by_one | executor | EX-6 | confirm_not_executed accepts an id exactly WINDOW below newest (`>=`, not `>`) | pending |
+| s33_confirm_without_stale_check | executor | EX-6 | confirm_not_executed accepts a forgotten id | pending |
+| s34_max_jobs_256 | executor | EX-6/EX-7 | the executor holds at most 256 jobs (the v1.0 cap) | pending |
+| s35_notify_returns_on_settled | executor | EX-5/EX-8 | notify returns on_settled's result instead of the lock's settle | pending |
+| s36_advance_after_the_cap | executor | EX-6 | execute checks the cap before advance frees jobs | pending |
+| s37_execute_advances_on_a_stored_job | executor | EX-6 | an execute of an id that has a job raises newest (D-9) | pending |
+| s38_on_settled_never_advances | executor | EX-8 | on_settled never raises newest | pending |
 
 ## Gaps
 
 - The mocked runtime is not the real NEAR runtime: gas, storage staking,
   receipt timing across blocks and the real promise-result plumbing are the
-  sandbox layer's (RT-*). The router runs receipts FIFO in one block; the
-  settle-before-callback race is covered on the pool side only
-  (`ex5_settle_before_callback_is_absorbed`).
-- NT-F3: no static proof that the forbidden host functions are unreachable
-  (only source review and dynamic absence).
+  sandbox layer's (RT-*). The router runs receipts FIFO in one block;
+  `ex8_callbacks_in_any_order` permutes the `on_settled` callbacks
+  explicitly.
+- The wasm hashes are local reproducibility evidence (rustc 1.98.1 on this
+  machine); they become a CI gate only once CI produces the same hashes.
 - SH-8 random configurations are small (1-3 metrics, 1-3 recipes, values
-  near +-10); Full and Arithmetic are covered only by crafted states.
+  near +-10); Full and Arithmetic are covered by crafted states.

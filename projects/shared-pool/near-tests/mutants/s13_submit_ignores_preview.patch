@@ -1,10 +1,10 @@
-Mutant m13_submit_ignores_preview: SH-4/SH-5: submit tries the core directly and swallows its error (the version-overflow panic is lost).
+Mutant s13_submit_ignores_preview: SH-4/SH-5: submit tries the core directly and swallows its error (the version-overflow panic is lost).
 Applied with `patch -p1` from the source-mirror root by near-tests/run-mutants.sh;
 the near-tests suite must fail on it.
 
 --- a/crates/contract/src/lib.rs
 +++ b/crates/contract/src/lib.rs
-@@ -65,11 +65,7 @@
+@@ -68,11 +68,7 @@
      }
      pub fn submit(&mut self, request: Request) -> Submission {
          let decision = self.pool.preview(&caller(), &request, now());
