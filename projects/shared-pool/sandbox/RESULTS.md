@@ -373,8 +373,8 @@ the least whole-Tgas prepaid gas, counting up from 40 Tgas.
   40, `on_settled` 2.47 of 10.
 - **The executor at its cap (512 jobs).** Reached as upstream does: the
   operator confirms the 256 unassigned ids 289..=544; each adds a "cancelled"
-  job, the lock's `settle` fails NotFound (the lock's storage unchanged) and
-  `on_settled` takes the refused branch (`newest` stays 287). The confirmation
+  job, the lock's `settle` fails NotFound (afterwards the pool still equals
+  the core) and `on_settled` takes the refused branch (`newest` stays 287). The confirmation
   from 511 to 512 jobs burns 4.39 Tgas; one more fails "full" on the executor
   and never reaches the lock. At 512 jobs `status` burns 2.29 of 10,
   `finish` 4.39 with `on_settled` 3.68 of 10 (3.66 after a refused settle), and
