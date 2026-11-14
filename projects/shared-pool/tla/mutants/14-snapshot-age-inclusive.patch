@@ -1,0 +1,11 @@
+--- a/SharedPool.tla
++++ b/SharedPool.tla
+@@ -197,7 +197,7 @@
+ \* bump(): version.checked_add(1).
+ VerErr == IF version >= MaxVersion THEN "Arithmetic" ELSE "Ok"
+ 
+-SnapExpired(now) == cfg.maxAge > 0 /\ now > observedAt + cfg.maxAge
++SnapExpired(now) == cfg.maxAge > 0 /\ now >= observedAt + cfg.maxAge
+ 
+ -----------------------------------------------------------------------------
+ (* Guards, in the core's order. GuardOrder lists each entry point's exits  *)

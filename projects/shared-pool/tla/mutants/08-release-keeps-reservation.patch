@@ -1,0 +1,11 @@
+--- a/SharedPool.tla
++++ b/SharedPool.tla
+@@ -356,7 +356,7 @@
+ 
+ \* release(id)'s effect.
+ Release(i) ==
+-    /\ values' = AddVec(values, Neg(RecRcp(i).reserve), Rec(i).units)
++    /\ values' = values
+     /\ SetStatus(i, "Cancelled")
+     /\ version' = version + 1
+     /\ UNCHANGED <<cfg, observedAt, paused, base, k0>>

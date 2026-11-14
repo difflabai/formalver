@@ -1,0 +1,53 @@
+kind	name	result	seconds	job_seconds	cbmc_peak_gb	tree_peak_gb	limit_s	covers	kani_harnesses	started_utc
+harness	h_init	ok	430	481	27.9	27.9	2400	2 of 2	-	2026-11-14T01:42:42Z
+harness	h_validate	ok	800	887	33.7	33.7	2400	10 of 10	-	2026-11-14T01:09:45Z
+harness	h_energy	ok	145	193	18.9	19.0	1800	4 of 4	-	2026-11-14T02:49:07Z
+harness	h_energy_exact	ok	1356	1508	17.5	17.5	5100	0 of 4	-	2026-11-13T22:49:43Z
+harness	h_energy_max	ok	468	518	27.1	27.1	1800	1 of 1	-	2026-11-14T02:12:26Z
+harness	h_preview	ok	1718	1778	19.1	19.2	4800	5 of 5	-	2026-11-13T23:51:36Z
+harness	h_preview_post	ok	1102	1154	12.2	12.2	4500	0 of 5	-	2026-11-13T23:26:12Z
+harness	h_wedge	ok	394	435	35.4	35.4	1800	2 of 2	-	2026-11-14T02:52:21Z
+harness	h_bmc_from_init_po	ok	1581	1633	24.5	24.5	4800	0 of 2	-	2026-11-13T23:24:23Z
+harness	h_slot_cycle_0	ok	517	573	20.7	20.7	2400	1 of 1	-	2026-11-14T01:06:36Z
+harness	h_slot_cycle_2	ok	961	1073	29.1	29.1	2700	1 of 1	-	2026-11-14T00:18:38Z
+harness	h_full_255	ok	829	936	17.5	17.5	2400	1 of 2	-	2026-11-14T00:21:14Z
+harness	h_version_max_submit	ok	400	448	14.4	14.5	1800	1 of 10	-	2026-11-14T02:14:02Z
+harness	h_bmc_from_init_s_submit	ok	996	1050	29.8	29.8	3600	2 of 2	-	2026-11-14T00:36:31Z
+harness	h_bmc_from_init_s_dispatch	ok	227	277	15.9	15.9	1800	0 of 2	-	2026-11-14T02:32:26Z
+harness	h_bmc_from_init_s_ack	ok	225	274	15.1	15.1	1800	0 of 2	-	2026-11-14T02:27:52Z
+harness	h_bmc_from_init_s_cancel	ok	291	339	16.4	16.4	1800	0 of 2	-	2026-11-14T02:08:23Z
+harness	h_bmc_from_init_s_settle	ok	334	382	21.2	21.2	1800	0 of 2	-	2026-11-14T02:21:29Z
+harness	h_bmc_from_init_s_pause	ok	219	268	15.0	15.0	1800	0 of 2	-	2026-11-14T02:38:32Z
+harness	h_bmc_from_init_s_observe	ok	262	308	19.0	19.0	1800	0 of 2	-	2026-11-14T02:28:13Z
+harness	h_step_submit_tx	ok	636	685	16.1	16.1	1800	0 of 68	-	2026-11-14T01:43:37Z
+harness	h_step_submit_post	ok	472	520	16.6	16.7	1800	0 of 68	-	2026-11-14T01:59:43Z
+harness	h_step_submit_inv	ok	880	944	23.8	23.9	2700	0 of 68	-	2026-11-14T00:54:01Z
+harness	h_step_submit_cov	ok	215	265	14.9	15.0	1800	17 of 68	-	2026-11-14T02:37:03Z
+harness	h_step_cancel_post	ok	181	231	14.0	14.0	1800	0 of 68	-	2026-11-14T02:45:16Z
+harness	h_step_cancel_inv	ok	265	311	13.1	13.1	1800	0 of 68	-	2026-11-14T02:33:21Z
+harness	h_step_settle_tx	ok	232	281	12.2	12.2	1800	0 of 68	-	2026-11-14T02:43:00Z
+harness	h_step_settle_post	ok	372	429	18.2	18.3	1800	0 of 68	-	2026-11-14T02:21:05Z
+harness	h_step_settle_inv	ok	553	601	17.2	17.2	2100	0 of 68	-	2026-11-14T01:55:02Z
+harness	h_step_submit_inv_0	ok	388	443	21.0	21.0	1800	0 of 68	-	2026-11-14T02:05:04Z
+harness	h_step_submit_inv_1	ok	490	539	24.4	24.5	1800	0 of 68	-	2026-11-14T01:50:43Z
+harness	h_step_submit_inv_3	ok	1550	1606	16.6	16.6	3600	0 of 68	-	2026-11-13T23:51:52Z
+harness	h_step_cancel_inv_3	ok	822	877	15.9	15.9	2100	0 of 68	-	2026-11-14T00:36:49Z
+harness	h_step_settle_inv_1	ok	179	228	12.4	12.4	1800	0 of 68	-	2026-11-14T02:41:28Z
+harness	h_step_settle_inv_3	ok	2424	2495	13.1	13.1	5400	0 of 68	-	2026-11-13T22:44:37Z
+harness	h_step_observe_inv_3	ok	165	213	14.0	14.0	1800	0 of 68	-	2026-11-14T02:47:41Z
+mutant	01-guard-swap-paused-stale	killed/killed/killed	360	360	12.5	12.5	1800	-	h_step_submit_tx	2026-11-14T01:16:09Z
+mutant	03-submit-expiry-off-by-one	killed/killed/killed	352	352	16.8	16.9	1800	-	h_step_submit_tx	2026-11-14T01:22:09Z
+mutant	05-check-bounds-without-skip	killed/killed/killed	210	210	12.8	12.9	1800	-	h_step_settle_tx	2026-11-14T00:51:27Z
+mutant	06-envelope-ignores-reserved	killed/killed/killed	306	306	15.6	15.7	1800	-	h_step_submit_tx	2026-11-14T01:24:32Z
+mutant	10-settle-accepts-opposite-terminal	killed/killed/killed	170	170	11.3	11.3	1800	-	h_step_settle_tx	2026-11-14T00:54:57Z
+mutant	11-prerequisite-counts-non-completed	killed/killed/killed	372	372	15.8	15.9	1800	-	h_step_submit_tx	2026-11-14T01:28:01Z
+mutant	12-energy-ge	killed/killed/killed	324	324	20.0	20.1	1800	-	h_step_submit_tx	2026-11-14T01:29:39Z
+mutant	15-submit-actor-check-dropped	killed/killed/killed	262	262	17.0	17.0	1800	-	h_step_submit_tx	2026-11-14T01:34:13Z
+mutant	16-settle-executor-check-dropped	killed/killed/killed	192	192	10.1	10.1	1800	-	h_step_settle_tx	2026-11-14T00:57:47Z
+mutant	18-preview-candidate-divergence	killed/killed/killed	572	572	20.4	20.4	4800	-	h_preview	2026-11-13T23:14:51Z
+mutant	19-recovery-gt	killed/killed/killed	265	265	16.7	16.7	1800	-	h_step_submit_tx	2026-11-14T01:35:03Z
+mutant	21-full-off-by-one	killed/killed/killed	338	338	15.4	15.5	1800	-	h_full_256	2026-11-14T01:00:58Z
+mutant	23-envelope-ignores-extra	killed/killed/killed	247	247	14.1	14.1	1800	-	h_step_submit_tx	2026-11-14T01:38:35Z
+mutant	25-energy-excess-sign	killed/killed/killed	306	306	14.3	14.3	5100	-	h_energy_exact	2026-11-13T22:44:37Z
+mutant	28-check-bounds-vs-candidate	killed/killed/killed	250	250	17.4	17.4	1800	-	h_step_submit_tx	2026-11-14T01:39:28Z
+mutant	30-full-rejects-at-255	killed/killed/killed	386	386	3.8	3.8	2400	-	h_full_255	2026-11-13T23:45:25Z

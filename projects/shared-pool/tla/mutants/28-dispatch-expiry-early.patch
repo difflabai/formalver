@@ -1,0 +1,11 @@
+--- a/SharedPool.tla
++++ b/SharedPool.tla
+@@ -250,7 +250,7 @@
+     ELSE IF c # RecRcp(i).actor THEN "Unauthorized"
+     ELSE IF paused THEN "Paused"
+     ELSE IF Rec(i).status # "Reserved" THEN "InvalidState"
+-    ELSE IF now >= Rec(i).exp THEN "Expired"
++    ELSE IF now + 1 >= Rec(i).exp THEN "Expired"
+     ELSE IF SnapExpired(now) THEN "SnapshotExpired"
+     ELSE VerErr
+ 

@@ -1,0 +1,11 @@
+--- a/PoolLean/Machine.lean
++++ b/PoolLean/Machine.lean
+@@ -454,7 +454,7 @@
+ /-- Each call's post-state, given that no guard fired. -/
+ def effect (cfg : Cfg A) (s : State) : Op A → State
+   | .submit _ r u _ exp _ =>
+-    { s with records := s.records ++ [⟨s.records.length, r, u, exp, .reserved⟩],
++    { s with records := s.records ++ [⟨s.records.length + 1, r, u, exp, .reserved⟩],
+              values := addv s.values (cfg.recipe r).reserve u,
+              version := s.version + 1 }
+   | .dispatch _ id _ =>

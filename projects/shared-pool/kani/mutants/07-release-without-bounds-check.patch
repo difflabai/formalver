@@ -1,0 +1,14 @@
+# killed-by: h_step_cancel_tx
+# release: no check_bounds before undoing a reservation
+--- a/crates/core/src/lib.rs
++++ b/crates/core/src/lib.rs
+@@ -410,9 +410,6 @@
+         let r = &self.config.recipes[c.recipe as usize];
+         let undo: Vec<i64> = r.reserve.iter().map(|d| -d).collect();
+         let next = add(&self.values, &undo, c.units)?;
+-        // A dependent commitment can prevent release. Retain encumbrance until
+-        // dependencies are resolved; do not corrupt a downstream reservation.
+-        self.check_bounds(&next, None, Some(id))?;
+         self.bump()?;
+         self.values = next;
+         self.records[id as usize].status = Status::Cancelled;

@@ -1,0 +1,11 @@
+--- a/PoolLean/Machine.lean
++++ b/PoolLean/Machine.lean
+@@ -400,7 +400,7 @@
+ def inFlight : Status → Bool
+   | .dispatched => true
+   | .active => true
+-  | .unknown => true
++  | .unknown => false
+   | _ => false
+ 
+ /-- `settle` (lib.rs 423). -/

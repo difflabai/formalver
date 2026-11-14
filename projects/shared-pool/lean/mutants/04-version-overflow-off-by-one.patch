@@ -1,0 +1,11 @@
+--- a/PoolLean/Machine.lean
++++ b/PoolLean/Machine.lean
+@@ -313,7 +313,7 @@
+    (.err .bounds, boundsFail cfg s next extra skip)]
+ 
+ /-- `self.version.checked_add(1)?` / `bump()?`. -/
+-def verGuard (s : State) : Guard := (.err .arithmetic, decide (U32_MAX ≤ s.version))
++def verGuard (s : State) : Guard := (.err .arithmetic, decide (U32_MAX < s.version))
+ 
+ /-- `self.record(id)?` (lib.rs 339). -/
+ def foundGuard (s : State) (id : Nat) : Guard := (.err .notFound, decide (s.records.length ≤ id))

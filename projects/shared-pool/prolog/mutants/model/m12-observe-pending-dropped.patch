@@ -1,0 +1,16 @@
+# mutant: m12-observe-pending-dropped
+# mutates: F-1 hidden: observe ignores open records
+# expect: test_model F-1 witness
+# expect: test_mc2 MC-2 F-1:
+# expect: test_mc1 MC-1 wedge
+--- a/prolog/model/pool_machine.pl
++++ b/prolog/model/pool_machine.pl
+@@ -401,7 +401,7 @@
+ 
+ % --- observe (spec:54)
+ holds(observe, owner, S, observe(Caller, _, _)) :- pool_config(S, C), owner_of(C, O), Caller == O.
+-holds(observe, all_terminal, S, _) :- pool_records(S, Rs), \+ ( member(c(_, _, _, St), Rs), open_status(St) ).
++holds(observe, all_terminal, S, _) :- S = S, Rs = [], pool_records(S, _), \+ ( member(c(_, _, _, St), Rs), open_status(St) ).
+ holds(observe, bounded_values, S, observe(_, Vs, _)) :-
+     pool_values(S, V0), length(V0, N), length(Vs, N),          % CODE-ONLY: length (amb-observe-length)
+     maplist(bounded, Vs).

@@ -1,0 +1,60 @@
+{
+  "attempts": [
+    {
+      "attempt": 0,
+      "blocks": {
+        "callback": 32,
+        "dispatch": 30,
+        "execute": 31,
+        "settle": 30
+      },
+      "delay_ms": 0,
+      "observed_panic": "WebAssembly trap: An `unreachable` opcode was executed.",
+      "order": "settle before dispatch: rejected",
+      "version_delta": 2
+    },
+    {
+      "attempt": 1,
+      "blocks": {
+        "callback": 40,
+        "dispatch": 38,
+        "execute": 39,
+        "settle": 39
+      },
+      "delay_ms": 100,
+      "order": "dispatch, settle, callback: late ack ignored",
+      "version_delta": 2
+    },
+    {
+      "attempt": 2,
+      "blocks": {
+        "callback": 49,
+        "dispatch": 47,
+        "execute": 48,
+        "settle": 48
+      },
+      "delay_ms": 200,
+      "order": "dispatch, settle, callback: late ack ignored",
+      "version_delta": 2
+    },
+    {
+      "attempt": 3,
+      "blocks": {
+        "callback": 58,
+        "dispatch": 56,
+        "execute": 57,
+        "settle": 58
+      },
+      "delay_ms": 300,
+      "order": "dispatch, settle, callback: late ack ignored",
+      "version_delta": 2
+    }
+  ],
+  "executor": "upstream pool_executor, its account key signing settle",
+  "late_ack_hits": 3,
+  "near_sandbox": "2.13.4 (near-workspaces 0.23.0 / near-sandbox 0.3.16 default)",
+  "pool_contract_sha256": "8ddc9280c63157636fede6f201ebff30ef528307092ad21914730c00df380f7c",
+  "pool_executor_sha256": "ca76c3caf0505ab7fdb43ab3ecaef6234472eec94bb4256679e69c5a4785b0e5",
+  "property": "RT-RACE",
+  "wasm_variant": "upstream"
+}

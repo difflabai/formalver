@@ -1,0 +1,11 @@
+--- a/SharedPool.tla
++++ b/SharedPool.tla
+@@ -379,7 +379,7 @@
+ SetPaused(c, b) ==
+     /\ PauseErr(c, b) = "Ok"
+     /\ paused' = b
+-    /\ version' = version + 1
++    /\ version' = version
+     /\ UNCHANGED <<cfg, values, observedAt, records, base, k0>>
+     /\ Step("pause", c, 0, 0, 0, 0, b, 0, 0)
+ 

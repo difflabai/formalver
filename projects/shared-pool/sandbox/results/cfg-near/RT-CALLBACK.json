@@ -1,0 +1,97 @@
+{
+  "assumption": "ASM-CALLBACK",
+  "final": {
+    "by_status": {
+      "Cancelled": 3,
+      "Completed": 1
+    },
+    "paused": false,
+    "records": 4,
+    "values": [
+      50,
+      20
+    ],
+    "version": 16
+  },
+  "modes": [
+    {
+      "event": {
+        "error": null,
+        "id": 0,
+        "outcome": "active"
+      },
+      "execute_returns": "active",
+      "mode": "normal",
+      "status": "Active",
+      "values": [
+        50,
+        8
+      ]
+    },
+    {
+      "event": {
+        "error": null,
+        "id": 1,
+        "outcome": "cancelled"
+      },
+      "execute_returns": "cancelled",
+      "mode": "reject",
+      "status": "Cancelled",
+      "values_after": [
+        50,
+        8
+      ],
+      "values_before": [
+        50,
+        16
+      ]
+    },
+    {
+      "cancel": "Pending",
+      "event": {
+        "error": null,
+        "id": 2,
+        "outcome": "unknown"
+      },
+      "execute_returns": "unknown",
+      "mode": "unknown",
+      "reconcile": {
+        "by": "mallory",
+        "repeat_is_noop": true,
+        "status": "Active",
+        "status_returns": "active"
+      },
+      "status": "Unknown"
+    },
+    {
+      "confirm_not_executed": {
+        "status": "Cancelled",
+        "values": [
+          50,
+          16
+        ]
+      },
+      "dispatch_tx_success": true,
+      "event": {
+        "error": null,
+        "id": 3,
+        "outcome": "unknown"
+      },
+      "execute": "fails",
+      "execute_panic": "panicked at crates/executor/src/lib.rs:50:9:\nassertion `left != right` failed: injected failure\n  left: \\",
+      "mode": "panic",
+      "reconcile": "status unknown, no-op",
+      "status": "Unknown",
+      "values": [
+        50,
+        24
+      ]
+    }
+  ],
+  "near_sandbox": "2.13.4 (near-workspaces 0.23.0 / near-sandbox 0.3.16 default)",
+  "pool_contract_sha256": "af617a8f00a10d0a049fb8092ae2f22463204faf71cf770a1b166d2c5b903c02",
+  "pool_executor_sha256": "760618725144241959be7c0b7a432c413d16b156a0a4aec7c875940c65b74cc6",
+  "property": "RT-CALLBACK",
+  "result": "pass",
+  "wasm_variant": "cfg-near"
+}

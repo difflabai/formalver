@@ -1,0 +1,11 @@
+--- a/PoolLean/Machine.lean
++++ b/PoolLean/Machine.lean
+@@ -361,7 +361,7 @@
+    verGuard s]
+ 
+ /-- `acknowledge`'s target status. -/
+-def ackStatus (accepted : Bool) : Status := if accepted then .active else .unknown
++def ackStatus (accepted : Bool) : Status := if accepted then .unknown else .active
+ 
+ /-- `acknowledge` (lib.rs 374). -/
+ def ackGuards (s : State) (id : Nat) (accepted : Bool) : List Guard :=

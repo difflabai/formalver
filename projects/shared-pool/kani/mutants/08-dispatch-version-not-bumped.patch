@@ -1,0 +1,12 @@
+# killed-by: h_step_dispatch_tx
+# dispatch: version not incremented
+--- a/crates/core/src/lib.rs
++++ b/crates/core/src/lib.rs
+@@ -366,7 +366,6 @@
+         {
+             return Err(Error::SnapshotExpired);
+         }
+-        self.bump()?;
+         self.records[id as usize].status = Status::Dispatched;
+         Ok(())
+     }

@@ -1,0 +1,17 @@
+Mutant m03_swap_completed_cancelled: SH-3: on_result maps completed and cancelled to the opposite settlement.
+Applied with `patch -p1` from the source-mirror root by near-tests/run-mutants.sh;
+the near-tests suite must fail on it.
+
+--- a/crates/contract/src/lib.rs
++++ b/crates/contract/src/lib.rs
+@@ -125,8 +125,8 @@
+             .expect("NotFound");
+         let status = result.unwrap_or_else(|_| "unknown".into());
+         let update = match status.as_str() {
+-            "completed" => self.pool.settle(&executor, id, true),
+-            "cancelled" => self.pool.settle(&executor, id, false),
++            "completed" => self.pool.settle(&executor, id, false),
++            "cancelled" => self.pool.settle(&executor, id, true),
+             "active" => self.pool.acknowledge(id, true),
+             _ => self.pool.acknowledge(id, false),
+         };

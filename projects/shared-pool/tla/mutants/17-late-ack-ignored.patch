@@ -1,0 +1,11 @@
+--- a/SharedPool.tla
++++ b/SharedPool.tla
+@@ -260,7 +260,7 @@
+ \* callback is the only caller, SH-3).
+ AckErr(i, acc) ==
+     IF i >= NR THEN "NotFound"
+-    ELSE IF Rec(i).status \notin {"Dispatched", "Unknown"} THEN "Noop"
++    ELSE IF Rec(i).status # "Dispatched" THEN "Noop"
+     ELSE IF Rec(i).status = AckTo(acc) THEN "Noop"
+     ELSE VerErr
+ 

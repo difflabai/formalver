@@ -1,0 +1,10 @@
+--- a/SharedPool.tla
++++ b/SharedPool.tla
+@@ -261,7 +261,6 @@
+ AckErr(i, acc) ==
+     IF i >= NR THEN "NotFound"
+     ELSE IF Rec(i).status \notin {"Dispatched", "Unknown"} THEN "Noop"
+-    ELSE IF Rec(i).status = AckTo(acc) THEN "Noop"
+     ELSE VerErr
+ 
+ \* release(id): undo the reservation; the envelope skips the record.

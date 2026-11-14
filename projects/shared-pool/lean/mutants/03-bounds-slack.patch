@@ -1,0 +1,11 @@
+--- a/PoolLean/Machine.lean
++++ b/PoolLean/Machine.lean
+@@ -256,7 +256,7 @@
+ /-- `check_bounds` returns `Bounds` (once `envelope` succeeded). -/
+ def boundsFail (cfg : Cfg A) (s : State) (v : List Int) (extra : Option (Nat × Nat))
+     (skip : Option Nat) : Bool :=
+-  anyLt cfg.n fun i => decide (viol cfg s.values i < ev cfg s.records v extra skip i)
++  anyLt cfg.n fun i => decide (viol cfg s.values i + 1 < ev cfg s.records v extra skip i)
+ 
+ /-! ## Energy (lib.rs 151-175) -/
+ 

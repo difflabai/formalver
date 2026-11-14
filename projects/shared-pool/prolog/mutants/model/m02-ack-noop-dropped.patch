@@ -1,0 +1,15 @@
+# mutant: m02-ack-noop-dropped
+# mutates: div-ack-noop-version: a repeated acknowledgment bumps version
+# expect: test_model acknowledge:
+# expect: test_mc2 MC-2: all traces replay
+--- a/prolog/model/pool_machine.pl
++++ b/prolog/model/pool_machine.pl
+@@ -361,7 +361,7 @@
+ % CODE-ONLY / div-ack-noop-version: an acknowledgment that would not change the
+ % status is ignored and does not bump version.
+ holds(ack, changes_status, S, ack(Id, Acc)) :-
+-    record_of(S, Id, c(_, _, _, St)), ack_next(Acc, Next), St \== Next.
++    record_of(S, Id, c(_, _, _, St)), ack_next(Acc, _).
+ ack_next(true, active).
+ ack_next(false, unknown).
+ 

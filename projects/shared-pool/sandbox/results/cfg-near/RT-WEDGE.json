@@ -1,0 +1,105 @@
+{
+  "config": "m(0,10,5), m(-100,100,5); t(1,0,1,target); r(actor, exec, [-2,0], [2,-5], 1, [])",
+  "final": {
+    "executor_job": "completed",
+    "open_records": 1,
+    "record": "Active",
+    "values": [
+      10,
+      5
+    ],
+    "version": 4
+  },
+  "finding": "F-1",
+  "near_sandbox": "2.13.4 (near-workspaces 0.23.0 / near-sandbox 0.3.16 default)",
+  "pool_contract_sha256": "af617a8f00a10d0a049fb8092ae2f22463204faf71cf770a1b166d2c5b903c02",
+  "pool_executor_sha256": "760618725144241959be7c0b7a432c413d16b156a0a4aec7c875940c65b74cc6",
+  "property": "RT-WEDGE",
+  "result": "wedge reproduced on the wasm: LIVE-2 violated",
+  "steps": [
+    {
+      "result": "Ok",
+      "step": "owner observe [12, 5]",
+      "values": [
+        12,
+        5
+      ]
+    },
+    {
+      "result": "Ok (allowed)",
+      "step": "actor submit recipe 0 x 1",
+      "values": [
+        10,
+        5
+      ]
+    },
+    {
+      "result": "Ok: execute -> active -> Active",
+      "step": "actor dispatch"
+    },
+    {
+      "executor_job": "completed",
+      "notify settle(true)": {
+        "core_error": "Bounds",
+        "observed_panic": "Bounds"
+      },
+      "pool_record": "Active",
+      "step": "operator finish(id, completed)"
+    },
+    {
+      "event": {
+        "error": "Bounds",
+        "id": 0,
+        "outcome": "completed"
+      },
+      "result": "Ok (no panic), record unchanged",
+      "step": "anyone reconcile(id)"
+    },
+    {
+      "expected": [
+        "terminal outcome conflict",
+        "job exists",
+        "Bounds"
+      ],
+      "observed_panic": [
+        "panicked at crates/executor/src/lib.rs:85:9:\nterminal outcome conflict",
+        "panicked at crates/executor/src/lib.rs:95:9:\njob exists",
+        "Bounds"
+      ],
+      "step": "operator finish(id, cancelled) / confirm_not_executed / finish(id, completed) again"
+    },
+    {
+      "core_error": [
+        "Bounds",
+        "Bounds"
+      ],
+      "observed_panic": [
+        "Bounds",
+        "Bounds"
+      ],
+      "step": "executor key settle(id, true), settle(id, false)"
+    },
+    {
+      "core_error": "Pending",
+      "observed_panic": [
+        "Pending",
+        "Pending"
+      ],
+      "step": "actor / owner cancel(id)"
+    },
+    {
+      "core_error": "Pending",
+      "observed_panic": [
+        "Pending",
+        "Pending",
+        "Pending"
+      ],
+      "step": "owner observe [5,5], [10,5], [12,0]"
+    },
+    {
+      "result": "Pending / event error Bounds / Bounds",
+      "step": "fast_forward 200 blocks; observe / reconcile / executor-key settle"
+    }
+  ],
+  "wasm_variant": "cfg-near"
+}

@@ -1,0 +1,271 @@
+{
+  "calls": [
+    {
+      "call": "new (max config)",
+      "margin_to_300_tgas": 292.11,
+      "receipts": [
+        {
+          "gas": 7510424454835,
+          "gas_tgas": 7.51,
+          "ok": true,
+          "on": "pool"
+        }
+      ],
+      "tx_total_tgas": 7.89
+    },
+    {
+      "call": "preview at 255 records (as a transaction)",
+      "margin_to_300_tgas": 293.7,
+      "receipts": [
+        {
+          "gas": 5981787445814,
+          "gas_tgas": 5.98,
+          "ok": true,
+          "on": "pool"
+        }
+      ],
+      "tx_total_tgas": 6.3
+    },
+    {
+      "call": "submit #256 (recipe 31, 31 prerequisites, 224 open records)",
+      "margin_to_300_tgas": 287.13,
+      "receipts": [
+        {
+          "gas": 12562560450463,
+          "gas_tgas": 12.56,
+          "ok": true,
+          "on": "pool"
+        }
+      ],
+      "tx_total_tgas": 12.87
+    },
+    {
+      "call": "submit #257 (rejected Full)",
+      "margin_to_300_tgas": 291.59,
+      "receipts": [
+        {
+          "gas": 8096431407157,
+          "gas_tgas": 8.1,
+          "ok": true,
+          "on": "pool"
+        }
+      ],
+      "tx_total_tgas": 8.41
+    },
+    {
+      "call": "get_pool (as a transaction)",
+      "margin_to_300_tgas": 289.86,
+      "receipts": [
+        {
+          "gas": 9830527488536,
+          "gas_tgas": 9.83,
+          "ok": true,
+          "on": "pool"
+        }
+      ],
+      "tx_total_tgas": 10.14
+    },
+    {
+      "call": "get_commitments(0, 1000) -> 50 (as a transaction)",
+      "margin_to_300_tgas": 295.83,
+      "receipts": [
+        {
+          "gas": 3857557071393,
+          "gas_tgas": 3.86,
+          "ok": true,
+          "on": "pool"
+        }
+      ],
+      "tx_total_tgas": 4.17
+    },
+    {
+      "attached_budget_tgas": 30,
+      "call": "dispatch (pool.dispatch, pool.on_result [30 Tgas], exec.execute [30 Tgas])",
+      "margin_to_300_tgas": 281.84,
+      "margin_to_budget_tgas": 22.38,
+      "receipts": [
+        {
+          "gas": 8290310010576,
+          "gas_tgas": 8.29,
+          "ok": true,
+          "on": "pool"
+        },
+        {
+          "gas": 7619848798028,
+          "gas_tgas": 7.62,
+          "ok": true,
+          "on": "pool"
+        },
+        {
+          "gas": 1496502345692,
+          "gas_tgas": 1.5,
+          "ok": true,
+          "on": "exec"
+        }
+      ],
+      "tx_total_tgas": 18.16
+    },
+    {
+      "attached_budget_tgas": 40,
+      "call": "finish -> notify settle(true) [40 Tgas]",
+      "margin_to_300_tgas": 287.98,
+      "margin_to_budget_tgas": 30.35,
+      "receipts": [
+        {
+          "gas": 9648151100464,
+          "gas_tgas": 9.65,
+          "ok": true,
+          "on": "pool"
+        }
+      ],
+      "tx_total_tgas": 12.02
+    },
+    {
+      "call": "settle(true) by the executor key",
+      "margin_to_300_tgas": 290.05,
+      "receipts": [
+        {
+          "gas": 9638806891737,
+          "gas_tgas": 9.64,
+          "ok": true,
+          "on": "pool"
+        }
+      ],
+      "tx_total_tgas": 9.95
+    },
+    {
+      "call": "settle(false) by the executor key",
+      "margin_to_300_tgas": 290.06,
+      "receipts": [
+        {
+          "gas": 9631759332676,
+          "gas_tgas": 9.63,
+          "ok": true,
+          "on": "pool"
+        }
+      ],
+      "tx_total_tgas": 9.94
+    },
+    {
+      "call": "cancel (release)",
+      "margin_to_300_tgas": 290.08,
+      "receipts": [
+        {
+          "gas": 9611043346231,
+          "gas_tgas": 9.61,
+          "ok": true,
+          "on": "pool"
+        }
+      ],
+      "tx_total_tgas": 9.92
+    },
+    {
+      "attached_budget_tgas": 30,
+      "call": "reconcile (pool.reconcile, pool.on_result [30 Tgas], exec.status [10 Tgas])",
+      "margin_to_300_tgas": 286.14,
+      "margin_to_budget_tgas": 22.38,
+      "receipts": [
+        {
+          "gas": 4165477417186,
+          "gas_tgas": 4.17,
+          "ok": true,
+          "on": "pool"
+        },
+        {
+          "gas": 7619430669145,
+          "gas_tgas": 7.62,
+          "ok": true,
+          "on": "pool"
+        },
+        {
+          "gas": 1315623240176,
+          "gas_tgas": 1.32,
+          "ok": true,
+          "on": "exec"
+        }
+      ],
+      "tx_total_tgas": 13.86
+    },
+    {
+      "attached_budget_tgas": 40,
+      "call": "finish -> notify settle(false) [40 Tgas]",
+      "margin_to_300_tgas": 288.0,
+      "margin_to_budget_tgas": 30.39,
+      "receipts": [
+        {
+          "gas": 9613557501688,
+          "gas_tgas": 9.61,
+          "ok": true,
+          "on": "pool"
+        }
+      ],
+      "tx_total_tgas": 12.0
+    }
+  ],
+  "get_pool_tx_tgas": 9.83,
+  "near_sandbox": "2.13.4 (near-workspaces 0.23.0 / near-sandbox 0.3.16 default)",
+  "pool_contract_sha256": "8ddc9280c63157636fede6f201ebff30ef528307092ad21914730c00df380f7c",
+  "pool_executor_sha256": "ca76c3caf0505ab7fdb43ab3ecaef6234472eec94bb4256679e69c5a4785b0e5",
+  "property": "RES-1",
+  "result": "pass",
+  "state": {
+    "build_seconds": 144,
+    "built_by": "real transactions only",
+    "completed": 33,
+    "get_pool_json_bytes": 53221,
+    "max_requires": 31,
+    "metrics": 32,
+    "open": 220,
+    "recipes": 32,
+    "records": 256,
+    "state_bytes": 45613,
+    "storage_usage_bytes": 439584,
+    "terms": 64
+  },
+  "submit_256_pool_receipt_tgas": 12.56,
+  "submit_gas_by_record_count": [
+    {
+      "pool_receipt_tgas": 7.31,
+      "records_after": 1
+    },
+    {
+      "pool_receipt_tgas": 7.45,
+      "records_after": 31
+    },
+    {
+      "pool_receipt_tgas": 7.49,
+      "records_after": 32
+    },
+    {
+      "pool_receipt_tgas": 8.21,
+      "records_after": 64
+    },
+    {
+      "pool_receipt_tgas": 8.94,
+      "records_after": 96
+    },
+    {
+      "pool_receipt_tgas": 9.66,
+      "records_after": 128
+    },
+    {
+      "pool_receipt_tgas": 10.39,
+      "records_after": 160
+    },
+    {
+      "pool_receipt_tgas": 11.11,
+      "records_after": 192
+    },
+    {
+      "pool_receipt_tgas": 11.84,
+      "records_after": 224
+    },
+    {
+      "pool_receipt_tgas": 12.56,
+      "records_after": 256
+    }
+  ],
+  "wasm_variant": "upstream",
+  "worst_margin_to_300_tgas": 287.44,
+  "worst_pool_receipt_tgas": 12.56
+}

@@ -1,0 +1,20 @@
+# killed-by: h_step_cancel_tx
+# add: result not checked against +-1e6 (only i64 overflow). Equivalent on
+# submit (envelope's bound check on the candidate returns the same
+# Arithmetic), not on release: undoing a reservation can leave +-1e6, where
+# the original fails with Arithmetic and the mutant with Bounds (or accepts).
+--- a/crates/core/src/lib.rs
++++ b/crates/core/src/lib.rs
+@@ -66,11 +66,7 @@
+             let v = x
+                 .checked_add(d.checked_mul(i64::from(units)).ok_or(Error::Arithmetic)?)
+                 .ok_or(Error::Arithmetic)?;
+-            if bounded(v) {
+-                Ok(v)
+-            } else {
+-                Err(Error::Arithmetic)
+-            }
++            Ok(v)
+         })
+         .collect()
+ }

@@ -1,0 +1,94 @@
+{
+  "assumption": "ASM-PRIVATE",
+  "cases": [
+    {
+      "call": "pool.new",
+      "expected": "Method new is private",
+      "observed_panic": "WebAssembly trap: An `unreachable` opcode was executed.",
+      "predecessor": "owner.test.near"
+    },
+    {
+      "call": "pool.new",
+      "expected": "Method new is private",
+      "observed_panic": "WebAssembly trap: An `unreachable` opcode was executed.",
+      "predecessor": "actor.test.near"
+    },
+    {
+      "call": "pool.new",
+      "expected": "Method new is private",
+      "observed_panic": "WebAssembly trap: An `unreachable` opcode was executed.",
+      "predecessor": "mallory.test.near"
+    },
+    {
+      "call": "pool.new",
+      "expected": "Method new is private",
+      "observed_panic": "WebAssembly trap: An `unreachable` opcode was executed.",
+      "predecessor": "exec.test.near"
+    },
+    {
+      "call": "pool.new via relay, signed by the pool's key",
+      "expected": "Method new is private",
+      "observed_panic": "WebAssembly trap: An `unreachable` opcode was executed.",
+      "predecessor": "relay.test.near"
+    },
+    {
+      "call": "exec.new",
+      "expected": "Method new is private",
+      "observed_panic": "WebAssembly trap: An `unreachable` opcode was executed.",
+      "predecessor": "owner.test.near"
+    },
+    {
+      "call": "pool.new and exec.new again, by their own accounts",
+      "expected": "The contract has already been initialized",
+      "observed_panic": "WebAssembly trap: An `unreachable` opcode was executed.",
+      "storage_unchanged": true
+    },
+    {
+      "call": "pool.on_result",
+      "expected": "Method on_result is private",
+      "observed_panic": "WebAssembly trap: An `unreachable` opcode was executed.",
+      "predecessor": "owner.test.near",
+      "storage_unchanged": true
+    },
+    {
+      "call": "pool.on_result",
+      "expected": "Method on_result is private",
+      "observed_panic": "WebAssembly trap: An `unreachable` opcode was executed.",
+      "predecessor": "actor.test.near",
+      "storage_unchanged": true
+    },
+    {
+      "call": "pool.on_result",
+      "expected": "Method on_result is private",
+      "observed_panic": "WebAssembly trap: An `unreachable` opcode was executed.",
+      "predecessor": "mallory.test.near",
+      "storage_unchanged": true
+    },
+    {
+      "call": "pool.on_result",
+      "expected": "Method on_result is private",
+      "observed_panic": "WebAssembly trap: An `unreachable` opcode was executed.",
+      "predecessor": "exec.test.near",
+      "storage_unchanged": true
+    },
+    {
+      "call": "pool.on_result via relay",
+      "expected": "Method on_result is private",
+      "observed_panic": "WebAssembly trap: An `unreachable` opcode was executed.",
+      "predecessor": "relay.test.near",
+      "storage_unchanged": true
+    },
+    {
+      "call": "pool.on_result signed by the pool's own key (no promise result)",
+      "observed_failure": "host error: Accessed invalid promise result index: 0",
+      "predecessor": "pool.test.near",
+      "storage_unchanged": true
+    }
+  ],
+  "near_sandbox": "2.13.4 (near-workspaces 0.23.0 / near-sandbox 0.3.16 default)",
+  "pool_contract_sha256": "8ddc9280c63157636fede6f201ebff30ef528307092ad21914730c00df380f7c",
+  "pool_executor_sha256": "ca76c3caf0505ab7fdb43ab3ecaef6234472eec94bb4256679e69c5a4785b0e5",
+  "property": "RT-PRIVATE",
+  "result": "pass",
+  "wasm_variant": "upstream"
+}

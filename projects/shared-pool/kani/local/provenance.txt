@@ -1,0 +1,33 @@
+# shared-pool's local Kani record: the run's provenance. Written by
+# projects/shared-pool/kani/local/record.py from a run of run-local.py; do
+# not edit. tools/scripts/check-kani-record.py checks it in CI: the input
+# lines (git object ids, tool versions) hash to fingerprint, which must be
+# HEAD's; digest is the sha256 of jobs.tsv and covers.tsv.
+commit	89f99d6eed4011ea06f07a7372844f6d7fdcf0ef
+kani_tree	da291ceff06988fe10418ee9610576286b977ae5
+input	projects/shared-pool/kani/src	20cda78ef521183025e8cd0a238fafada8aa69dd
+input	projects/shared-pool/kani/Cargo.toml	521ce97b5b19a83d225d25e22a8cd8142a0d57bb
+input	projects/shared-pool/kani/Cargo.lock	934c57a3fdaf8c761785d208a9a0404308ed7faa
+input	projects/shared-pool/kani/mutants	f7c8a90890fd08b357fc77dbd6ef54074355eefd
+input	projects/shared-pool/kani/run.sh	d0902b3f72d7508a5f980151e912d8e3542a77f8
+input	projects/shared-pool/kani/.gitignore	2f7896d1d1365eafb0da03d9fe456fac81408487
+input	projects/shared-pool/source-mirror	a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7
+input	projects/shared-pool/conformance/traces/core.txt	dd8ce999c5000e2871790e24b806a5822c1d9008
+input	projects/shared-pool/kani/(all but local, *.md)	6b3baad84771f864a4fb7050195e6039480588c0f337613ef172cae9b36a74fb
+input	.cargo/config[.toml] above kani/ (the root, projects, projects/shared-pool)	none
+input	tools/versions.env:KANI	0.68.0
+input	tools/versions.env:CBMC	6.11.0
+fingerprint	3ea19cce127fe2cff7fa4d24b6cd02d34db2d4005492b133d771825ae91b4a87
+digest	f76255530239f360e43b72c7f85e42db29926328e41001d0288eb18307e0144f
+kani	Kani Rust Verifier 0.68.0 (cargo plugin)
+cbmc	6.11.0 (cbmc-6.11.0)
+rustc	not recorded (the host's default toolchain, for the mutants' plain mode)
+host	Apple M1 Max 10 cores 64 GB, macOS 27.2.1
+started	2026-11-13T22:44:37Z
+finished	2026-11-14T02:59:36Z
+parallel	2 jobs at a time, their measured peaks summing to at most 50 GB
+kani_max_gb	40 (run.sh's default)
+kani_env	not recorded (the run's other KANI_* variables)
+cargo_config	not recorded (cargo configuration outside the lanes)
+runner	sched.py, the prototype of kani/local/run-local.py (same jobs, lanes and sampling)
+jobs	36 harnesses, 16 mutants

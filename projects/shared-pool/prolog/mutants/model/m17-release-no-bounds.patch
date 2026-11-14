@@ -1,0 +1,15 @@
+# mutant: m17-release-no-bounds
+# mutates: F-2 hidden: a release (cancel, settle(false)) skips the envelope bounds check
+# expect: test_requirements C-5 fixture conservation
+# expect: test_mc2 MC-2: all traces
+# expect: test_mc1 MC-1 reliance
+--- a/prolog/model/pool_machine.pl
++++ b/prolog/model/pool_machine.pl
+@@ -384,6 +384,7 @@
+     pool_config(S, C), pool_records(S, Recs), pool_values(S, V),
+     envelope(C, Recs, Next, none, Id, Low, High),
+     hard_ok(C, V, Low, High).
++holds(Kind, bounds, _, _) :- release_kind(Kind).
+ 
+ % --- settle (spec:40, 42, 43)
+ holds(Kind, caller, S, settle(Caller, Id, _)) :-
