@@ -13,9 +13,10 @@ catalogue: `projects/shared-pool/strategy.md` §5 (118 IDs), which C-6 reads.
 Run: `projects/shared-pool/prolog/run.sh` (optional `PROLOG_LOGS=<dir>`).
 Last full run: 2026-11-14, one uninterrupted run of `run.sh` (exit 0) in a
 scratch copy of the committed `prolog/`, `tla/` and `conformance/` at
-`51d4ca2` with the candidate corpus and the trace-reader patch: every step
-passes and all 47 mutants are killed, in 1,735 s, about 29 minutes (suites
-188 s, mutants 1,510 s summed, most of it the MC-1 mutants).
+`51d4ca2` with the v1.1.0 corpus and the trace reader, both since
+committed: every step passes and all 47 mutants are killed, in 1,735 s,
+about 29 minutes (suites 188 s, mutants 1,510 s summed, most of it the
+MC-1 mutants).
 
 Conformance traces (v1.1.0 corpus, generated from the real core by
 `conformance/`): `core.txt`, sha256
@@ -24,10 +25,9 @@ traces, 8,865 calls; trace 210 is a refused config, `init_error`), and
 `reads.txt`, sha256
 `9733bc8f23b4cab34bdcbe75e83d7e36cad647d84d488e52e333e0b147700103` (39,627
 requests at 1,300 states). The MC-2 and COV-2 numbers below are on this
-corpus with the s/7 trace reader (`verification/traces.pl`, `mc2.pl`). Until
-both are committed (the corpus swap), the committed v1.0.0 corpus (s/5) does
-not replay against this model and `test_mc2`, `test_reads` and C-3's and
-C-5's trace legs fail; see "State at this commit" at the end.
+corpus with the s/7 trace reader (`verification/traces.pl`, `mc2.pl`,
+`reads.pl`), committed together with it (the corpus swap): the v1.0.0
+corpus (s/5) does not convert to `pool/8`.
 
 Evidence vocabulary (near-approval strategy §12): this layer gives `check`
 (C-1..C-6), `model-check` (MC-1, LIVE-2, VER-CAP) and `test` (the MC-2
@@ -273,16 +273,3 @@ check (no prerequisite is admitted after its record was pruned), by
   counts and witnesses it asserts (the hedge rejected, prunes, Full on an open
   front, a pruned prerequisite, NotFound, refreshes, each gated call stopped at
   the cap) and from the mutants that it kills.
-
-## State at this commit
-
-The model, props, MC-1 and the unit tests are at v1.1.0, and C-2 reads the
-TLA layer's v1.1.0 `GuardOrder`. The trace reader (`traces.pl`, `mc2.pl`,
-`reads.pl`) and `test_mc2.pl` still read the committed v1.0.0 corpus (s/5);
-they change together with the corpus swap. Until then `test_mc2`,
-`test_reads`, and C-3's and C-5's trace legs fail (the v1.0.0 states do not
-convert to `pool/8`). With the candidate corpus and the reader patch,
-`run.sh` passes (numbers above). The RD-PREVIEW and RD-BEST evidence text in
-`requirements/traceability.pl` names the committed `reads.txt`'s numbers
-(1,246 states, 36,797 requests: the v1.0.0 file); the same patch changes it
-to 1,300 states and 39,627 requests when `reads.txt` is swapped.

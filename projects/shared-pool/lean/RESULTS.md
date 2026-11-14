@@ -47,11 +47,11 @@ corollary `hard_of_inv`.
 | CFG-2 | `valid_actor_ne_executor`, `valid_iff` (Window.lean) | `validate` decides `Valid` (`valid_iff`); a valid recipe's actor is not its executor (AUTH-SELF; the owner may execute) |
 | LEAN-GUARD | `Guard.guards_order`, `Guard.outcome_mem` (Guard.lean) | the outcome codes of every call's guard list are exactly `guardOrder` (written from lib.rs at the pin with line numbers; `pool-lean guards` prints it), and every outcome is one of them. Checked against the code: each entry against its lib.rs line at 57b3f02, and each call's list against its `code_events` sequence in `prolog/extracted/code_facts.pl` with the helper calls expanded (the consecutive `Arithmetic` sites inside `add` and `envelope` are one entry each; `energy`'s `Arithmetic` sites are absent because the model's energy is exact, NUM-1). Compared with W3's guard table (guard/5), which is coarser: it has one row per check the spec names and leaves out the sites that cannot fire in an `Inv` state (decision `c2-unreachable`). With those sites dropped from `guardOrder` (the `InvalidConfig` length checks in `add`, the second `NotFound` lookups in `release` and `index`, the `energy_terms` `Bounds` checks, the `add` in submit's recovery check, the plain bump inside `bump_new`, submit's version and id `checked_add`), the two lists are equal for all eight call kinds (a script over `pool-lean guards` and guard/5; not part of `run.sh`) |
 | LEAN-WIT | Witness.lean | see below, all by `decide`/`rfl` in the kernel (the cap state by induction) |
-| REF-5L | `pool-lean replay` (Main.lean) | see "Replay" below: fails on the committed v1.0.0 corpus by design until the v1.1.0 corpus lands |
+| REF-5L | `pool-lean replay` (Main.lean) | the committed v1.1.0 corpus: 216 traces (1 refused at init), 8,865 calls (2,565 `Ok`), every result and post-state equal; see "Replay" below |
 
 ### LEAN-WIT (Witness.lean)
 
-Configs are the candidate corpus's traces; accounts o = 0, a1 = 1, x1 = 2,
+Configs are the v1.1.0 corpus's traces; accounts o = 0, a1 = 1, x1 = 2,
 a2 = 3.
 
 * F-1 (trace 0): `wcfg_valid`; `f1_rejected`: after `observe [12,5]` the
@@ -103,18 +103,15 @@ a2 = 3.
 
 ## Replay (REF-5L)
 
-`conformance/traces/core.txt` at this commit is still the v1.0.0 corpus
-(212 traces, states `s/5`). The v1.1.0 machine disagrees with it by
-design at trace 0 (the F-1 hedge: `ok(0)` there, `err(bounds)` here), so
-`run.sh replay` FAILS until the v1.1.0 corpus and the parser change land
-together (workflow W10). The parser change (`Text.lean`, `Main.lean`:
-states `s/7` with `first_id` and `completed_units`, `init_error`) is not
-in this commit, because the current parser cannot read the new corpus and
-the new parser cannot read the old one. With both applied in a scratch
-copy, the candidate v1.1.0 corpus (216 traces, 8865 calls, 2565 `Ok`)
-replays with every result and post-state equal (values, version,
-observed_at, paused, the retained records, first_id, completed_units),
-`validate` accepting every `init` config and refusing trace 210's.
+`run.sh replay` builds `pool-lean` and replays `conformance/traces/core.txt`,
+the v1.1.0 corpus (216 traces, 8,865 calls, 2,565 `Ok`; states `s/7`),
+committed together with the parser (`Text.lean`, `Main.lean`: states with
+`first_id` and `completed_units`, `init_error`). Every result and
+post-state is equal (values, version, observed_at, paused, the retained
+records, first_id, completed_units); `validate` accepts every `init`
+config and refuses trace 210's (`init_error(invalid_config)`). The old
+parser cannot read this corpus and the new one cannot read the v1.0.0
+corpus (`s/5`), so the two were committed together.
 
 ## Mutants
 
@@ -123,7 +120,8 @@ observed_at, paused, the retained records, first_id, completed_units),
 re-anchored (01, 04 and 08 re-targeted), and 17-26 that each restore one
 v1.0.0 behaviour (fix-revert ids FR-1..FR-8 in each patch header).
 `run.sh mutants` runs the replay (only when the unmutated machine
-replays the corpus, which it does not until W10), the full `lake build`,
+replays the corpus, which it does on the committed v1.1.0 corpus), the
+full `lake build`,
 and, for 17-26, a property probe (`mutants/probes/`: a concrete state on
 which the named property fails; it must fail to compile unmutated and
 compile on the mutant). All 26 are killed by the build; none survives.
@@ -164,9 +162,8 @@ Several first breaks are proof shape rather than a false statement: 19
 the guard counts fewer units), 24 and 25 (the Facts restatements still
 hold); the probes show the named property itself fails on each. The
 replay column was measured once in a scratch copy with the parser change
-and the candidate corpus (with Guard dropped from Main for 09, 23 and 25,
-whose `guards_order` breaks); it is not part of the committed run until
-W10.
+and the v1.1.0 corpus, before both were committed (with Guard dropped from
+Main for 09, 23 and 25, whose `guards_order` breaks).
 
 ## Run times (darwin arm64, this workspace)
 
@@ -176,14 +173,14 @@ W10.
 | `run.sh audit` (65 `#print axioms`) | 1 s |
 | `run.sh canary` (3 files) | 1 s |
 | `run.sh regression` (1 file) | under 1 s |
-| `run.sh replay` (fails until W10) | 1 s (FAIL on the v1.0.0 corpus, see above) |
+| `run.sh replay` | 1 s (measured on the v1.0.0 corpus, where it fails at trace 0; 3 s on the v1.1.0 corpus in a scratch copy) |
 | `run.sh mutants` (26 mutants, 10 probes) | 135 s (one mutant at a time) |
 | whole run, all six checks | 148 s |
 
 ## What is NOT shown here
 
 * Transcription fidelity is not a proof: Machine.lean is a hand
-  transcription of lib.rs. REF-5L (with the W10 corpus) checks it against
+  transcription of lib.rs. REF-5L (the v1.1.0 corpus) checks it against
   real-core traces, which is evidence, not proof, of equivalence. The
   history encoding is a representation choice; `envS_win`, `anyOpen_win`
   and `win1` show the guards' quantities equal the window's, and the

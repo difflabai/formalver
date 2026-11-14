@@ -60,7 +60,7 @@ Run: `./run.sh test | surface | mutants` (or `./run.sh` for all three).
 |---|---|---|
 | `tests/shell.rs` (15) | SH-1..SH-7, SH-9, SH-10, RD-PREVIEW (shell half), LIVE-ALL at the shell | exact scenarios on the host path and the documented build. The v1.0.0 finding witnesses are inverted: `nt_f1_documented_build_reports_every_panic_message` (SH-5), `nt_f2_reconcile_rejects_an_attached_deposit` (SH-10), `sh3_non_string_promise_results_become_unknown` (SH-3; upstream's 16 raw-result cases). F-3 through the shell: `sh9_views_and_paging_by_id_through_the_window` (300 submits, first_id 44, pages by id), `sh9_pruned_ids_are_not_found_and_pages_are_by_id` (every id-taking method on a pruned id) |
 | `tests/store_diff.rs` (3) | SH-8 (+SH-1, SH-3..SH-7, SH-9, RD-PREVIEW, LIVE-ALL) | 2,000 x 40 random calls on the host path and 300 x 40 on the documented build, Borsh reload every call; results, panic messages, events, receipts, stored bytes and views; required coverage. `sh8_store_diff_window`: 4 host + 1 wasm sequences of 1,500 submit-heavy calls past the 256-record window (prunes, pruned ids, ids `first_id + k`) |
-| `tests/traces.rs` (1) | SH-8 (+SH-3, SH-4, SH-5), LIVE-2, LIVE-ALL | the conformance traces replayed through the shell on both paths. Expected to fail until the v1.1.0 corpus is committed (see "Expected failure" below) |
+| `tests/traces.rs` (1) | SH-8 (+SH-3, SH-4, SH-5), LIVE-2, LIVE-ALL | the conformance traces (`../conformance/traces/core.txt`: 216 traces, 8,865 calls) replayed through the shell on both paths, host and the documented build (Near). States `s/7` (first_id and completed_units compared); trace 210 is `init_error(invalid_config)`: `Pool::new` refuses its config and the shell's `new` fails, writing nothing; an `ack` NotFound is an Ok callback whose event carries the error |
 | `tests/executor.rs` (14) | EX-1..EX-8 (+SH-3, SH-6, SH-7 end to end; RT-RACE, pool side) | executor alone on both paths (stored bytes checked against a Borsh mirror; window tests against the reference model), its wrappers (`on_settled` private), notify's two receipts (`settle` 40 Tgas, then `on_settled` 10 Tgas, `promise_return` of the settle), the window (`WINDOW == MAX_RECORDS`, `MAX_JOBS >= 2*WINDOW` read from the pinned source), a random differential against the model (24 x 400, a third from near the cap), end-to-end flows, and `ex7_d1_*`, upstream's sandbox D-1 test in the mocked runtime (300 failed executes confirmed; EX-7 after every transaction; final first_id 44, then 46) |
 | `tests/wedge.rs` (3) | LIVE-2 (F-1), LIVE-1 (control), RT-WEDGE (mocked runtime), +SH-3, SH-5, EX-4, EX-5 | the F-1 hedge refused with Bounds through the shell, the curing hedge admitted and resolvable from every state; control; end to end with the executor, F-1 refused and the F-2 `risk` run whose credit release stays Ok |
 | `tests/scenarios.rs` (1) | SCN-1 | the six published `scenarios/<name>/{config,trace}.json` equal a re-derivation from `pool_core` (preview, submit, dispatch, acknowledge, settle at the fixed epoch 1,794,441,600) |
@@ -100,7 +100,7 @@ equals the one found. Checked 2026-11-14: 0 problems (catalogue 118 IDs,
 | SH-5 | pass (NT-F1 fixed) | `sh5_core_errors_are_panics_with_the_error_string` on both paths, including a crafted state (`first_id = u32::MAX`) where the preview allows a submit the core refuses with Arithmetic: the shell panics with it and writes nothing; `nt_f1_documented_build_reports_every_panic_message`: the documented build reports the error string (the Plain build, the negative control, still traps bare); SURF-3: build.sh refuses a wasm without `panic_utf8`; mutants s07, s13, s14, s25 |
 | SH-6 | pass | `sh6_dispatch_promise_shape` (`promise_create` execute 30 Tgas, `promise_then` on_result 30 Tgas, `promise_return` of the callback); mutants s11, s27, s28 |
 | SH-7 | pass | `sh7_reconcile_guard_and_promise_shape`; mutants s05, s15, s28 |
-| SH-8 | pass (host, wasm, window); traces pending W10 | `sh8_store_diff_host`, `sh8_store_diff_wasm`, `sh8_store_diff_window`. `conformance_traces_through_the_shell` fails on the committed tree, whose corpus is still v1.0.0; it passes only with the v1.1.0 corpus and the W10 patch, in a scratch copy (see "Expected failure" below) |
+| SH-8 | pass (host, wasm, window, traces) | `sh8_store_diff_host`, `sh8_store_diff_wasm`, `sh8_store_diff_window`, `conformance_traces_through_the_shell` (216 traces, 8,865 calls, host and documented build) |
 | SH-9 | pass | `sh9_views_and_paging_by_id_through_the_window`, `sh9_pruned_ids_are_not_found_and_pages_are_by_id`; mutants s06, s26 |
 | SH-10 | pass (NT-F2 fixed) | `sh10_mutating_methods_reject_attached_deposits`, `nt_f2_reconcile_rejects_an_attached_deposit`; mutants s12, s22 |
 | SH-11 | pass | `wasm-surface.sh` SURF-1: `pool_contract` exports its 12 methods, `contract_source_metadata` and `memory` (14), `pool_executor` its 8 methods (`on_settled` new) and the same two (10), as in `../wasm-surface.expected`; no upgrade, migrate or reset export |
@@ -115,21 +115,7 @@ equals the one found. Checked 2026-11-14: 0 problems (catalogue 118 IDs,
 | EX-6 | pass | `ex6_window_forgets_and_caps`, `ex6_window_constants_match_the_lock`, `ex6_random_differential_against_the_model`; mutants s31-s34, s36, s37, s00b |
 | EX-7 | pass (mocked runtime) | `ex7_d1_confirmed_failed_executes_stay_within_256` (EX-7 checked after every transaction), `ex6_window_constants_match_the_lock`; mutant s34, s00b. The sandbox half is RT-D1 |
 | EX-8 | pass | `ex8_on_settled_protocol`, `ex8_callbacks_in_any_order`, `ex1_executor_wrappers` (privacy on wasm); mutants s29, s30, s35, s38, s00b |
-| LIVE-2 (F-1) | regression pass | `wedge.rs`: the F-1 hedge is refused with Bounds. Trace 0 of the v1.1.0 corpus is pending W10 (the committed v1.0.0 trace 0 expects the hedge to be accepted) |
-
-## Expected failure until the v1.1.0 corpus is committed
-
-`tests/traces.rs::conformance_traces_through_the_shell` replays
-`../conformance/traces/core.txt`, which is still the v1.0.0 corpus (212
-traces, state `s/5`). On v1.1.0 it fails at trace 0 call 1: the F-1 hedge
-submit, `ok(0)` in the v1.0.0 corpus, is refused with Bounds. The v1.0.0
-corpus also expects acks of missing ids to fail and trace 210 (actor ==
-executor) to be accepted. The parser and replayer for the v1.1.0 corpus
-(216 traces, `s/7` with first_id and completed_units, `init_error` for
-trace 210, NotFound acks as events) are a separate patch applied with the
-corpus; with that patch and the candidate corpus the test passes on both
-paths (8,865 calls of 216 traces each). `run-mutants.sh` leaves this test
-out with `NT_SKIP_TRACES=1` until then.
+| LIVE-2 (F-1) | regression pass | `wedge.rs`: the F-1 hedge is refused with Bounds; so is trace 0 of the v1.1.0 corpus (`conformance_traces_through_the_shell`) |
 
 ## Wasm surface (`./run.sh surface`)
 
@@ -197,12 +183,12 @@ The first full run had s13 survive; the crafted state at the end of
 `sh5_core_errors_are_panics_with_the_error_string` (`first_id = u32::MAX`)
 now kills it.
 
-Until the v1.1.0 corpus is committed, the run uses `NT_SKIP_TRACES=1`
-(`tests/traces.rs` left out; see "Expected failure").
+The default run includes `tests/traces.rs` (the committed v1.1.0 corpus);
+`NT_SKIP_TRACES=1` leaves it out for a quicker run.
 
-Last run 2026-11-14 (`NT_SKIP_TRACES=1 ./run-mutants.sh`, 18 min): the
-control survives, 41 of 41 mutants killed, exit 0. Each verdict below lists
-every failing test.
+Last recorded run 2026-11-14, made before the v1.1.0 corpus was committed
+(`NT_SKIP_TRACES=1 ./run-mutants.sh`, 18 min): the control survives, 41 of
+41 mutants killed, exit 0. Each verdict below lists every failing test.
 
 The historical mutants also fail the surface checks, outside
 `run-mutants.sh`: the documented build of s00a + s00b imports 19

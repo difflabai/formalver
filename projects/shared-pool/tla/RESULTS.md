@@ -12,14 +12,10 @@ tla2tools 1.7.4, OpenJDK 23, 4 workers (`run.sh` default), macOS arm64, on a
 
 Conformance traces (REF-5): the v1.1.0 corpus `conformance/traces/core.txt`
 (216 traces, 8,865 calls; trace 210 is an `init_error`) and the matching
-`trace2tla.py` and `TraceCheck.{tla,cfg}` land together in the integration
-commit (W10). The trace and mutant numbers below were measured on that
-corpus and parser in a scratch tree. Until that commit `run.sh trace`
-fails: the committed v1.0.0 corpus converts (212 traces, 8,804 calls),
-but the v1.0.0 `TraceCheck.cfg` does not assign the v1.1.0 model's
-`DoneCap`, so TLC stops before the first trace; and `run.sh mutants`
-reports the mutants whose only killer is the trace replay (01, 06, 14, 26,
-28, 39) not killed.
+`trace2tla.py` and `TraceCheck.{tla,cfg}` (states `s/7`, `init_error`,
+the invariant `TInv`) are committed together (the integration commit). The
+trace and mutant numbers below were measured on the same corpus and parser
+in a scratch tree before that commit.
 
 ## What v1.1.0 changed, and where the model has it
 
@@ -118,10 +114,10 @@ checked on every transition, also into a state whose view TLC has seen.
 | `liveness-f2` (MC_Liveness_F2.cfg): `CreditHedgeConfig`, WF of `settle(false)` and of cancel | TLA-LIVE-F2 | no error (v1.0.0: violated, F-2) | 5,202 distinct, 4 s |
 | `liveness-win` (MC_Liveness_Win.cfg): `WinLive`, MaxRecords 1, WF of resolving the oldest record | WIN-LIVE | no error | 1,868 distinct, 2 s |
 | `liveness-win2` (MC_Liveness_Win2.cfg): the same at MaxRecords 2 (Full = two records, the oldest open) | WIN-LIVE | no error | 8,228 distinct, 4 s |
-| `trace` (TraceCheck): 216 traces, 8,865 calls, every result and post-state equal; `Inv` and `StepProperty` on every core state; trace 210's config refused by `ValidCfg` | REF-5 (also TX-0, TX-NOOP, CFG-1, CFG-2) | every trace accepted (W10 corpus and parser, scratch tree) | 9,081 of 9,081 states (216 initial + 8,865 steps), 9 s |
+| `trace` (TraceCheck): 216 traces, 8,865 calls, every result and post-state equal; `Inv` and `StepProperty` on every core state; trace 210's config refused by `ValidCfg` | REF-5 (also TX-0, TX-NOOP, CFG-1, CFG-2) | every trace accepted | 9,081 of 9,081 states (216 initial + 8,865 steps), 9 s |
 | `executor` (Executor.tla) | TLA-EXEC | no error; 12 witnesses reachable | section Executor |
 | Inductive invariant (Apalache) | TLA-IND | not done | open item, below |
-| Spec mutants (`mutants/*.patch`) | | all 52 killed (46 core, 6 executor; 29 and 31 retired), scratch tree | 7 min 2 s |
+| Spec mutants (`mutants/*.patch`) | | all 52 killed (46 core, 6 executor; 29 and 31 retired) | 7 min 2 s |
 
 The configs list each invariant on its own `INVARIANT` line (in the order
 above), so a failing run names the property. Each run's distinct-state
@@ -223,9 +219,9 @@ executor checks are exempt (their universe has no VIEW and does not finish
 on the unmutated model; their baseline is `run.sh executor`). 52 patches:
 46 core-model mutants (01-28, 30, 32-48; 32-48 are the FR mutants t32-t48
 of strategy section 4.5) and 6 executor mutants (49-54, section Executor).
-All 52 are killed (scratch tree with the v1.1.0 corpus and the W10 parser,
-2026-11-14, 7 min 2 s on 4 workers). Killer = the first check that kills, with the
-property TLC names (the configs list each invariant separately).
+All 52 are killed (2026-11-14, 7 min 2 s on 4 workers, in a scratch tree
+with the v1.1.0 corpus and parser). Killer = the first check that kills,
+with the property TLC names (the configs list each invariant separately).
 Where the first property TLC names is not the one strategy.md section 4.5
 names for an FR mutant, that property was also checked alone, in one-off
 runs ("alone").
@@ -300,10 +296,8 @@ behaviours they remove. Mutants 24 and 34 reach exactly the states of the
 unmutated model (an endpoint beyond ±10^6 then fails `Bounds`, since it
 exceeds every violation the comparator allows), so no state or step
 property can kill them: `Witness_F2bRefused` (F-2b's admission is refused
-with `Arithmetic`, not `Bounds`) and trace 208 do. At the branch head the
-`trace` check replays the v1.0.0 corpus and fails its baseline (the corpus note at
-the top), so `run.sh mutants` reports 01, 06, 14, 26,
-28 and 39 not killed until the corpus and parser land (W10).
+with `Arithmetic`, not `Bounds`) and trace 208 do. Of the checks their headers
+name, only `trace` (the v1.1.0 corpus) kills 01, 06, 14, 26, 28 and 39.
 
 ## Executor (TLA-EXEC)
 
@@ -359,6 +353,6 @@ Tagged `PROP: <ID>` where the layer checks them: TLA-SAFE and TLA-WIT
 (`MC_Safety.tla`, its cfgs, `Props.tla`), TLA-CAP (`MC_Cap.tla`, `.cfg`),
 TLA-LIVE-1, TLA-LIVE-F1, TLA-LIVE-F2, LIVE-2 and WIN-LIVE
 (`MC_Liveness.tla` and its cfgs), REF-5 (`TraceCheck.tla`, `trace2tla.py`),
-TX-0 and TX-NOOP (`TraceCheck.tla`), CFG-1 (`TraceCheck.tla`; with the
-W10 patch `PROP: CFG-1 CFG-2` on `TInv`), TLA-EXEC (`Executor.tla`), and the
+TX-0 and TX-NOOP (`TraceCheck.tla`), CFG-1 and CFG-2 (`TraceCheck.tla`,
+`PROP: CFG-1 CFG-2` on `TInv`), TLA-EXEC (`Executor.tla`), and the
 invariants and step properties in `Props.tla`. `run.sh` lists the layer IDs.

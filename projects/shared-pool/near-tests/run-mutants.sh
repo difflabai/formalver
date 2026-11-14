@@ -28,9 +28,9 @@
 # usage: projects/shared-pool/near-tests/run-mutants.sh [patch-glob]
 #   MUTANT_STORE_DIFF_SEQS  host store_diff sequences per mutant (default 300 x 40)
 #   MUTANT_WASM_DIFF_SEQS   wasm store_diff sequences per build (default 40 x 40)
-#   NT_SKIP_TRACES=1        leave tests/traces.rs out of the suite (until the
-#                           v1.1.0 corpus is committed, it replays the v1.0.0
-#                           traces and fails on the unpatched control)
+#   NT_SKIP_TRACES=1        leave tests/traces.rs (the 216 conformance traces
+#                           through the shell) out of the suite, for a quicker
+#                           run; the default includes it
 #   KEEP_LOGS=<dir>         keep each mutant's test log
 set -uo pipefail
 export PATH="$HOME/.cargo/bin:$PATH"

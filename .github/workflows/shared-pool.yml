@@ -233,15 +233,18 @@ jobs:
         run: tools/scripts/check-status.sh shared-pool
 
   conformance:
-    # The shared link between the layers: traces/core.txt (212 traces, 8,804
+    # The shared link between the layers: traces/core.txt (216 traces, 8,865
     # calls) must regenerate byte for byte from the pinned pool-core. TLA+,
-    # Lean, Prolog and the shell replay this file, so a stale one would make
-    # their replays evidence about other code. traces/reads.txt (COV-2: the
-    # core's preview and best_quantity at 1,246 states, 36,797 requests,
+    # Lean, Prolog, Kani and the shell replay this file, so a stale one would
+    # make their replays evidence about other code. traces/reads.txt (COV-2:
+    # the core's preview and best_quantity at 1,300 states, 39,627 requests,
     # compared with the Prolog model by prolog/tests/test_reads.pl) must
     # regenerate too; that run also fails if preview and submit disagree on
-    # the real core or a read class is never reached. Seconds of work;
-    # pool-core has no dependencies.
+    # the real core or a read class is never reached. coverage.py then
+    # recomputes the call classes from the terms alone and fails if a
+    # required class is missing or a forbidden one (cancel or settle failing
+    # Bounds or Arithmetic) occurs. Seconds of work; pool-core has no
+    # dependencies.
     needs: pin
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 20
@@ -264,6 +267,9 @@ jobs:
       - name: traces/reads.txt is current
         working-directory: projects/shared-pool/conformance
         run: cargo run --release --locked -- --reads-check traces/reads.txt
+      - name: traces/core.txt coverage classes (coverage.py)
+        working-directory: projects/shared-pool/conformance
+        run: python3 coverage.py traces/core.txt
 
   # The Kani layer on the real pool-core (strategy.md section 6,
   # kani/RESULTS.md): plain, mutants and kani-record on every run; kani,
@@ -1127,10 +1133,12 @@ jobs:
     # extract.py reads the pinned sources, so this job needs the submodule.
     # C-6 compares the catalogue in traceability.pl with section 5 of
     # projects/shared-pool/strategy.md (the path filters include that file
-    # again); a missing file or section fails it. 511 s on a 10-core Mac.
+    # again); a missing file or section fails it. About 30 minutes on a
+    # 10-core Mac (v1.0.0: 511 s), most of it the MC-1 mutants; the timeout
+    # leaves room for slower hosted runners.
     needs: pin
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:

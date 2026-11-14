@@ -240,13 +240,10 @@ family() {
   echo "$f"
 }
 
-# Plain-mode test filter. h_ref_traces (conform.rs) replays
-# conformance/traces/core.txt, which is still the v1.0.0 corpus in s/5 form:
-# against the v1.1.0 core it fails from trace 0 (the F-1 hedge is now
-# refused). It is skipped until the corpus is regenerated and conform.rs
-# reads s/7 and carries tla::ghost_after's ghost (v1.1 W10, one commit);
-# tla.rs is already the v1.1.0 transcription. That commit drops this filter.
-plain_skip='--skip h_ref_traces'
+# Plain-mode test filter (plain and the mutants' plain runs): none.
+# h_ref_traces (conform.rs) replays conformance/traces/core.txt, the v1.1.0
+# corpus in s/7 form, against the core and tla.rs on every call.
+plain_skip=''
 
 do_plain() {
   (cd "$here" && cargo test --release -q -- $plain_skip 2>&1) | tee "${PLAIN_LOG:-/dev/null}" | grep -E '^test |test result|panicked|unsatisfied' | grep -vE '\.\.\. ok$'
