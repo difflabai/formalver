@@ -2,7 +2,7 @@
 # TLA+ layer of shared-pool (pattern: near-approval strategy.md section 17,
 # tools/scripts/run-tla.sh). Exit 0 iff every check has its required outcome.
 #
-# PROP: TLA-SAFE TLA-WIT TLA-LIVE-1 TLA-LIVE-F1 TLA-LIVE-F2 REF-5
+# PROP: TLA-SAFE TLA-WIT TLA-LIVE-1 TLA-LIVE-F1 TLA-LIVE-F2 REF-5 TLA-EXEC
 #
 #   safety     TLC, MC_Safety: InvMC and StepProperty (TLA-SAFE); then every
 #              Witness_* invariant and WitStep_* step property must be
@@ -16,6 +16,13 @@
 #                liveness-f2        healthy, executor fair to settle(false): must
 #                                   FAIL as F-2 (TLA-LIVE-F2)
 #                liveness-f2-shape  Live2F2 holds: every counterexample is F-2
+#   executor   TLA-EXEC (EX-6, EX-7, EX-8): TLC, Executor.tla, the executor's
+#              job window against the lock's record window with receipts in
+#              any order, at WINDOW 2 (MC_Executor_W2, as executor-w2) and 3
+#              (MC_Executor_W3, as executor-w3); then every Witness_* and
+#              WitStep_* of Executor.tla must be VIOLATED on MC_Executor_W2
+#              without its VIEW (non-vacuity, and T-JOBCAP: the job cap
+#              refuses a retained record's execute and confirmation)
 #   apalache   TLA-IND (Apalache): not implemented, prints "skip" (a gap)
 #   trace      REF-5: trace2tla.py converts conformance/traces/core.txt and
 #              TLC replays every trace through TraceCheck (Inv and
@@ -23,7 +30,9 @@
 #              equal traces + calls
 #   mutants    every mutants/*.patch must make one of its checks fail. A
 #              patch may start with `# checks: <check>...` (names as in the
-#              liveness list, or trace / safety); otherwise the checks are
+#              liveness list, or trace / safety / executor-w2 / executor-w3 /
+#              executor-w2-noview, the WINDOW 2 universe without the VIEW,
+#              which the executor patches use); otherwise the checks are
 #              trace, safety, liveness, liveness-f1-shape, liveness-f2-shape,
 #              tried in order until one fails. The report names the killing
 #              check and why (invariant, temporal, rejected trace call, or
@@ -61,6 +70,7 @@ tlc() {
 }
 tlc_ok() { grep -q 'Model checking completed. No error has been found.' "$1"; }
 states() { grep -oE '[0-9,]+ distinct states found' "$1" | tail -1; }
+depth() { grep -oE 'depth of the complete state graph search is [0-9]+' "$1" | grep -oE '[0-9]+$'; }
 live_violated() { grep -q 'Temporal properties were violated' "$1"; }
 # Why a TLC run did not pass: the first violation it reports.
 why() {
@@ -142,6 +152,24 @@ run_liveness-f2-shape() {
   tlc "$1" MC_Liveness.tla MC_Liveness_F2Shape.cfg "$2"
   tlc_ok "$2"
 }
+# TLA-EXEC: every invariant and StepExec of Executor.tla.
+run_executor-w2() {
+  tlc "$1" Executor.tla MC_Executor_W2.cfg "$2"
+  tlc_ok "$2"
+}
+run_executor-w3() {
+  tlc "$1" Executor.tla MC_Executor_W3.cfg "$2"
+  tlc_ok "$2"
+}
+# The WINDOW 2 universe without the VIEW. The VIEW is a quotient of the
+# unmutated model only (a mutant may change what a dead receipt does), so
+# the executor mutants run here.
+run_executor-w2-noview() {
+  mkdir -p "$1/build/cfg"
+  sed '/^VIEW /d' "$1/MC_Executor_W2.cfg" >"$1/build/cfg/MC_Executor_W2_noview.cfg"
+  tlc "$1" Executor.tla build/cfg/MC_Executor_W2_noview.cfg "$2"
+  tlc_ok "$2"
+}
 
 fail=0
 report() { # name ok(0/1) detail log
@@ -197,7 +225,42 @@ desc() {
     liveness-f1-shape) echo "Live2F1: every counterexample is F-1" ;;
     liveness-f2) echo "LIVE-2 must fail, healthy, fair settle(false): F-2 (TLA-LIVE-F2)" ;;
     liveness-f2-shape) echo "Live2F2: every counterexample is F-2" ;;
+    executor-w2) echo "TLA-EXEC, WINDOW 2, MAX_JOBS 4" ;;
+    executor-w3) echo "TLA-EXEC, WINDOW 3, MAX_JOBS 6" ;;
   esac
+}
+
+EXEC_STATE_WITNESSES="Witness_Pruned Witness_Cap Witness_JobCapExec Witness_JobCapConfirm
+  Witness_ConfirmStale"
+EXEC_STEP_WITNESSES="WitStep_ExecStale WitStep_ExecStored WitStep_ExecFull WitStep_ExecForgets
+  WitStep_SettleForgets WitStep_SettleRefused WitStep_CapExit"
+
+# TLA-EXEC at WINDOW 2 and 3, then its witnesses (non-vacuity, including
+# the documented job-cap refusals T-JOBCAP) on the WINDOW 2 universe,
+# without the VIEW: it may expand only one state of a view, and the one it
+# keeps need not be a witness's source (a stale execute's state shares its
+# view with one where the record was cancelled before dispatch).
+check_executor() {
+  local d=$1 c w log start
+  for c in executor-w2 executor-w3; do
+    log="$logs/$c.log"
+    start=$(date +%s)
+    "run_$c" "$d" "$log"
+    report "$c" $? "$(desc "$c"), $(states "$log"), depth $(depth "$log"), $(($(date +%s) - start))s" "$log"
+  done
+  for w in $EXEC_STATE_WITNESSES $EXEC_STEP_WITNESSES; do
+    log="$logs/$w.log"
+    {
+      sed -e '/^INVARIANT /d' -e '/^PROPERTY /d' -e '/^VIEW /d' "$d/MC_Executor_W2.cfg"
+      case $w in
+        Witness_*) echo "INVARIANT $w" ;;
+        *) echo "PROPERTY $w" ;;
+      esac
+    } >"$d/build/cfg/$w.cfg"
+    tlc "$d" Executor.tla "build/cfg/$w.cfg" "$log"
+    grep -qE "(Invariant|Action property) $w is violated" "$log"
+    report "$w" $? "must be reachable" "$log"
+  done
 }
 
 gen_traces() { # out dir
@@ -266,7 +329,7 @@ check_mutants() {
 
 for c in "$@"; do
   case $c in
-    safety | liveness | apalache | trace) "check_$c" "$dir" ;;
+    safety | liveness | apalache | trace | executor) "check_$c" "$dir" ;;
     mutants)
       gen_traces "$dir/build" || { report trace2tla 1 "conversion failed" "$logs/trace2tla.log"; continue; }
       check_mutants
