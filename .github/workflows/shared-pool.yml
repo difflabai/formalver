@@ -33,6 +33,7 @@ on:
       - "tools/scripts/check-pin.sh"
       - "tools/scripts/test-check-pin.sh"
       - "tools/scripts/check-status.sh"
+      - "tools/scripts/test-check-status.sh"
       - "tools/scripts/ci-submodule.sh"
       - "tools/scripts/get-lean.sh"
       - "tools/scripts/get-tla-tools.sh"
@@ -63,6 +64,7 @@ on:
       - "tools/scripts/check-pin.sh"
       - "tools/scripts/test-check-pin.sh"
       - "tools/scripts/check-status.sh"
+      - "tools/scripts/test-check-status.sh"
       - "tools/scripts/ci-submodule.sh"
       - "tools/scripts/get-lean.sh"
       - "tools/scripts/get-tla-tools.sh"
@@ -214,7 +216,10 @@ jobs:
 
   status-lint:
     # status.toml claims nothing the repository doesn't back (near-approval
-    # strategy.md sections 12 and 14): 103 properties, 15 assumptions.
+    # strategy.md sections 12 and 14): 103 properties, 15 assumptions and
+    # 14 [findings] tables (closes <-> closed_by, closed_in, a closer past
+    # unverified). The self-test runs first: its findings cases edit a
+    # scratch copy of near-approval's status.toml, which has no [findings].
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
@@ -234,6 +239,8 @@ jobs:
             fi
           done
           echo "::error::no python3 >= 3.11 on PATH"; exit 1
+      - name: check-status self-test
+        run: tools/scripts/test-check-status.sh
       - name: status-lint
         run: tools/scripts/check-status.sh shared-pool
 
@@ -1072,7 +1079,9 @@ jobs:
     # (tla/RESULTS.md): 5 min 8 s for safety liveness trace (MC_Safety
     # 181 s, trace 9 s), 6 min 57 s (417 s) for mutants; the executor step
     # below. About 17 to 18 minutes in all; the timeout leaves room for a
-    # slower hosted runner.
+    # slower hosted runner. On a hosted runner at TLA_HEAP 5g the job took
+    # 22 min (PR #32 run 43600054037 at 5cf571e; executor-w3, 7,323,777
+    # distinct states, 214 s).
     needs: pin
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 120

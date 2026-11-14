@@ -25,7 +25,7 @@ settlement always has version room.
 |---|---|
 | Pinned commit | `57b3f02d18e85149db3c1035431368c4e07a4d8a`, the merge commit of upstream PR #4 on `main` (2026-11-13 UTC, "Merge pull request #4 from difflabai/gabehamilton/v1.1-verification-findings"). Its tree is the tree of the PR head `6fcbd56` (`status.toml` `[project] identity`, checked by `tools/scripts/check-pin.sh`). |
 | Version under verification | shared-pool-controls v1.1.0 (root `Cargo.toml` `version = "1.1.0"`), on the branch `gabehamilton/shared-pool-controls-v1.1` (PR #32). |
-| Previous verification | v1.0.0: pin `a4bb5c3`, whose contract code is that of upstream's v1.0.0 commit `6f61616` (upstream's findings page calls it `80fb89e`; `git diff 6f61616 80fb89e -- crates scripts Cargo.toml Cargo.lock` is empty). Verified in PR #31; its last verification commit is `a072a2d`, to be tagged `shared-pool-v1.0.0` (the tag does not exist yet; until it does, cite the commits). It found 6 core findings (F-1..F-6, with F-2b) and 4 shell findings (NT-F1..NT-F4); v1.1.0 closes all of them (§4). |
+| Previous verification | v1.0.0: pin `a4bb5c3`, whose contract code is that of upstream's v1.0.0 commit `6f61616` (upstream's findings page calls it `80fb89e`; `git diff 6f61616 80fb89e -- crates scripts Cargo.toml Cargo.lock` is empty). Recorded in PR #31 (open). Its last results commit is `a072a2d` (the local Kani record); the two commits after it, `22df7b6` and `651852b` (#31's head), harden the record check and change no layer's results. The tag `shared-pool-v1.0.0` goes on #31's head once its `kani`, `kani-record` and `covers` jobs pass (the tag does not exist yet; until it does, cite the commits). It found 6 core findings (F-1..F-6, with F-2b) and 4 shell findings (NT-F1..NT-F4); v1.1.0 closes all of them (§4). |
 | Crates | `pool-core` (`crates/core/src/lib.rs`, 566 lines): every decision; zero dependencies in the default build; `#![forbid(unsafe_code)]`; serde and borsh optional. `pool-contract` (452 lines): a near-sdk 5.29.1 shell (predecessor → caller, block time in whole seconds, core errors → panics, a low-level promise to the executor, a private callback that reads the raw result, views). `pool-executor` (571 lines): the synthetic executor with a window of 256 job ids and a cap of 512 stored jobs (`execute`, `status`, `finish`, `confirm_not_executed`, the private `on_settled`, fault modes). `crates/sandbox`: upstream's near-workspaces tests, including `res1.rs` (gas). `scripts/build.sh`: the documented build. |
 | Toolchain | Upstream `rust-toolchain.toml` 1.98 (rustc 1.98.1 here). Release profile: codegen-units 1, `opt-level = "z"`, LTO, `panic = "abort"`, `overflow-checks = true` (ASM-COMPILE). `scripts/build.sh` builds with `--cfg near` and checks the wasm's imports against an allowlist. |
 | TCB via `Cargo.lock` | near-sdk 5.29.1, borsh 1.8.1, serde_json 1.0.154, and their dependencies |
@@ -218,10 +218,11 @@ reviewer who has not been named.
 
 ## 4. Findings
 
-The v1.0.0 verification (pin `a4bb5c3`, PR #31, last commit `a072a2d`,
-to be tagged `shared-pool-v1.0.0`) found six core findings (F-1..F-6, with
-F-2b) and four shell findings (NT-F1..NT-F4); their full text is in that
-record, and upstream records the fixes in `docs/verification-findings.md`.
+The v1.0.0 verification (pin `a4bb5c3`, PR #31 with its results at
+`a072a2d`; #31's head is to be tagged `shared-pool-v1.0.0`) found six
+core findings (F-1..F-6, with F-2b) and four shell findings
+(NT-F1..NT-F4); their full text is in that record, and upstream records
+the fixes in `docs/verification-findings.md`.
 v1.1.0 (upstream PR #4) closes each. A finding counts as closed here only
 with (t) the v1.0.0 result showing it, and (r) a fix-revert mutant (§4.5)
 killed by the closing property or (c) the corpus (§10: `coverage.py` and
@@ -237,9 +238,9 @@ property the docs promise. The re-verification found no new finding
 |---|---|---|---|---|
 | F-1 (high) | **Disturbed-state hedge wedge.** After an `observe` outside [min, max], a hedge whose reservation cured a metric and whose completion re-violated it was admitted; then both settles failed `Bounds` and `cancel` and `observe` failed `Pending`, forever (trace 0). Contradicted spec@v1.0.0:46 and handoff@v1.0.0:31 (`div-F1-inverse`). | `59e404f`: H5, the release-aware envelope (`:216-228`); H6, `check_bounds` against the violation now and after the reservation (`:258-261`) | LIVE-ALL, INV-RES, LIVE-2, TLA-LIVE-F1, LEAN-WIT, MC-1, RT-WEDGE | v1.0.0: trace 0 `ok(0)`, then both settles `Bounds`; TLC `Witness_Wedge` and `MC_Liveness_F1` violated; Lean `f1_forever`; MC-1 `wedge` 228 dead states; RT-WEDGE reproduced on chain. v1.1.0: trace 0's hedge `Bounds`; the recovery hedge admitted and settled (traces 214, 215; `WitStep_Recovery`; Lean `recovery_admitted`); `liveness-f1` holds; Lean `f1_rejected`; MC-1 `wedge` 0 dead; `rt_wedge_f1_refused_and_cure_settles`. FR-1, FR-2. |
 | F-2 (high) | **Healthy-state release wedge in the `risk` fixture.** A hedge was admitted on the strength of an unexecuted position's reservation; the position's honest `settle(false)` then failed `Bounds`, and only a false `settle(true)` ended it (trace 209). Contradicted spec@v1.0.0:46 (`div-F2-fixture-release`). **F-2b:** a release could leave ±1,000,000 and fail `Arithmetic` (trace 208). | `59e404f`: H5 (the release term `x = −reserve·u`, each endpoint within ±10^6), H6 | LIVE-ALL, INV-RES, LIVE-2, TLA-LIVE-F2, C-5, MC-1; NUM-2 (F-2b) | v1.0.0: C-5 20 counterexamples in `risk`; MC-1 `reliance` 150 release-blocked states; `MC_Liveness_F2` violated; trace 208's release `Arithmetic`. v1.1.0: trace 209's hedge refused (`test_model`: 7 units `Bounds`, 6 Ok, then the position's release Ok); C-5 0 blocked in every fixture; MC-1 `reliance` 0 blocked, `f2b` refuses at admission; `liveness-f2` holds; Lean `f2_rejected`; `rt_wedge_f2_honest_release_after_the_hedge`. FR-2 (F-2b: t34, m23), FR-1. |
-| F-3 (low) | **Lifetime slot exhaustion.** 256 lifetime records, then `Full` for every actor, forever (trace 207). handoff@v1.0.0:34: "256 lifetime records bound ordinary growth". | `1f01d43`: H2, H4, H7, H8, H10, H11, H14 (`Full` only with an open front, `:284`; prune and `first_id + 1`, `:370`; prerequisites read `completed_units`, `:301-305`, `:519`); the executor window, `4d69f19` | WIN-1, WIN-2, WIN-ESC, WIN-LIVE, DEP-1, INV-DEP, RT-WINDOW; executor: EX-6, EX-7, EX-8, TLA-EXEC, RT-D1 | v1.0.0: trace 207 ends `full` twice; TLC `WinLive` violated on the v1.0.0 model (`a072a2d`); the v1.0.0 executor (s00b) fails "full" at job 257. v1.1.0: trace 207 prunes three records (`ok(256)`, `ok(257)` on a pruned prerequisite, `Full` on an open front, `NotFound` on id 0); `liveness-win` and `liveness-win2` hold; MC-1 `window`, `window1`; Lean `win_esc`, `dep1_iff`; RT-WINDOW (300 records, `first_id` 44); RT-D1. FR-3, FR-4, FR-13, FR-14. |
+| F-3 (low) | **Lifetime slot exhaustion.** 256 lifetime records, then `Full` for every actor, forever (trace 207). handoff@v1.0.0:34: "256 lifetime records bound ordinary growth". | `1f01d43`: H2, H4, H7, H8, H10, H11, H14 (`Full` only with an open front, `:287`; prune and `first_id + 1`, `:370`; prerequisites read `completed_units`, `:301-305`, `:519`); the executor window, `4d69f19` | WIN-1, WIN-2, WIN-ESC, WIN-LIVE, DEP-1, INV-DEP, RT-WINDOW; executor: EX-6, EX-7, EX-8, TLA-EXEC, RT-D1 | v1.0.0: trace 207 ends `full` twice; TLC `WinLive` violated on the v1.0.0 model (`a072a2d`); the v1.0.0 executor (s00b) fails "full" at job 257. v1.1.0: trace 207 prunes three records (`ok(256)`, `ok(257)` on a pruned prerequisite, `Full` on an open front, `NotFound` on id 0); `liveness-win` and `liveness-win2` hold; MC-1 `window`, `window1`; Lean `win_esc`, `dep1_iff`; RT-WINDOW (300 records, `first_id` 44); RT-D1. FR-3, FR-4, FR-13, FR-14. |
 | F-4 (low) | **A principal could attest its own work.** `validate` accepted a recipe whose actor is its executor (trace 210). Contradicted spec@v1.0.0:64 and spec@v1.0.0:50 (`amb-self-executor`). | `dc774f8`: H3 (`:130`) | CFG-2, C-5, AUTH-1 | v1.0.0: trace 210 accepted; `code_role_checks(validate, [])`. v1.1.0: trace 210 is `init_error(invalid_config)` in the core and every replayer; Lean `self_executor_invalid`; C-5 CASH-SELF-ENFORCED passes. FR-5. Residual: the owner may be an executor (§4.6). |
-| F-5 (low) | **Version saturation.** At version u32::MAX every transition failed `Arithmetic`, settling in-flight records included (handoff@v1.0.0:34). | `da43188`: H1 (`VERSION_CAP`), H9 (the cap is `candidate`'s last check), H12 (`bump_new` in dispatch, set_paused and observe; `:401`, `:319-321`, `:524`) | VER-CAP, INV-VERCAP, TLA-CAP, LIVE-ALL, C-4 | v1.0.0: Prolog "F-5 witness"; Lean mutant 04; Kani `h_version_max_*`. v1.1.0: Lean `cap_reach`, `cap_instance`, `cap_drain`; TLC `MC_Cap` (the first TLC run to reach a cap); MC-1 `cap`; `test_model` "F-5 fixed" at 4,294,966,527; RT-REVERT at a patched `VERSION_CAP`; COV-2 at the 12 reads states at or above the cap. FR-6, FR-6b. |
+| F-5 (low) | **Version saturation.** At version u32::MAX every transition failed `Arithmetic`, settling in-flight records included (handoff@v1.0.0:34). | `da43188`: H1 (`VERSION_CAP`), H9 (the cap is `candidate`'s last check), H12 (`bump_new` in dispatch, set_paused and observe; `:401`, `:319-321`, `:526`) | VER-CAP, INV-VERCAP, TLA-CAP, LIVE-ALL, C-4 | v1.0.0: Prolog "F-5 witness"; Lean mutant 04; Kani `h_version_max_*`. v1.1.0: Lean `cap_reach`, `cap_instance`, `cap_drain`; TLC `MC_Cap` (the first TLC run to reach a cap); MC-1 `cap`; `test_model` "F-5 fixed" at 4,294,966,527; RT-REVERT at a patched `VERSION_CAP`; COV-2 at the 12 reads states at or above the cap. FR-6, FR-6b. |
 | F-6 (low) | **An open record blocked the only snapshot refresh.** `observe` was `Pending` with any record open, so with `max_age > 0` one long-open record froze admission (trace 211; spec@v1.0.0:19, 37, 54). | `3eaf1cb`: H15 (`:538-540`) | OBS-2, REFRESH-1, OBS-1 | v1.0.0: trace 211 `Pending`; TLC REFRESH-1 violated on `a072a2d`. v1.1.0: trace 211's refresh Ok with record 0 Active, then submit Ok; Lean `refresh_ok`, `refresh_instance`; TLC REFRESH-1 and `WitStep_Refresh`; MC-1 REFRESH-1 and OBS-2 on every state and edge. FR-7. |
 
 ### 4.2 Closed in v1.1.0: shell, build and runtime
@@ -312,14 +313,14 @@ recorded (§6).
 | FR | Reverts | Finding | Must be killed by | TLA+ | Lean | Prolog | Kani | near-tests, sandbox, other | v1.0.0 evidence (`a072a2d`) |
 |---|---|---|---|---|---|---|---|---|---|
 | FR-1 | H6 (`59e404f`, `:258-261`): `check_bounds` compares with the violation now only (`v > old[i]`) | F-1 | LIVE-ALL, INV-RES | t33 | l18 | m22 | N2 `33-check-bounds-old-only` | C-5; TLC `liveness-f1` | `Witness_Wedge` reachable, `f1_forever`, MC-1 228 dead, `h_wedge` cover |
-| FR-2 | H5 (`59e404f`, `:216-228`): the envelope drops the release term `x` (F-2b: `t34`, `m23` drop only its ±10^6 bound) | F-1, F-2, F-2b | LIVE-ALL, INV-RES | t32; t34 | l17 | m21; m23 | N1 `32-envelope-no-release-term` | C-5 (0 counterexamples at v1.1.0); traces 208, 209; `h_wedge_healthy` | C-5 20 counterexamples, MC-1 150 blocked, trace 208 |
-| FR-3 | H7 (`1f01d43`, `:284`): `Full` whenever 256 records are retained; prune without `first_id + 1` (`:370`) | F-3 | WIN-1, WIN-2, WIN-ESC, WIN-LIVE | t35, t36, t38 | l19, l20 | m24, m25, c11 | N5 `36-full-ignores-front`, N11 `42-prune-keeps-first-id`; re-based 21, 30 | trace 207 replay; s26 (`get_commitments` skips `from`), s27 (dispatch indexes `records[id]`); RT-WINDOW | trace 207 `full`; `WinLive` violated on the v1.0.0 model |
+| FR-2 | H5 (`59e404f`, `:216-228`): the envelope drops the release term `x` (F-2b: `t34`, `m23` drop only its ±10^6 bound) | F-1, F-2, F-2b | LIVE-ALL, INV-RES | t32; t34 | l17 | m21; m23 | N1 `32-envelope-no-release-term` | C-5 (0 counterexamples at v1.1.0); traces 208, 209; Kani `h_wedge_healthy` (v1.0.0's harness; pending at v1.1.0) | C-5 20 counterexamples, MC-1 150 blocked, trace 208 |
+| FR-3 | H7 (`1f01d43`, `:287`): `Full` whenever 256 records are retained; prune without `first_id + 1` (`:370`) | F-3 | WIN-1, WIN-2, WIN-ESC, WIN-LIVE | t35, t36, t38 | l19, l20 | m24, m25, c11 | N5 `36-full-ignores-front`, N11 `42-prune-keeps-first-id`; re-based 21, 30 | trace 207 replay; s26 (`get_commitments` skips `from`), s27 (dispatch indexes `records[id]`); RT-WINDOW | trace 207 `full`; `WinLive` violated on the v1.0.0 model |
 | FR-4 | H8 (`1f01d43`, `:301-305`, `:519`): prerequisites scan the retained records instead of `completed_units` | F-3 | DEP-1, INV-DEP, WIN-1 | t37 | l21 | m26 | N13 `prereq-scan-retained`; N9 `40-settle-no-completed-units`, N10 `41-completed-units-wrap` | trace 207 (`submit:prereq_after_prune`) | none (v1.0.0 never pruned) |
 | FR-5 | H3 (`dc774f8`, `:130`): `validate` accepts actor = executor | F-4 | CFG-2 | t39 | l22 | c10 | N6 `37-validate-actor-is-executor` | trace 210 `init_error` | trace 210 accepted; `code_role_checks(validate, [])` |
-| FR-6 | H12 (`da43188`, `:401`, `:319-321`, `:524`): `bump_new` → `bump`, no cap in `candidate` | F-5 | VER-CAP, INV-VERCAP | t40-t44 | l23 (l04′) | m27, m28, c12 | N3 `34-pause-without-cap`, N4 `35-candidate-without-cap`; P2 `dispatch-plain-bump`, `observe-plain-bump` | TLC `MC_Cap` (TLA-CAP) | Prolog "F-5 witness"; Lean mutant 04; Kani `h_version_max_*` |
-| FR-6b | H9 (`da43188`): the cap check moved from `candidate` into `submit` | preview at u32::MAX | RD-PREVIEW | none | none | none | N14 `cap-in-submit-only` | `h_preview`; COV-2 reads at the cap | reads generator disagrees at u32::MAX |
+| FR-6 | H12 (`da43188`, `:401`, `:319-321`, `:526`): `bump_new` → `bump`, no cap in `candidate` | F-5 | VER-CAP, INV-VERCAP | t40-t44 | l23 (l04′) | m27, m28, c12 | N3 `34-pause-without-cap`, N4 `35-candidate-without-cap`; P2 `dispatch-plain-bump`, `observe-plain-bump` | TLC `MC_Cap` (TLA-CAP) | Prolog "F-5 witness"; Lean mutant 04; Kani `h_version_max_*` |
+| FR-6b | H9 (`da43188`): the cap check moved from `candidate` into `submit` | preview at u32::MAX | RD-PREVIEW | none | none | none | N14 `cap-in-submit-only` | COV-2 reads at the cap; Kani `h_preview` (v1.0.0's harness; pending at v1.1.0) | reads generator disagrees at u32::MAX |
 | FR-7 | H15 (`3eaf1cb`, `:538-540`): observe `Pending` whenever a record is open | F-6 | OBS-2, REFRESH-1 | t45, t46, t47 | l24, l26 (l01′) | m29, m30, m31 | N7 `38-observe-no-refresh` | trace 211 | trace 211 `Pending`; TLC REFRESH-1 violated |
-| FR-8 | H13 (`138ef98`, `:469-471`): cancel of Completed gives `Pending` | `div-cancel-terminal-name` | TERM-1, TX-CANCEL | t48 | l25 | m32 | N8 `39-cancel-completed-pending` | the 18 traces with cancel(Completed) | 18 traces `Pending` |
+| FR-8 | H13 (`138ef98`, `:467-469`): cancel of Completed gives `Pending` | `div-cancel-terminal-name` | TERM-1, TX-CANCEL | t48 | l25 | m32 | N8 `39-cancel-completed-pending` | the 18 traces with cancel(Completed) | 18 traces `Pending` |
 | FR-9 | contract (`1d441c5`): `reconcile` without its deposit check | NT-F2 | SH-10 | none | none | none | none | s22, s00a | `nt_f2_*` keeps 1 yocto |
 | FR-10 | contract (`1d441c5`): back to `#[callback_result]` | NT-F4 | SH-3, RT-CALLBACK | none | none | none | none | s23, s24, s25, s00a | callback panics on a non-string result |
 | FR-11 | contract and executor (`3598902`): near-sdk's `Promise` API | NT-F3 | SH-12 | none | none | none | none | s28, s35, s00a, s00b (their build imports 19 `promise_batch_*` functions per wasm; SURF-2 fails) | 15 forbidden imports |
@@ -340,8 +341,8 @@ Upstream documents each; the layers reach each and record it.
 | Limit | What happens | Docs | Evidence | Assumption |
 |---|---|---|---|---|
 | Head-of-line `Full` | With 256 records retained and the oldest open, `submit` fails `Full` even if the other 255 are terminal. A Reserved front can be cancelled by its actor or the owner; a dispatched one closes only when its executor reports. | api:28; handoff:38 | WIN-ESC (one call by the front's resolver frees the window); WIN-LIVE (under weak fairness of that resolver); TLC `Witness_FullOpenFront`; MC-1 `window` (`Full` on an open front: 3,344 edges); trace 207; RES-1 (submit #257 prunes id 0; `Full` only with the front open, submit #288) | ASM-EXEC |
-| Executor job cap through refused confirmations (upstream D-1, R1) | The synthetic executor holds at most 512 jobs. Only confirmations the lock refused (operator error: an unassigned or pruned id, a record still Reserved, the other outcome recorded, another executor's recipe) or whose `on_settled` has not run can fill it. At the cap `confirm_not_executed` fails "full", and so does an `execute` that frees no job, whose record then stays Unknown. The exits are a `settle` signed with the executor account's own key, or an accepted `finish(id, false)` of a refused job whose record the lock holds cancelled or open. LIVE still holds at the lock. | api:42; handoff:39 | TLA-EXEC: `Witness_JobCapExec`, `Witness_JobCapConfirm`, `WitStep_ExecFull`; `WitStep_CapExit` shows an exit is reachable, not that one always exists (safety only); `InvCapShape`: the cap needs at least WINDOW refused or in-flight confirmations. RT-D1: 300 confirmed failed executes keep at most 256 jobs, and a refused confirmation keeps its job and moves nothing. RES-1: `finish` at the 512-job cap | ASM-EXEC; upstream follow-up OQ-12 |
-| The owner as executor (upstream decision Q3) | `validate` refuses actor = executor only. The owner may be a recipe's executor, and then settles work it can also pause and observe around. | spec:11; api:65 | CFG-2; C-5 CASH-SELF-ENFORCED; trace 213 (the owner as executor settles); Lean `owner_executor_valid`; `amb-owner-roles` | ASM-OWNER |
+| Executor job cap through refused confirmations (upstream D-1) | The synthetic executor holds at most 512 jobs. Only confirmations the lock refused (operator error: an unassigned or pruned id, a record still Reserved, the other outcome recorded, another executor's recipe) or whose `on_settled` has not run can fill it. At the cap `confirm_not_executed` fails "full", and so does an `execute` that frees no job, whose record then stays Unknown. The exits are a `settle` signed with the executor account's own key, or an accepted `finish(id, false)` of a refused job whose record the lock holds cancelled or open. LIVE still holds at the lock. | api:42; handoff:39 | TLA-EXEC: `Witness_JobCapExec`, `Witness_JobCapConfirm`, `WitStep_ExecFull`; `WitStep_CapExit` shows an exit is reachable, not that one always exists (safety only); `InvCapShape`: the cap needs at least WINDOW refused or in-flight confirmations. RT-D1: 300 confirmed failed executes keep at most 256 jobs, and a refused confirmation keeps its job and moves nothing. RES-1: `finish` at the 512-job cap | ASM-EXEC; upstream follow-up OQ-12 |
+| The owner as executor | `validate` refuses actor = executor only. The owner may be a recipe's executor, and then settles work it can also pause and observe around. | spec:11; api:65 | CFG-2; C-5 CASH-SELF-ENFORCED; trace 213 (the owner as executor settles); Lean `owner_executor_valid`; `amb-owner-roles` | ASM-OWNER |
 
 ### 4.7 Open (v1.1.0)
 
@@ -646,7 +647,7 @@ The levels are those of `threat_model.pl`: high, med, low, or policy.
 | ASM-DEPLOY | No code replacement; the deployment lock is out of scope | assumption | none for the account's keys; the in-contract half (no deploy, key, transfer, stake, account or global-contract import, no upgrade export) is SH-11 and SH-12 (NT-F3 fixed) | policy |
 | ASM-TOOLS | Scryer, TLC, Lean, Kani and the extractors are sound for what is used | assumption | canaries, witnesses and mutants in every runner; the Lean axiom audit (65 of 65 headline theorems); Kani's canary, covers and mutants (v1.0.0: `h_canary` fails as required, 164 covers, 30 mutants killed; two Kani 0.68.0 hazards worked around, §6) | trusted (med); Kani: pending |
 | ASM-SPEC | The specs, and the Prolog transcription of the docs, mean what we intend | assumption | `[review] spec_reviewer` (empty); the Prolog author had read the code (§8) | open: no reviewer (low) |
-| ASM-MODEL | The small scopes are representative: Kani's bounds, TLC's universes and 32-bit integers, MC-1's universes | assumption | Lean at every size (model); traces at 256 records with prunes and ±1,000,000; reads at and above `VERSION_CAP`; TLC's scaled window and cap (§17.5); Kani's bounds, stated per harness (§6) | trusted (med) |
+| ASM-MODEL | The small scopes are representative: Kani's bounds, TLC's universes and 32-bit integers, MC-1's universes | assumption | Lean at every size (model); traces at 256 records with prunes and ±1,000,000; reads at and above `VERSION_CAP`; TLC's scaled window and cap (§17.5); Kani's bounds, stated per harness (§6; v1.0.0's until the v1.1.0 Kani record) | trusted (med); Kani: pending |
 | ASM-LEAN-TLA | The Lean and TLA+ models transcribe the code | assumption | REF-5, REF-5L, MC-2 (216 traces), C-2; REF-1..3 (TLA+, Kani, within the step bounds) | trusted (med); tested on 216 traces; Kani: pending (v1.0.0: bounded proof per step for TLA+, REF-1..3) |
 | ASM-COMPILE | `overflow-checks = true` in the release profile | assumption | `tools/scripts/check-pin.sh` (`release_overflow_checks = true`) | trusted (high); checked |
 | ASM-GAS | Callers attach at least the prepaid gas `api.md` documents; a receipt that runs out of gas changes nothing (ASM-ATOMIC) and can be retried. Liveness is conditional on authoritative evidence and gas (handoff:34) | assumption | RES-1 at 57b3f02: every pool receipt under 30 Tgas (largest of the calls without promises 14.81); least prepaid `dispatch` 70, `reconcile` 46, `confirm_not_executed` 55, `finish` 55 (56 at 512 jobs), each at least 10 Tgas below api.md's attach; smaller amounts fail out of gas and change neither contract (ASM-ATOMIC); `on_settled` at most 3.68 of 10 Tgas | trusted (med); tested: equal to api:44-59 |
@@ -1106,8 +1107,9 @@ with the state unchanged):
 
 - **Equivalence.** 8,865 equal calls are evidence that the models
   transcribe the code, not a proof (ASM-LEAN-TLA). REF-1..3 (Kani, §17.2)
-  add a bounded proof per step for TLA+, within the step bounds; Lean and
-  Prolog have only the traces.
+  add a bounded proof per step for TLA+, within the step bounds: pending
+  at v1.1.0 (v1.0.0: a bounded proof on the v1.0.0 code). Until then,
+  TLA+, Lean and Prolog have only the traces at v1.1.0.
 - **The version cap.** No `core.txt` state comes near `VERSION_CAP` (the
   highest version is 518). Submit's and preview's cap exit is reached only
   in `reads.txt` (`arithmetic:version` 30 times); dispatch, set_paused and
@@ -1126,8 +1128,8 @@ with the state unchanged):
 |---|---|
 | docs ↔ code facts | C-1..C-4 (`extract.py`) |
 | docs ↔ TLA+ guard order and edges | C-2, C-3 |
-| brief ↔ real core | Kani: `spec.rs`, written from the brief, equals the core within the bounds (§6) |
-| Prolog `step/4`, TLA+, Lean ↔ real core | MC-2, REF-5, REF-5L (traces); REF-1..3 for TLA+ (Kani, within the step bounds) |
+| brief ↔ real core | Kani: pending at v1.1.0 (v1.0.0: `spec.rs`, written from the brief, equals the core within the bounds; §6) |
+| Prolog `step/4`, TLA+, Lean ↔ real core | MC-2, REF-5, REF-5L (traces); REF-1..3 for TLA+ (Kani, within the step bounds): pending at v1.1.0 (v1.0.0: bounded proof, §17.2) |
 | Prolog reads ↔ real core `preview`, `best_quantity` | COV-2 (`reads.txt`, `test_reads`) |
 | Lean guard lists ↔ Prolog `guard/5` | LEAN-GUARD: `pool-lean-guards` prints `guardOrder`, compared by a script (not in `run.sh`) |
 | real core ↔ shell (host, documented build) | SH-8 |
@@ -1184,7 +1186,7 @@ Specific to this project:
 **Re-verification (v1.1.0).** When the pin moves to a new release, every
 property and assumption becomes `stale` (rank 0, like `unverified`), and
 keeps its other keys as the record of the previous verification (here
-v1.0.0 at `a4bb5c3`, PR #31, to be tagged `shared-pool-v1.0.0`) until its
+v1.0.0 at `a4bb5c3`, PR #31, results at `a072a2d`) until its
 layer re-checks it at the new pin and rewrites them from that layer's
 `RESULTS.md`. New rows start `unverified` with the planned evidence in
 `harness`. A row whose only layer is Kani (NUM-1, ROB-1, REF-1..3) stays
@@ -1227,7 +1229,7 @@ v1.0.0 was pinned at `a4bb5c3`, byte-identical in contract code to
 upstream's v1.0.0 commit `6f61616`; that argument does not carry over,
 because v1.1.0 changes the core, the contract, the executor and the docs.
 The verified release is v1.1.0; v1.0.0's results stay on PR #31's branch
-(`a072a2d`), to be tagged `shared-pool-v1.0.0` when #31 merges. No
+(`a072a2d`), #31's head to be tagged `shared-pool-v1.0.0`. No
 `status.toml` row is `verified` until a spec reviewer signs (§12).
 
 **Next, in order.**
@@ -1383,7 +1385,7 @@ finish on swap, which led to the local record (this section at
 | Risk | Mitigation |
 |---|---|
 | The pin is not the commit the fixes were reviewed at. | The pin is the release: `57b3f02`, the merge of PR #4 on upstream `main`. Its tree equals the PR head `6fcbd56`, and the `pin` job fails if that stops being true or either commit cannot be fetched (`check-pin.sh`, §12, §14). A squash merge or a moved head would fail it loudly. |
-| Three hand-written models share a transcription error. | All replay the same real-core traces; C-2 compares guard orders; every layer has mutants; REF-1..3 tie TLA+ to the code per step, within the step bounds. |
+| Three hand-written models share a transcription error. | All replay the same real-core traces; C-2 compares guard orders; every layer has mutants; REF-1..3 (Kani) tie TLA+ to the code per step, within the step bounds: pending at v1.1.0 (v1.0.0: bounded proof, §17.2). |
 | The ghost semantics differ between models (the pruned prefix of the ledger, the refresh and `base`/`k0`, the saturation of `completed_units`). | One definition in the §5 notation, frozen before any layer started. The traces include refreshes with records open (207, 211) and a re-base (213), so every replayer must agree on them. |
 | "Fails on v1.0.0" asserted but not shown. | Each closed finding has v1.0.0's result (PR #31's branch, `a072a2d`) and a fix-revert mutant that its closing property's layer kills at v1.1.0 (§4.5). |
 | Trace renumbering breaks every "trace N" cross-reference. | Fixtures chosen by name; traces 0-211 keep their numbers and the new ones are appended (§10.1). |
@@ -1405,29 +1407,30 @@ finish on swap, which led to the local record (this section at
 
 | # | Question |
 |---|---|
-| OQ-1 | Closed (v1.1.0): re-pinned to `57b3f02`, PR #4's merge, with every layer re-run (Kani: W13 part 2). v1.0.0 stays verified at `a4bb5c3` on PR #31's branch. |
+| OQ-1 | Closed (v1.1.0): re-pinned to `57b3f02`, PR #4's merge, with every layer but Kani re-run (Kani: W13 part 2). v1.0.0's results (pin `a4bb5c3`) stay recorded on PR #31's branch (`a072a2d`). |
 | OQ-2 | Closed (v1.1.0): upstream chose the resolution envelope. A reservation never changes a metric's violation amount (handoff:32), and the envelope over every open record's completion or release must not exceed the current violation (§4.1, F-1, F-2). |
 | OQ-3 | Closed (v1.1.0): `scripts/build.sh` sets `--cfg near` and checks that the wasm imports `panic_utf8` (NT-F1; SH-5, SURF-3). |
 | OQ-4 | Closed (v1.1.0): build.sh checks both wasm files' imports against a reviewed list, which excludes deploy, key, transfer, stake, account and global-contract actions (NT-F3; SH-12). |
-| OQ-5 | Closed (v1.1.0): `validate` refuses actor = executor (F-4; CFG-2). The owner may be a recipe's executor, by upstream's decision Q3: a documented limit (§4.6). |
+| OQ-5 | Closed (v1.1.0): `validate` refuses actor = executor (F-4; CFG-2). The docs forbid only actor = executor (spec:11, api:65), so the owner may be a recipe's executor: a documented limit (§4.6). |
 | OQ-6 | Closed (v1.1.0): F-3 by the 256-record window with pruning of terminal records (`Full` only while the oldest is open; WIN-1, WIN-ESC, WIN-LIVE); F-6 by the refresh, an `observe` of the current values with records open (REFRESH-1, OBS-2). |
 | OQ-7 | TLA-IND: rewrite the model for Apalache, or accept LEAN-IND as the every-size safety result? |
 | OQ-8 | Closed: moot. A reservation never changes a violation amount, and LIVE-ALL makes cancel and both settles Ok in every reachable state (L-1b, §4.8). |
 | OQ-9 | Closed (v1.1.0): spec:41 and api:30 describe the no-op acknowledgment, api:40 the non-string results (NT-F4), and api:44-59 give the prepaid gas per method. RES-1 reproduces every figure (§9.2); the executor's `finish` needs 55 Tgas at v1.1.0 (v1.0.0: 43). |
 | OQ-10 | Who reviews the specs? |
 | OQ-11 | Closed (2026-11-13): Kani in CI, swap or a large runner? Neither, by default: the harnesses that fit the 16 GB hosted runner run there, the others and their mutants are run locally and recorded, and CI checks the record (§14). `KANI_RUNNER` still runs them in CI when it is set. The v1.1.0 split is W13 part 2's. |
-| OQ-12 | The executor's job cap (upstream R1): only refused or in-flight confirmations can fill it (TLA-EXEC `InvCapShape`), and its exits are documented (api:42, handoff:39; §4.6). Should upstream add a callback that rolls back a refused confirmation's job? An upstream follow-up. |
+| OQ-12 | The executor's job cap (upstream D-1): only refused or in-flight confirmations can fill it (TLA-EXEC `InvCapShape`), and its exits are documented (api:42, handoff:39; §4.6). Should upstream add a callback that rolls back a refused confirmation's job? An upstream follow-up. |
 | OQ-13 | Closed by TLA-EXEC: should the lock's and the executor's windows be model-checked together for EX-7, or stay tests? Model-checked at WINDOW 2 and 3, every receipt in any order; the tests keep the concrete 256 and 512. The checked invariant deviates from the plan's wording ("a retained in-flight record's job is present"), which is false in reachable states where an in-flight record's `execute` panicked, failed "full" or has not arrived. `InvRetainedJob` states it as: the executor never forgets the job of a record the lock retains (EX-7, T-FORGET); a record whose execute never made a job has none to keep. |
 
 ---
 
 ## 17. TLA+ over every event sequence
 
-Kani proves one step of the real core within bounds (§6). That says
-nothing about liveness or safety at depth. The TLA+ model is checked over
-all event sequences in small universes, and tied to the real core by the
-traces (REF-5) and, within the step bounds, step by step (REF-1..3,
-§17.2). Results: `tla/RESULTS.md`. TLC 2.19 (tla2tools 1.7.4), OpenJDK 23,
+Kani proves one step of the real core within bounds (§6; pending at
+v1.1.0, the v1.0.0 result is PR #31's). That says nothing about liveness
+or safety at depth. The TLA+ model is checked over all event sequences in
+small universes, and tied to the real core by the traces (REF-5) and,
+within the step bounds, step by step (REF-1..3, §17.2; Kani, pending at
+v1.1.0). Results: `tla/RESULTS.md`. TLC 2.19 (tla2tools 1.7.4), OpenJDK 23,
 4 workers, on a 10-core Mac shared with other jobs; runs on 2026-11-13
 and 2026-11-14, the trace check and mutants again at `a7781c7`.
 
@@ -1580,7 +1583,7 @@ classify.
   hand-argued quotient, sound if `InvJobWindow` holds, which the same run
   checks.
 - **Refinement to the code** is REF-5 (traces) and Kani's REF-1..3, which
-  link the step at `first_id = 0` (§17.2).
+  link the step at `first_id = 0` (§17.2; pending at v1.1.0).
 
 ---
 
@@ -1686,7 +1689,7 @@ wedge permanent) is gone.
   u32 type and all strings are not modelled.
 - **Panics (ROB-1).** Not modelled. `Inv` shows every index the guards
   read is in range, but not that the Rust never panics; Kani checks that
-  on the real core within its bounds.
+  on the real core within its bounds (ROB-1; pending at v1.1.0).
 - **Not stated in Lean:** RD-PREVIEW, RD-BEST and the shell; LIVE-2 and
   WIN-LIVE, which are temporal (LIVE-ALL and WIN-ESC are their per-state
   halves); TX-SUBMIT..TX-OBSERVE as separate theorems (the model's

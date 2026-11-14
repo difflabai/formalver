@@ -649,7 +649,7 @@ found_in = "v1.0.0"
 status = "closed"
 closed_in = "v1.1.0"
 fix = ["1f01d43", "4d69f19"]
-hunks = "H2, H4, H7, H8, H10, H11, H14 (Full only with an open front, :284; prune and first_id + 1, :370; prerequisites read completed_units, :301-305, :519); the executor window (4d69f19)"
+hunks = "H2, H4, H7, H8, H10, H11, H14 (Full only with an open front, :287; prune and first_id + 1, :370; prerequisites read completed_units, :301-305, :519); the executor window (4d69f19)"
 closed_by = ["DEP-1", "WIN-2", "INV-DEP", "WIN-1", "WIN-ESC", "WIN-LIVE", "SH-9", "EX-6", "EX-7", "EX-8", "RT-WINDOW", "RT-D1", "TLA-EXEC"]
 regression = "v1.0.0: trace 207 ends full twice; TLC WinLive violated on the v1.0.0 model (a072a2d); the v1.0.0 executor (s00b) fails \"full\" at job 257. v1.1.0: trace 207 prunes three records (ok(256), ok(257) on a pruned prerequisite, Full on an open front, NotFound on id 0); liveness-win and liveness-win2 hold; MC-1 window, window1; Lean win_esc, dep1_iff; RT-WINDOW (300 records, first_id 44); RT-D1. FR-3, FR-4, FR-13, FR-14 killed (TLA+, Lean, Prolog, near-tests); Kani N5, N9, N10, N11, N13 pending"
 note = "Head-of-line Full with an open front is a documented limit, not a finding (strategy.md section 4.6; ASM-EXEC)"
@@ -675,7 +675,7 @@ found_in = "v1.0.0"
 status = "closed"
 closed_in = "v1.1.0"
 fix = ["da43188"]
-hunks = "H1 (VERSION_CAP), H9 (the cap is candidate's last check), H12 (bump_new in dispatch, set_paused and observe; :401, :319-321, :524)"
+hunks = "H1 (VERSION_CAP), H9 (the cap is candidate's last check), H12 (bump_new in dispatch, set_paused and observe; :401, :319-321, :526)"
 closed_by = ["VER-CAP", "INV-VERCAP", "LIVE-ALL", "RT-REVERT", "C-4", "MC-1", "TLA-CAP", "LEAN-WIT"]
 regression = "v1.0.0: Prolog \"F-5 witness\"; Lean mutant 04; Kani h_version_max_*. v1.1.0: Lean cap_reach, cap_instance, cap_drain; TLC MC_Cap; MC-1 cap; test_model \"F-5 fixed\" at 4,294,966,527; RT-REVERT at a patched VERSION_CAP; COV-2 at the 12 reads states at or above the cap. FR-6 (t40-t44, l23, m27, m28, c12) killed; Kani N3, N4 (FR-6) and N14 (FR-6b) pending"
 
