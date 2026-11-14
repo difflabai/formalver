@@ -3,7 +3,7 @@
 # expect: test_requirements C-2 guard order
 --- a/source-mirror/crates/core/src/lib.rs
 +++ b/source-mirror/crates/core/src/lib.rs
-@@ -230,12 +230,12 @@
+@@ -265,12 +265,12 @@
          Ok(())
      }
      fn candidate(&self, caller: &str, req: &Request, now: u64) -> Result<Vec<i64>, Error> {

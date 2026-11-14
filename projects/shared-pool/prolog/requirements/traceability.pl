@@ -174,7 +174,7 @@ prolog_evidence('C-1', check("pool_req method/4 vs extracted caller checks and s
 prolog_evidence('C-2', check("pool_req guard/5 vs extracted code paths and TLA GuardOrder")).
 prolog_evidence('C-3', check("pool_req life/5 vs extracted status guards, TLA Edges and the traces")).
 prolog_evidence('C-4', check("pool_req constant/3 and model_constant/3 vs extracted constants")).
-prolog_evidence('C-5', check("fixture claims on trace configs 1-5, their replays, fixtures.rs accounts, a two-record release search per fixture; known findings F-2 and F-4 must reproduce")).
+prolog_evidence('C-5', check("fixture claims on trace configs 1-5, their replays, fixtures.rs accounts (station derived from gpu), a two-record release search per fixture; validate rejects actor = executor; no known finding at v1.1.0 (F-2, F-4 fixed)")).
 prolog_evidence('C-6', check("this file")).
 prolog_evidence('MC-1', 'model-check'("bounded exploration of three small universes (wedge F-1, healthy, reliance F-2)")).
 prolog_evidence('MC-2', test("replay of every conformance trace through step/4")).
@@ -199,6 +199,7 @@ prolog_evidence(P, test("planned for v1.1.0: MC-2 on every trace state and MC-1 
 verified_by(Req, P) :- trace_row(Req, Ps), member(P, Ps).
 
 trace_row('S-STATE',       ['INV-WF', 'CFG-1', 'MC-2']).
+trace_row('S-WINDOW',      ['WIN-1', 'INV-WF', 'C-4']).
 trace_row('S-CONFIG',      ['CFG-1', 'CFG-2', 'INV-WF', 'OBS-1']).
 trace_row('S-INIT',        ['SH-2', 'RT-PRIVATE', 'C-1']).
 trace_row('S-PRED',        ['SH-1', 'RT-PRED', 'AUTH-1', 'C-1']).
@@ -206,12 +207,13 @@ trace_row('S-PREVIEW-NOAUTH', ['RD-PREVIEW', 'C-1']).
 trace_row('S-NUM',         ['NUM-1', 'NUM-2', 'C-4', 'INV-WF']).
 trace_row('S-SERIAL',      ['C-4', 'SH-8']).
 trace_row('S-EXPIRY',      ['TX-SUBMIT', 'C-4']).
-trace_row('S-ADM-ORDER',   ['TX-SUBMIT', 'C-2', 'LEAN-GUARD']).
+trace_row('S-ADM-ORDER',   ['TX-SUBMIT', 'C-2', 'LEAN-GUARD', 'WIN-ESC', 'DEP-1']).
 trace_row('S-ADM-CANDIDATE', ['TX-SUBMIT', 'NUM-2']).
-trace_row('S-ADM-HARD',    ['HARD-STEP', 'INV-HARD', 'INV-HEALTHY']).
+trace_row('S-ADM-HARD',    ['HARD-STEP', 'INV-HARD', 'INV-HEALTHY', 'INV-RES']).
 trace_row('S-ADM-ENERGY',  ['ADM-1', 'ADM-2']).
 trace_row('S-ADM-RECOVERY-SCOPE', ['LIVE-2', 'MC-1', 'TLA-LIVE-F1']).
 trace_row('S-ADM-EFFECT',  ['TX-SUBMIT', 'TX-0', 'TX-VER', 'LIFE-1']).
+trace_row('S-PRUNE',       ['WIN-2', 'WIN-1', 'C-2']).
 trace_row('S-ADM-NOREPLAY', ['STALE-1', 'INV-VER']).
 trace_row('S-ADM-WRAPPER', ['SH-4']).
 trace_row('S-PREVIEW',     ['RD-PREVIEW']).
@@ -221,24 +223,24 @@ trace_row('S-HARD-AXIS',   ['INV-HARD', 'HARD-STEP']).
 trace_row('S-LIFE-DISPATCH', ['TX-DISPATCH', 'C-2', 'C-3', 'SH-6', 'PAUSE-1']).
 trace_row('S-LIFE-ACTIVE', ['TX-ACK', 'C-3', 'SH-3', 'RT-CALLBACK']).
 trace_row('S-LIFE-UNKNOWN', ['TX-ACK', 'ASYNC-1', 'C-3', 'SH-3', 'RT-CALLBACK']).
-trace_row('S-LIFE-COMPLETE', ['TX-SETTLE', 'C-3', 'LIVE-1']).
-trace_row('S-LIFE-CANCEL', ['TX-CANCEL', 'C-3', 'AUTH-1']).
-trace_row('S-LIFE-NONEXEC', ['TX-SETTLE', 'C-3', 'RT-CALLBACK']).
+trace_row('S-LIFE-COMPLETE', ['TX-SETTLE', 'C-3', 'LIVE-1', 'LIVE-ALL', 'WIN-1']).
+trace_row('S-LIFE-CANCEL', ['TX-CANCEL', 'C-3', 'AUTH-1', 'TERM-1', 'LIVE-ALL']).
+trace_row('S-LIFE-NONEXEC', ['TX-SETTLE', 'C-3', 'RT-CALLBACK', 'LIVE-ALL']).
 trace_row('S-LIFE-IDEMPOTENT', ['TERM-1', 'TX-NOOP', 'C-3', 'EX-4']).
 trace_row('S-LIFE-LATEACK', ['TX-ACK', 'C-3', 'RT-RACE']).
-trace_row('S-INVERSE',     ['LIVE-2', 'MC-1', 'TLA-LIVE-F1', 'RT-WEDGE', 'LEAN-WIT']).
-trace_row('S-FIXTURE-RELIANCE', ['C-5', 'MC-1', 'LIVE-2', 'TLA-LIVE-F2']).
+trace_row('S-INVERSE',     ['LIVE-ALL', 'INV-RES', 'TLA-LIVE-F1', 'RT-WEDGE', 'LEAN-WIT', 'MC-1']).
+trace_row('S-FIXTURE-RELIANCE', ['C-5', 'MC-1', 'LIVE-ALL', 'TLA-LIVE-F2']).
+trace_row('S-VERSION-RESERVE', ['VER-CAP', 'INV-VERCAP', 'C-2', 'C-4', 'TLA-CAP']).
 trace_row('S-NOEXPIRY',    ['LIFE-1', 'SH-7', 'C-3']).
-trace_row('S-ADAPTER',     ['EX-1', 'EX-2', 'EX-3', 'EX-4', 'EX-5']).
-trace_row('S-PAUSE',       ['PAUSE-1', 'TX-PAUSE', 'C-1', 'C-2']).
-trace_row('S-OBSERVE',     ['OBS-1', 'TX-OBSERVE', 'C-1', 'C-2']).
-% S-NOADMIN (spec:56): C-1 (no role-mutation method in the authority matrix),
+trace_row('S-ADAPTER',     ['EX-1', 'EX-2', 'EX-3', 'EX-4', 'EX-5', 'EX-6', 'EX-7']).
+trace_row('S-PAUSE',       ['PAUSE-1', 'TX-PAUSE', 'VER-CAP', 'C-1', 'C-2']).
+trace_row('S-OBSERVE',     ['OBS-1', 'OBS-2', 'REFRESH-1', 'TX-OBSERVE', 'C-1', 'C-2']).
+% S-NOADMIN (spec:60): C-1 (no role-mutation method in the authority matrix),
 % OBS-1 (observe leaves the policy unchanged), SH-11 (no upgrade, migrate or
-% reset export). The funds-transfer and dynamic-plugin clauses rest on source
-% review only: both wasm files import transfer, deploy and add-key host
-% functions, and no check here excludes them (NT-F3). Code replacement through
-% a deployment-account key is ASM-DEPLOY.
-trace_row('S-NOADMIN',     ['C-1', 'OBS-1', 'SH-11', 'ASM-DEPLOY']).
+% reset export), SH-12 (v1.1.0: the wasm imports equal build.sh's allowlist, no
+% transfer, deploy, key, stake, account or promise_batch import; v1.0.0's NT-F3
+% gap). Code replacement through a deployment-account key is ASM-DEPLOY.
+trace_row('S-NOADMIN',     ['C-1', 'OBS-1', 'SH-11', 'SH-12', 'ASM-DEPLOY']).
 trace_row('S-GPU',         ['C-5']).
 trace_row('S-STOCK',       ['C-5']).
 trace_row('S-CASH',        ['C-5', 'DEP-1']).
@@ -247,11 +249,17 @@ trace_row('A-NONPAYABLE',  ['SH-10', 'C-1']).
 trace_row('A-METHODS',     ['C-1', 'SH-1', 'SH-2', 'SH-3']).
 trace_row('A-PAGE',        ['SH-9', 'C-4']).
 trace_row('A-SUBMIT-RESULT', ['SH-4']).
+trace_row('A-ONRESULT',    ['SH-3', 'RT-CALLBACK', 'C-1']).
+trace_row('A-WINDOW',      ['WIN-1', 'WIN-2', 'WIN-ESC', 'C-2']).
 trace_row('A-VERSION',     ['TX-VER', 'TX-NOOP', 'INV-VER', 'C-3']).
+trace_row('A-VERSION-CAP', ['VER-CAP', 'INV-VERCAP', 'LIVE-ALL', 'C-2', 'C-4']).
 trace_row('A-EXPIRY-MAX',  ['C-4', 'TX-SUBMIT']).
 trace_row('A-REASONS',     ['C-2', 'RD-PREVIEW']).
 trace_row('A-AFTER',       ['RD-PREVIEW']).
 trace_row('A-EXECUTOR',    ['SH-3', 'RT-CALLBACK', 'EX-1']).
+trace_row('A-EXEC-WINDOW', ['EX-6', 'EX-7', 'EX-8', 'TLA-EXEC', 'RT-D1']).
+trace_row('A-GAS',         ['RES-1', 'ASM-GAS']).
+trace_row('A-CONFIG-ROLES', ['CFG-2', 'C-5']).
 trace_row('H-CFG',         ['CFG-1', 'CFG-2']).
 trace_row('H-NUM',         ['NUM-1', 'NUM-2', 'ROB-1']).
 trace_row('H-AUTH',        ['AUTH-1', 'C-1']).
@@ -260,12 +268,17 @@ trace_row('H-ATOM',        ['TX-0', 'SH-5', 'RT-REVERT']).
 trace_row('H-STALE',       ['STALE-1']).
 trace_row('H-ASYNC',       ['ASYNC-1', 'INV-LEDGER']).
 trace_row('H-TERM',        ['TERM-1']).
-trace_row('H-DEP',         ['DEP-1', 'INV-DEP']).
+trace_row('H-DEP',         ['DEP-1', 'INV-DEP', 'WIN-1']).
 trace_row('H-BIND',        ['LIFE-1', 'EX-2', 'SH-6']).
 trace_row('H-STOCK',       ['C-5']).
 trace_row('H-CASH',        ['C-5']).
 trace_row('H-RISK',        ['C-5']).
-trace_row('H-INTERVAL',    ['INV-HARD', 'INV-HEALTHY']).
-trace_row('H-LIVENESS',    ['LIVE-1', 'LIVE-2', 'MC-1']).
+trace_row('H-LIVE',        ['LIVE-ALL', 'LEAN-LIVE-ALL', 'INV-RES', 'INV-VERCAP', 'C-5']).
+trace_row('H-WIN',         ['WIN-1', 'WIN-2', 'WIN-ESC', 'WIN-LIVE']).
+trace_row('H-EXEC',        ['EX-6', 'EX-7', 'EX-8', 'TLA-EXEC']).
+trace_row('H-INTERVAL',    ['INV-HARD', 'INV-HEALTHY', 'INV-RES']).
+trace_row('H-LIVENESS',    ['LIVE-ALL', 'LIVE-1', 'LIVE-2', 'MC-1']).
 trace_row('H-NOMONO',      ['TX-SETTLE', 'TX-OBSERVE']).
-trace_row('H-VERSION',     ['TX-VER', 'INV-WF', 'C-4']).
+trace_row('H-VERSION',     ['TX-VER', 'VER-CAP', 'INV-VERCAP', 'INV-WF', 'C-4']).
+trace_row('H-WINDOW',      ['WIN-1', 'WIN-2', 'WIN-ESC', 'DEP-1', 'RT-WINDOW']).
+trace_row('H-JOBCAP',      ['EX-6', 'TLA-EXEC', 'RT-D1']).

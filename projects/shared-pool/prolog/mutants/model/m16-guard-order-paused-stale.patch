@@ -5,14 +5,14 @@
 # expect: test_mc2 MC-2: all traces replay
 --- a/prolog/requirements/pool_req.pl
 +++ b/prolog/requirements/pool_req.pl
-@@ -209,8 +209,8 @@
+@@ -289,8 +289,8 @@
  op_kind(observe).
  
- % --- submit (spec:17-25, api:26-28)
--guard(submit,  1, paused,        err('Paused'),          doc('spec:19 "Check paused"')).
--guard(submit,  2, version,       err('Stale'),           doc('spec:19 "version equality"; api:26')).
-+guard(submit,  2, paused,        err('Paused'),          doc('spec:19 "Check paused"')).
-+guard(submit,  1, version,       err('Stale'),           doc('spec:19 "version equality"; api:26')).
- guard(submit,  3, expiry,        err('Expired'),         doc('spec:19 "expiry strictly after now and at most one day ahead"')).
- guard(submit,  4, freshness,     err('SnapshotExpired'), doc('spec:19 "observation freshness if configured"')).
- guard(submit,  5, record_bound,  err('Full'),            doc('spec:19 "record bound"; api:8 "up to 256 records"')).
+ % --- submit (spec:19-27, api:13, api:28-32)
+-guard(submit,  1, paused,        err('Paused'),          doc('spec:21 "Check paused"')).
+-guard(submit,  2, version,       err('Stale'),           doc('spec:21 "version equality"; api:30')).
++guard(submit,  2, paused,        err('Paused'),          doc('spec:21 "Check paused"')).
++guard(submit,  1, version,       err('Stale'),           doc('spec:21 "version equality"; api:30')).
+ guard(submit,  3, expiry,        err('Expired'),         doc('spec:21 "expiry strictly after now and at most one day ahead"; api:30')).
+ guard(submit,  4, freshness,     err('SnapshotExpired'), doc('spec:21 "observation freshness if configured"')).
+ guard(submit,  5, record_bound,  err('Full'),            doc('spec:21 "record bound (Full only when 256 records are retained and the oldest is open)"; api:28')).

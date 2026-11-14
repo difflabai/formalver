@@ -3,10 +3,10 @@
 # expect: test_requirements C-4 constants
 --- a/source-mirror/crates/core/src/lib.rs
 +++ b/source-mirror/crates/core/src/lib.rs
-@@ -9,7 +9,7 @@
- pub const MAX_METRICS: usize = 32;
+@@ -12,7 +12,7 @@
  pub const MAX_RECIPES: usize = 32;
  pub const MAX_TERMS: usize = 64;
+ /// Records retained in a pool's window (`Pool::records`).
 -pub const MAX_RECORDS: usize = 256;
 +pub const MAX_RECORDS: usize = 255;
  pub const MAX_VALUE: i64 = 1_000_000;

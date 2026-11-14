@@ -42,7 +42,7 @@ TLA_OUT = os.path.join(HERE, "extracted", "tla_facts.pl")
 
 # Internal functions whose Err propagates through `?` (or a tail call).
 FALLIBLE = ["energy_terms", "check_bounds", "candidate", "validate", "envelope",
-            "release", "energy", "record", "bump", "add"]
+            "release", "energy", "record", "index", "bump_new", "bump", "add"]
 STATUS_FNS = ["dispatch", "acknowledge", "cancel", "settle", "release", "submit"]
 
 
@@ -228,6 +228,75 @@ def parse_cond(cond):
 
 
 # --------------------------------------------------------------------------
+# Constant expressions (v1.1.0: `pub const VERSION_CAP: u32 = u32::MAX - 3 *
+# MAX_RECORDS as u32;`). Integer literals, earlier constants, `T::MAX`/`T::MIN`,
+# `+ - *`, parentheses and `as T` (binding tighter than `*`, as in Rust); every
+# intermediate and the result must fit its type, as the compiler requires.
+
+INT_RANGE = {"u32": (0, 2**32 - 1), "u64": (0, 2**64 - 1), "usize": (0, 2**64 - 1),
+             "i64": (-2**63, 2**63 - 1), "i32": (-2**31, 2**31 - 1)}
+
+
+def eval_const(expr, consts, name):
+    toks = re.findall(r"\d[\d_]*(?:u32|u64|i64|usize)?|\w+::\w+|\w+|[-+*()]|\S", expr)
+    if re.sub(r"\s+", "", expr) != "".join(toks):
+        raise ExtractError(f"constant {name}: cannot tokenize {expr!r}")
+    pos = [0]
+
+    def peek():
+        return toks[pos[0]] if pos[0] < len(toks) else None
+
+    def eat():
+        t = peek()
+        pos[0] += 1
+        return t
+
+    def atom():
+        t = eat()
+        if t == "(":
+            v = add()
+            if eat() != ")":
+                raise ExtractError(f"constant {name}: unbalanced parentheses in {expr!r}")
+            return v
+        if t is not None and re.fullmatch(r"\d[\d_]*(?:u32|u64|i64|usize)?", t):
+            return int(re.sub(r"(u32|u64|i64|usize)$", "", t).replace("_", ""))
+        if t is not None and (m := re.fullmatch(r"(\w+)::(MAX|MIN)", t)) and m.group(1) in INT_RANGE:
+            lo, hi = INT_RANGE[m.group(1)]
+            return hi if m.group(2) == "MAX" else lo
+        if t in consts:
+            return consts[t]
+        raise ExtractError(f"constant {name}: unsupported term {t!r} in {expr!r}")
+
+    def cast():
+        v = atom()
+        while peek() == "as":
+            eat()
+            ty = eat()
+            if ty not in INT_RANGE or not INT_RANGE[ty][0] <= v <= INT_RANGE[ty][1]:
+                raise ExtractError(f"constant {name}: {v} as {ty} does not fit")
+        return v
+
+    def mul():
+        v = cast()
+        while peek() == "*":
+            eat()
+            v = v * cast()
+        return v
+
+    def add():
+        v = mul()
+        while peek() in ("+", "-"):
+            op = eat()
+            v = v + mul() if op == "+" else v - mul()
+        return v
+
+    v = add()
+    if peek() is not None:
+        raise ExtractError(f"constant {name}: trailing tokens in {expr!r}")
+    return v
+
+
+# --------------------------------------------------------------------------
 # Core
 
 def core_facts(raw):
@@ -237,9 +306,19 @@ def core_facts(raw):
     for name, fpos, params, lb, rb in functions(text):
         fns.setdefault(name, (fpos, params, lb, rb))
 
-    # Constants
-    for m in re.finditer(r"pub const (\w+): (\w+) = ([\d_]+);", text):
-        facts.append(f"code_constant('{m.group(1)}', {int(m.group(3).replace('_', ''))}, {line_of(text, m.start())}).")
+    # Constants (literals or constant expressions, evaluated)
+    consts = {}
+    for m in re.finditer(r"\bconst (\w+): (\w+) = ([^;]+);", text):
+        ty = m.group(2)
+        if ty not in INT_RANGE:
+            raise ExtractError(f"constant {m.group(1)}: unsupported type {ty}")
+        v = eval_const(m.group(3), consts, m.group(1))
+        if not INT_RANGE[ty][0] <= v <= INT_RANGE[ty][1]:
+            raise ExtractError(f"constant {m.group(1)} = {v} does not fit {ty}")
+        consts[m.group(1)] = v
+        if not text[:m.start()].rstrip().endswith("pub"):
+            raise ExtractError(f"constant {m.group(1)} is not pub")
+        facts.append(f"code_constant('{m.group(1)}', {v}, {line_of(text, m.start())}).")
 
     # Enums (data! macro)
     for enum in ("Error", "Status", "Shape"):
@@ -254,6 +333,8 @@ def core_facts(raw):
         for fm in re.finditer(r"pub (\w+): ([\w<>()]+)", m.group(2)):
             if fm.group(2) in ("u32", "u64", "i64", "bool"):
                 facts.append(f"code_field('{m.group(1)}', {fm.group(1)}, {fm.group(2)}).")
+            elif (vm := re.fullmatch(r"Vec<(u32|u64|i64)>", fm.group(2))):
+                facts.append(f"code_field('{m.group(1)}', {fm.group(1)}, vec({vm.group(1)})).")
 
     # Role distinctness in Config::validate (F-4): comparisons between two of
     # a recipe's actor/executor and the owner. Always emitted (an empty list is
@@ -300,6 +381,15 @@ def core_facts(raw):
             events.append((m.start(), f"noop({line_of(text, base + m.start())})"))
         events.sort(key=lambda e: e[0])
         facts.append(f"code_events({name}, [{', '.join(t for _, t in events)}]).")
+
+        # checked increments of a Pool field: `self.<field>.checked_add(..)`
+        # in the statement of an Error::Arithmetic site (C-2 discharges the
+        # site by the invariant that bounds the field).
+        for m in re.finditer(r"Error::Arithmetic", body):
+            st = max(body.rfind(";", 0, m.start()), body.rfind("{", 0, m.start()),
+                     body.rfind("}", 0, m.start())) + 1
+            for fm in re.finditer(r"\bself\s*\.\s*(\w+)\s*\.\s*checked_add\s*\(", body[st:m.start()]):
+                facts.append(f"code_checked_add({name}, {line_of(text, base + m.start())}, {fm.group(1)}).")
 
         # caller comparisons: if <cond on caller> { return Err(Error::X); }
         for m in re.finditer(r"\bif\s+((?:(?!\bif\b)[^{;])*?\bcaller\b[^{]*?)\{\s*return\s+Err\(Error::(\w+)\)", body, re.S):
@@ -445,12 +535,32 @@ def fixture_facts(raw):
         raise ExtractError("fixtures::config: owner not found")
     facts.append(f"fixture_owner('{om.group(1)}', {line_of(text, lb + 1 + om.start())}).")
     arms = list(re.finditer(r'((?:"\w+"\s*\|\s*)*"\w+")\s*=>\s*\{', cbody))
+    arm_actors, derived = {}, []
     for i, arm in enumerate(arms):
         alb = cbody.index("{", arm.end() - 1)
         arb = match_close(cbody, alb, "{", "}")
         body = cbody[alb + 1:arb]
         loops = {v: re.findall(r'"([^"]*)"', lst)
                  for v, lst in re.findall(r"for \(\w+, (\w+)\) in \[([^\]]*)\]", body)}
+        # v1.1.0: an arm may start from another fixture (`c = config("gpu")?;`,
+        # the station) and rename its recipes' actors with
+        # `r.actor = format!("{}<suffix>", <loop var>.to_lowercase());` over a
+        # literal list. Its actors are then a superset: the base fixture's
+        # actors plus the renamed ones (fixture_actors is used as "every
+        # recipe's actor is among these"). Any other actor write is an error.
+        dm = re.search(r'\bc = config\("(\w+)"\)\?;', body)
+        renamed = set()
+        for am2 in re.finditer(r"\.actor\s*=\s*([^;]*);", body):
+            fm2 = re.fullmatch(r'format!\("\{\}([^"]*)",\s*(\w+)\.to_lowercase\(\)\)', " ".join(am2.group(1).split()))
+            if not dm or not fm2 or fm2.group(2) not in loops:
+                raise ExtractError(f"fixtures: unsupported actor assignment {am2.group(0)!r}")
+            renamed.update(x.lower() + fm2.group(1) for x in loops[fm2.group(2)])
+        if dm:
+            if re.search(r"(?<![\w.])recipe\(|c\.recipes\s*=", body):
+                raise ExtractError(f"fixtures: derived arm {arm.group(1)} also builds recipes")
+            for nm in re.findall(r'"(\w+)"', arm.group(1)):
+                derived.append((nm, dm.group(1), line_of(text, lb + 1 + alb + 1 + dm.start()), renamed))
+            continue
         actors, ordered = set(), []
         for cm in re.finditer(r"(?<![\w.])recipe\(", body):
             lp = cm.end() - 1
@@ -464,7 +574,10 @@ def fixture_facts(raw):
                 ordered = None if ordered is None else ordered + [None]
             else:
                 raise ExtractError(f"fixtures: unresolved actor argument {a!r}")
+        if not actors:
+            raise ExtractError(f"fixtures: arm {arm.group(1)} has no recipe() call and no derivation")
         for nm in re.findall(r'"(\w+)"', arm.group(1)):
+            arm_actors[nm] = actors
             facts.append(f"fixture_actors({nm}, [{', '.join(repr(x) for x in sorted(actors))}]).")
             # Recipe order by actor, only where the recipes are a literal list
             # (no loop): the recipe's index is its position here.
@@ -482,6 +595,11 @@ def fixture_facts(raw):
                 if len(lits) != len(ordered):
                     raise ExtractError(f"fixtures: {nm}: recipes outside the literal list")
                 facts.append(f"fixture_recipe_actors({nm}, [{', '.join(repr(x) for x in lits)}]).")
+    for nm, basename, line, renamed in derived:
+        if basename not in arm_actors:
+            raise ExtractError(f"fixtures: {nm} derives from {basename!r}, which builds no recipes")
+        facts.append(f"fixture_derived({nm}, {basename}, {line}).")
+        facts.append(f"fixture_actors({nm}, [{', '.join(repr(x) for x in sorted(arm_actors[basename] | renamed))}]).")
     return facts
 
 
@@ -532,13 +650,15 @@ def main(argv):
              ":- module(code_facts, [code_constant/3, code_enum/3, code_fn/3, code_events/2,",
              "    code_caller_check/5, code_literal/3, code_status_guard/4, code_status_next/5,",
              "    code_status_write/3, code_field/3, code_role_checks/2, shell_method/4, shell_core_call/4, shell_literal/3, shell_helper/3,",
-             "    fixture_names/2, fixture_executor/2, fixture_owner/2, fixture_actors/2, fixture_recipe_actors/2]).",
+             "    fixture_names/2, fixture_executor/2, fixture_owner/2, fixture_actors/2, fixture_recipe_actors/2,",
+             "    code_checked_add/3, fixture_derived/3]).",
              ":- discontiguous(code_fn/3).", ":- discontiguous(code_events/2).",
              ":- discontiguous(code_caller_check/5).", ":- discontiguous(code_literal/3).",
              ":- discontiguous(code_status_guard/4).", ":- discontiguous(code_status_next/5).",
              ":- discontiguous(code_status_write/3).", ":- discontiguous(shell_core_call/4).",
              ":- discontiguous(shell_method/4).", ":- discontiguous(shell_literal/3).",
-             ":- discontiguous(fixture_actors/2).", ":- discontiguous(fixture_recipe_actors/2).", ""]
+             ":- discontiguous(fixture_actors/2).", ":- discontiguous(fixture_recipe_actors/2).",
+             ":- discontiguous(code_checked_add/3).", ":- dynamic(fixture_derived/3).", ""]
     try:
         lines += core_facts(open(core).read())
         lines += shell_facts(open(shell).read())

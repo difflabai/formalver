@@ -98,14 +98,17 @@ test('C-2 alignment covers every op kind and rejects a swapped spec', (
         ;   true
         ) )) )).
 
-% C-3: the code derivation is total and the only static spec/code difference is
-% the recorded divergence (Unknown -> Unknown on a negative acknowledgment).
-test('C-3 static spec/code differences are exactly div-ack-noop-version', (
+% C-3: the code derivation is total and agrees with the spec on every row. The
+% v1.0.0 difference (Unknown -> Unknown on a negative acknowledgment) is closed:
+% spec:41 now names it an Ok no-op (div-ack-noop-version is a closed divergence).
+test('C-3 static spec/code differences: none (div-ack-noop-version closed)', (
     findall(Op-F-S, ( consistency:life_domain(Op, F, S), life(Op, F, S, SO, _),
                       code_life(Op, F, S, CO), SO \== CO ), Ds),
     note("differences: ~q", [Ds]),
-    Ds == [ack-false-unknown],
-    divergence('div-ack-noop-version', _, _, _) )).
+    check(no_difference, Ds == []),
+    check(ack_noop_doc, life(ack, false, unknown, same, doc(_))),
+    check(cancel_completed, life(cancel, none, completed, reject('InvalidState'), doc(_))),
+    check(closed, closed_divergence('div-ack-noop-version', _, _, _, _)) )).
 
 % The TLA+ leg is live (the file exists at this pin) or explicitly a gap.
 test('C-2/C-3 TLA+ leg status is recorded', (
@@ -116,11 +119,28 @@ test('C-2/C-3 TLA+ leg status is recorded', (
     ;   true
     ) )).
 
-% The divergences are findings: each cites doc lines and states both sides.
-test('divergences are recorded with doc citations', (
-    findall(D, divergence(D, _, _, _), Ds), note("divergences: ~q", [Ds]),
-    length(Ds, N), N >= 3,
-    forall(divergence(_, Cite, Doc, Code), ( atom(Cite), Doc = [_ | _], Code = [_ | _] )) )).
+% No divergence is open at the pin; each v1.0.0 divergence is recorded as closed
+% with its v1.0.0 citation, its v1.1.0 citation and both texts.
+test('divergences: none open; the v1.0.0 ones are closed with old and new citations', (
+    findall(D, divergence(D, _, _, _), Open), note("open divergences: ~q", [Open]),
+    check(none_open, Open == []),
+    findall(D, closed_divergence(D, _, _, _, _), Ds), note("closed divergences: ~q", [Ds]),
+    check(closed_four, Ds == ['div-F1-inverse', 'div-F2-fixture-release',
+                              'div-ack-noop-version', 'div-cancel-terminal-name']),
+    forall(closed_divergence(D, Old, New, Was, Res),
+           check(cites(D), ( atom(Old), atom(New), atom_chars(Old, OC), append(_, ['@', v, '1', '.', '0', '.', '0' | _], OC),
+                             atom_chars(New, NC), \+ append(_, ['@' | _], NC),
+                             Was = [_ | _], Res = [_ | _] ))) )).
+
+% The version reserve constant is extracted with its value (u32::MAX - 768,
+% evaluated by extract.py) and agrees with the docs (C-4 compares them too).
+test('VERSION_CAP is extracted as u32::MAX - 768 and matches the docs', (
+    check(extracted, code_constant('VERSION_CAP', 4294966527, 24)),
+    check(docs, constant(version_cap, 4294966527, _)),
+    constant(version_max, VM, _), constant(max_records, MR, _),
+    check(reserve, 4294966527 =:= VM - 3 * MR),
+    guard_sequence(submit, SO), append(_, [Last], SO), note("submit's last guard: ~q", [Last]),
+    check(cap_last_in_submit, guard(submit, _, version_cap, Last, _)) )).
 
 % Extracted fixture accounts (fixtures.rs) behind CASH-SELF.
 test('C-5 CASH-SELF uses the fixtures.rs account names, not the renamed trace atoms', (
@@ -128,15 +148,18 @@ test('C-5 CASH-SELF uses the fixtures.rs account names, not the renamed trace at
     note("hiring actors ~q, executor ~q", [As, X]),
     As = [_ | _], \+ memberchk(X, As) )).
 
-% C-5 known findings: each is REPRODUCED (not skipped), with the brief's shape.
-test('C-5 reproduces F-2 (risk release blocked) and F-4 (validate accepts actor = executor)', (
+% C-5 at v1.1.0 reproduces no finding: F-2 (RISK-RELEASE) and F-4
+% (CASH-SELF-ENFORCED) are fixed, so both claims are checked outright and no
+% known_finding/2 remains. All six v1.0.0 findings are fixed('v1.1.0', Props).
+test('C-5 reproduces no finding; F-1..F-6 are fixed at v1.1.0', (
     c_check('C-5', R), ( R = ok(Info) ; R = fail(_, Info) ),
     memberchk(findings(Fs), Info),
-    note("findings: ~q", [Fs]),
-    check(f2, ( member('RISK-RELEASE'-'F-2'-release_blocked(count(N), first(rel(p(0, 1, 3, _), release(0), _, _)-err(bounds))), Fs),
-                N > 0 )),
-    check(f4, member('CASH-SELF-ENFORCED'-'F-4'-validate_accepts(actor = executor, _), Fs)),
-    check(only_risk_blocks, forall(( fixture_claim(Id, _, release_never_blocked, _), \+ known_finding(Id, _) ),
-                                   \+ member(Id-_-_, Fs))),
+    note("findings reproduced: ~q", [Fs]),
+    check(none_reproduced, Fs == []),
+    check(no_known_finding, \+ known_finding(_, _)),
+    memberchk(claims(Cs), Info),
+    check(cash_self_enforced, memberchk('CASH-SELF-ENFORCED'-[code_role_checks(RC)], Cs)),
+    check(validate_rejects_self, memberchk(actor-executor, RC)),
     findall(F, finding(F, _, _, _), All), note("findings recorded: ~q", [All]),
-    check(six_findings, All == ['F-1', 'F-2', 'F-3', 'F-4', 'F-5', 'F-6']) )).
+    check(six_findings, All == ['F-1', 'F-2', 'F-3', 'F-4', 'F-5', 'F-6']),
+    forall(member(F, All), check(fixed(F), finding(F, _, _, _, fixed('v1.1.0', [_ | _])))) )).
