@@ -137,7 +137,7 @@ compile on the mutant). All 26 are killed by the build; none survives.
 | 06-cancel-any-caller | | Facts (`cancel_ok`) | | killed |
 | 07-ack-status-swapped | | Witness (`unknown_settle`) | | killed |
 | 08-submit-id-ignores-first-id (id = window index; re-target) | | Inv (`inv_submit`: record id = index) | | survives (the trace format shows no record ids) |
-| 09-guard-order-paused-stale | | Guard (`guards_order`), Facts (`submit_ok`) | | killed |
+| 09-guard-order-paused-stale | | Guard (`guards_order`), Facts (`submit_ok`) | | killed (trace 3) |
 | 10-prereq-ignores-units | | Inv (`inv_submit`: INV-DEP) | | survives |
 | 11-unknown-not-settleable | | Live (`no_wedge`) | | killed |
 | 12-adm1-energy-check-dropped | | Facts (`submit_ok`) | | killed |
@@ -162,27 +162,29 @@ Several first breaks are proof shape rather than a false statement: 19
 (Inv still holds when Full fires more often), 21 (INV-DEP still holds when
 the guard counts fewer units), 24 and 25 (the Facts restatements still
 hold); the probes show the named property itself fails on each. The
-replay column was first measured in a scratch copy with the parser change
-and the v1.1.0 corpus, before both were committed, with Guard dropped from
-Main for 09, 23 and 25, whose `guards_order` breaks. `run.sh mutants` at
-a7781c7 (2026-11-14) gives the same column for the other 23 mutants (17,
-18, 19-21, 22 and 24 diverge first at the traces named). For 09, 23 and 25
-it prints "killed by replay", but there the replay step fails because
-`pool-lean` imports Guard (for `pool-lean guards`) and does not build: a
-build failure, not a trace divergence. The column keeps the scratch
-result for those three (23 survives the replay).
+replay column is `run.sh mutants` at 6b120fd (2026-11-14): 09 diverges
+first in trace 3, 25 in trace 4, and 17, 18, 19-21, 22 and 24 at the
+traces named. `pool-lean` imports only Machine and Text, so it builds on
+every mutant here, including 09, 23 and 25, whose `guards_order` (Guard)
+breaks. Before 6b120fd it also imported Guard (for the guard printer, now
+`pool-lean-guards`), and `run.sh` printed "killed by replay" for those
+three when `pool-lean` did not build. That was a build failure, not a
+trace divergence. `run.sh` now prints "no replay (pool-lean does not
+build)" in that case. The column is the same as the first scratch
+measurement, which was taken with Guard dropped from Main (23 survives
+the replay).
 
 ## Run times (darwin arm64, this workspace)
 
 | Check | Time |
 |-------|------|
-| `run.sh build` (+ hygiene scan) | 10 s (every module rebuilt) |
+| `run.sh build` (+ hygiene scan) | 10 s (every module rebuilt; 3 s at 6b120fd, where only Main and Guards rebuilt) |
 | `run.sh audit` (65 `#print axioms`) | 1 s |
 | `run.sh canary` (3 files) | 1 s |
 | `run.sh regression` (1 file) | under 1 s |
 | `run.sh replay` | 1 s (a7781c7, the v1.1.0 corpus; 3 s in the scratch copy) |
-| `run.sh mutants` (26 mutants, 10 probes) | 174 s at a7781c7, one mutant at a time, each with the replay (135 s before the corpus was committed, when the unmutated replay failed and the per-mutant replay was skipped) |
-| whole run, all six checks | 182 s at a7781c7 (148 s before the corpus was committed) |
+| `run.sh mutants` (26 mutants, 10 probes) | 178 s at 6b120fd (174 s at a7781c7), one mutant at a time, each with the replay (135 s before the corpus was committed, when the unmutated replay failed and the per-mutant replay was skipped) |
+| whole run, all six checks | 185 s at 6b120fd (182 s at a7781c7; 148 s before the corpus was committed) |
 
 ## What is NOT shown here
 
