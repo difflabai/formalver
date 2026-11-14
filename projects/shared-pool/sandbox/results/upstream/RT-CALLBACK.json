@@ -1,10 +1,33 @@
 {
   "assumption": "ASM-CALLBACK",
+  "executor_jobs": [
+    [
+      0,
+      "completed"
+    ],
+    [
+      1,
+      "cancelled"
+    ],
+    [
+      2,
+      "cancelled"
+    ],
+    [
+      3,
+      "cancelled"
+    ]
+  ],
+  "executor_newest": 3,
   "final": {
     "by_status": {
       "Cancelled": 3,
       "Completed": 1
     },
+    "completed_units": [
+      4
+    ],
+    "first_id": 0,
     "paused": false,
     "records": 4,
     "values": [
@@ -12,6 +35,16 @@
       20
     ],
     "version": 16
+  },
+  "finish_receipts_ok": {
+    "executor": [
+      true,
+      true
+    ],
+    "lock": [
+      true
+    ],
+    "order": "finish, then the lock's settle, then on_settled"
   },
   "modes": [
     {
@@ -21,6 +54,7 @@
         "outcome": "active"
       },
       "execute_returns": "active",
+      "executor_job": "active",
       "mode": "normal",
       "status": "Active",
       "values": [
@@ -65,6 +99,15 @@
     },
     {
       "confirm_not_executed": {
+        "receipts_ok": {
+          "executor": [
+            true,
+            true
+          ],
+          "lock": [
+            true
+          ]
+        },
         "status": "Cancelled",
         "values": [
           50,
@@ -78,7 +121,7 @@
         "outcome": "unknown"
       },
       "execute": "fails",
-      "execute_panic": "WebAssembly trap: An `unreachable` opcode was executed.",
+      "execute_panic": "panicked at crates/executor/src/lib.rs:79:9:\nassertion `left != right` failed: injected failure\n  left: \\",
       "mode": "panic",
       "reconcile": "status unknown, no-op",
       "status": "Unknown",
@@ -89,8 +132,8 @@
     }
   ],
   "near_sandbox": "2.13.4 (near-workspaces 0.23.0 / near-sandbox 0.3.16 default)",
-  "pool_contract_sha256": "8ddc9280c63157636fede6f201ebff30ef528307092ad21914730c00df380f7c",
-  "pool_executor_sha256": "ca76c3caf0505ab7fdb43ab3ecaef6234472eec94bb4256679e69c5a4785b0e5",
+  "pool_contract_sha256": "e6383aabed62dcf694ac2f97da4520a019b18c9db637b1ee2afc7180c697e2ea",
+  "pool_executor_sha256": "b92f146919be69f36f517edc10f1e04e6ee96430ba0d745e4422132615634e83",
   "property": "RT-CALLBACK",
   "result": "pass",
   "wasm_variant": "upstream"

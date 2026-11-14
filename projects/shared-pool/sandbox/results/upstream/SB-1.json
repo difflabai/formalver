@@ -1,33 +1,22 @@
 {
-  "builds": [
-    {
-      "observed": {
-        "exec.finish by mallory": "WebAssembly trap: An `unreachable` opcode was executed.",
-        "pool.dispatch(99) (core NotFound)": "WebAssembly trap: An `unreachable` opcode was executed.",
-        "pool.new by mallory": "WebAssembly trap: An `unreachable` opcode was executed.",
-        "pool.on_result by mallory": "WebAssembly trap: An `unreachable` opcode was executed.",
-        "pool.set_paused by mallory (core Unauthorized)": "WebAssembly trap: An `unreachable` opcode was executed."
-      },
-      "pool_contract_sha256": "8ddc9280c63157636fede6f201ebff30ef528307092ad21914730c00df380f7c",
-      "variant": "upstream"
-    },
-    {
-      "observed": {
-        "exec.finish by mallory": "panicked at crates/executor/src/lib.rs:111:9:\nassertion `left == right` failed: only independent operator\n  left: AccountId(\\",
-        "pool.dispatch(99) (core NotFound)": "NotFound",
-        "pool.new by mallory": "Method new is private",
-        "pool.on_result by mallory": "Method on_result is private",
-        "pool.set_paused by mallory (core Unauthorized)": "Unauthorized"
-      },
-      "pool_contract_sha256": "af617a8f00a10d0a049fb8092ae2f22463204faf71cf770a1b166d2c5b903c02",
-      "variant": "cfg-near"
-    }
-  ],
-  "finding": "SB-1",
+  "build": "upstream scripts/build.sh (results/wasm.json)",
+  "finding": "SB-1 (v1.0.0; upstream NT-F1)",
   "near_sandbox": "2.13.4 (near-workspaces 0.23.0 / near-sandbox 0.3.16 default)",
-  "pool_contract_sha256": "8ddc9280c63157636fede6f201ebff30ef528307092ad21914730c00df380f7c",
-  "pool_executor_sha256": "ca76c3caf0505ab7fdb43ab3ecaef6234472eec94bb4256679e69c5a4785b0e5",
-  "result": "reproduced",
-  "summary": "upstream scripts/build.sh builds without cfg(near); near-sdk's panic_str then traps without calling panic_utf8, so every on-chain failure is a bare unreachable trap",
+  "observed": {
+    "exec.finish by mallory": "panicked at crates/executor/src/lib.rs:164:9:\nassertion `left == right` failed: only independent operator\n  left: AccountId(\\",
+    "exec.on_settled by mallory": "Method on_settled is private",
+    "pool.cancel of an Active record (core Pending)": "Pending",
+    "pool.dispatch(99) (core NotFound)": "NotFound",
+    "pool.new by mallory": "Method new is private",
+    "pool.observe [50, 1000001] (core Bounds)": "Bounds",
+    "pool.observe [50, 1] with a record open (core Pending)": "Pending",
+    "pool.on_result by mallory": "Method on_result is private",
+    "pool.reconcile with 1 yoctoNEAR (NT-F2)": "Method reconcile doesn't accept deposit",
+    "pool.set_paused by mallory (core Unauthorized)": "Unauthorized"
+  },
+  "pool_contract_sha256": "e6383aabed62dcf694ac2f97da4520a019b18c9db637b1ee2afc7180c697e2ea",
+  "pool_executor_sha256": "b92f146919be69f36f517edc10f1e04e6ee96430ba0d745e4422132615634e83",
+  "result": "fixed: no bare trap; every failure reads Smart contract panicked: <msg>",
+  "summary": "v1.1.0's scripts/build.sh sets RUSTFLAGS=\"--cfg near\", so near-sdk's panic_str calls panic_utf8 and every on-chain failure carries its message",
   "wasm_variant": "upstream"
 }

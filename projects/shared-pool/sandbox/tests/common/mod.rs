@@ -2,6 +2,9 @@
 //! section 9 pattern). Adapted from upstream `crates/sandbox/tests/
 //! integration.rs` at the pin (`call`, `fail`, `state`): the same calls, plus
 //! raw-state snapshots, event parsing, receipt lookups and result recording.
+//! v1.1.0: one build (upstream scripts/build.sh, RUSTFLAGS="--cfg near"), so
+//! every failure must carry its message; the executor's job window
+//! (`get_jobs`, and `newest` read from its borsh state).
 #![allow(dead_code)]
 
 use near_workspaces::network::Sandbox;
@@ -10,7 +13,7 @@ use near_workspaces::types::NearToken;
 use near_workspaces::{Account, AccountId, Contract, Worker};
 use pool_core::{Commitment, Config, Metric, Pool, Recipe, Shape, Status, Term};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 
 /// NEAR's per-transaction gas limit (and near-workspaces' `max_gas`).
@@ -27,33 +30,26 @@ fn read(var: &str, default: PathBuf, hint: &str) -> Vec<u8> {
     std::fs::read(&path).unwrap_or_else(|e| panic!("can't read {}: {e}. {hint}", path.display()))
 }
 
-/// Which build of the two contracts is under test (scripts/build-wasm.sh):
-/// `upstream` (default: upstream scripts/build.sh, plain cargo build) or
-/// `cfg-near` (the same with RUSTFLAGS="--cfg near", as cargo-near builds).
+/// The build under test. v1.0.0 had two (`upstream`, a plain cargo build,
+/// and `cfg-near`); since v1.1.0 upstream scripts/build.sh sets
+/// RUSTFLAGS="--cfg near" itself, so there is one, `upstream`
+/// (scripts/build-wasm.sh). Result files go to results/upstream/.
 pub fn variant() -> String {
-    let v = std::env::var("POOL_WASM_VARIANT").unwrap_or_else(|_| "upstream".into());
-    assert!(v == "upstream" || v == "cfg-near", "POOL_WASM_VARIANT must be upstream or cfg-near, not {v}");
-    v
+    "upstream".into()
 }
 
-fn target_of(variant: &str) -> PathBuf {
-    let dir = if variant == "cfg-near" { "target/pool-near" } else { "target/pool" };
-    sandbox_dir().join(dir).join("wasm32-unknown-unknown/release")
+fn target_dir() -> PathBuf {
+    sandbox_dir().join("target/pool/wasm32-unknown-unknown/release")
 }
 
-/// A contract of the given build variant.
-pub fn wasm_of(variant: &str, name: &str) -> Vec<u8> {
-    read("__unset__", target_of(variant).join(format!("{name}.wasm")), "Run scripts/build-wasm.sh")
-}
-
-/// The pool contract under test: `POOL_CONTRACT_WASM`, else the selected
-/// variant's output of `scripts/build-wasm.sh`.
+/// The pool contract under test: `POOL_CONTRACT_WASM`, else the output of
+/// `scripts/build-wasm.sh` (a copy of build.sh's, hash-checked there).
 pub fn contract_wasm() -> Vec<u8> {
-    read("POOL_CONTRACT_WASM", target_of(&variant()).join("pool_contract.wasm"), "Run scripts/build-wasm.sh or set POOL_CONTRACT_WASM")
+    read("POOL_CONTRACT_WASM", target_dir().join("pool_contract.wasm"), "Run scripts/build-wasm.sh or set POOL_CONTRACT_WASM")
 }
 
 pub fn executor_wasm() -> Vec<u8> {
-    read("POOL_EXECUTOR_WASM", target_of(&variant()).join("pool_executor.wasm"), "Run scripts/build-wasm.sh or set POOL_EXECUTOR_WASM")
+    read("POOL_EXECUTOR_WASM", target_dir().join("pool_executor.wasm"), "Run scripts/build-wasm.sh or set POOL_EXECUTOR_WASM")
 }
 
 pub fn relay_wasm() -> Vec<u8> {
@@ -69,9 +65,9 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     sha2::Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Writes `results/<variant>/<id>.json` (observations: the test's own
-/// asserts are the pass/fail criterion; the file is the record), tagged with
-/// the build variant and the sha256 of both contracts under test.
+/// Writes `results/upstream/<id>.json` (observations: the test's own asserts
+/// are the pass/fail criterion; the file is the record), tagged with the
+/// build and the sha256 of both contracts under test.
 pub fn record(id: &str, value: Value) {
     let dir = sandbox_dir().join("results").join(variant());
     std::fs::create_dir_all(&dir).unwrap();
@@ -139,8 +135,41 @@ pub async fn tx_gas(a: &Account, receiver: &AccountId, method: &str, args: Value
         .unwrap_or_else(|e| panic!("{method} with {gas} gas: rpc error {e:?}"))
 }
 
+/// The outcome of a `transact_async` transaction once `done` holds for it.
+/// near-workspaces 0.23's own await of a `TransactionStatus` polls with
+/// `wait_until: Included` and returns the first outcome whose final status is
+/// known. The executor's `finish` and `confirm_not_executed` return the lock's
+/// `settle` value and run `on_settled` as a separate callback (upstream
+/// `notify`: `promise_then` on `settle`, then `promise_return(settle)`), so that
+/// first outcome can lack `on_settled`. (A plain `transact` is
+/// `broadcast_tx_commit`, which waits until every receipt has run.) Polls every
+/// 100 ms; fails after 20 s.
+pub async fn complete(t: &near_workspaces::operations::TransactionStatus, done: impl Fn(&ExecutionFinalResult) -> bool) -> ExecutionFinalResult {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        if let std::task::Poll::Ready(r) = t.status().await.unwrap() {
+            if done(&r) {
+                return r;
+            }
+            assert!(std::time::Instant::now() < deadline, "transaction still incomplete after 20 s: {:?}", r.receipt_outcomes());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
 /// The runtime's error when a receipt needs more gas than it was given.
 pub const OUT_OF_GAS: &str = "Exceeded the prepaid gas.";
+
+/// `tx` with a deposit of `yocto` attached (NT-F2: reconcile is nonpayable).
+pub async fn tx_deposit(a: &Account, receiver: &AccountId, method: &str, args: Value, yocto: u128) -> ExecutionFinalResult {
+    a.call(receiver, method)
+        .args_json(args)
+        .deposit(NearToken::from_yoctonear(yocto))
+        .max_gas()
+        .transact()
+        .await
+        .unwrap_or_else(|e| panic!("{method}: rpc error {e:?}"))
+}
 
 /// `tx` that must succeed (every receipt, not only the final value).
 pub async fn ok(a: &Account, receiver: &AccountId, method: &str, args: Value) -> ExecutionFinalResult {
@@ -155,7 +184,8 @@ pub fn failure_text(r: &ExecutionFinalResult) -> String {
     format!("{:?}", r.clone().into_result().unwrap_err())
 }
 
-/// What a wasm `unreachable` trap looks like in a failure.
+/// What a wasm `unreachable` trap looks like in a failure: v1.0.0's
+/// documented build failed every call this way (finding SB-1).
 pub const TRAP: &str = "WebAssembly trap: An `unreachable` opcode was executed.";
 
 /// The panic message in a failure text: `Smart contract panicked: <msg>`
@@ -171,20 +201,17 @@ pub fn panic_message(text: &str) -> String {
     }
 }
 
-/// Checks that a failure carries the panic `msg` as the build variant under
-/// test reports it, and returns the observed message. `exact`: the whole
-/// message is `msg` (env::panic_str of a core error); otherwise it contains
-/// `msg` (Rust assert!/expect messages carry a "panicked at file:line" prefix).
-/// `cfg-near`: the message is there. `upstream`: every panic is a bare
-/// unreachable trap with no message (finding SB-1); the call still fails.
+/// Checks that a failure carries the panic `msg` and returns the observed
+/// message. `exact`: the whole message is `msg` (env::panic_str of a core
+/// error); otherwise it contains `msg` (Rust assert!/expect messages carry a
+/// "panicked at file:line" prefix). The documented build has cfg(near), so
+/// every failure must say `Smart contract panicked: <msg>`; a bare trap
+/// (SB-1) fails the check.
 pub fn expect_panic(text: &str, msg: &str, exact: bool) -> String {
+    assert!(text.contains(PANIC), "expected {PANIC:?} with {msg:?}, got {text}");
     let observed = panic_message(text);
-    if variant() == "cfg-near" {
-        let hit = if exact { observed == msg } else { observed.contains(msg) };
-        assert!(hit, "expected panic {msg:?}, got {observed:?} in {text}");
-    } else {
-        assert_eq!(observed, TRAP, "upstream build: expected a bare trap for {msg:?} in {text}");
-    }
+    let hit = if exact { observed == msg } else { observed.contains(msg) };
+    assert!(hit, "expected panic {msg:?}, got {observed:?} in {text}");
     observed
 }
 
@@ -209,6 +236,91 @@ pub async fn fails_containing(a: &Account, receiver: &AccountId, method: &str, a
 
 pub async fn pool(c: &Contract) -> Pool {
     c.view("get_pool").await.unwrap().json().unwrap()
+}
+
+/// The executor's jobs (`get_jobs`, a public view since v1.1.0).
+pub async fn jobs(c: &Contract) -> Vec<ExecJob> {
+    let v: Vec<Value> = c.view("get_jobs").await.unwrap().json().unwrap();
+    v.iter()
+        .map(|j| ExecJob {
+            id: j["id"].as_u64().unwrap() as u32,
+            recipe: j["recipe"].as_u64().unwrap() as u32,
+            units: j["units"].as_u64().unwrap() as u32,
+            status: j["status"].as_str().unwrap().to_string(),
+        })
+        .collect()
+}
+
+/// The executor's job ids, in the order it holds them.
+pub async fn job_ids(c: &Contract) -> Vec<u32> {
+    jobs(c).await.iter().map(|j| j.id).collect()
+}
+
+/// A job, as `get_jobs` returns it and as the executor stores it (borsh).
+#[derive(borsh::BorshDeserialize, Clone, Debug, PartialEq, Eq)]
+pub struct ExecJob {
+    pub id: u32,
+    pub recipe: u32,
+    pub units: u32,
+    pub status: String,
+}
+
+/// The executor's contract state at the pin (crates/executor/src/lib.rs
+/// `struct Executor`), field for field; `AccountId` is a borsh string.
+#[derive(borsh::BorshDeserialize, Clone, Debug)]
+pub struct ExecState {
+    pub lock: String,
+    pub operator: String,
+    pub jobs: Vec<ExecJob>,
+    pub mode: String,
+    pub newest: u32,
+}
+
+/// The executor's whole state, decoded from its raw `STATE` value. The
+/// decode must consume every byte, so a layout change fails here.
+pub async fn exec_state(worker: &Worker<Sandbox>, id: &AccountId) -> ExecState {
+    let raw = raw_state(worker, id).await;
+    let bytes = raw.get(b"STATE".as_slice()).expect("executor STATE");
+    borsh::from_slice(bytes).expect("decode executor STATE")
+}
+
+/// EX-7 on the real runtime: the executor never forgets the job of a record
+/// the lock retains. `check` reads both contracts after a transaction: every
+/// job seen before whose id the lock still retains (id >= first_id) must
+/// still be held, every job that vanished must be below first_id, the jobs
+/// must match the borsh state, and the job count must stay within `bound`.
+pub struct Ex7 {
+    pub seen: BTreeSet<u32>,
+    pub bound: usize,
+    pub checks: u32,
+    pub max_jobs: usize,
+}
+
+impl Ex7 {
+    pub fn new(bound: usize) -> Ex7 {
+        Ex7 { seen: BTreeSet::new(), bound, checks: 0, max_jobs: 0 }
+    }
+
+    /// Returns (first_id, the executor's state).
+    pub async fn check(&mut self, worker: &Worker<Sandbox>, lock: &Contract, exec: &Contract, what: &str) -> (u32, ExecState) {
+        let p = pool(lock).await;
+        let st = exec_state(worker, exec.id()).await;
+        let held: BTreeSet<u32> = st.jobs.iter().map(|j| j.id).collect();
+        assert_eq!(jobs(exec).await, st.jobs, "{what}: get_jobs differs from the stored jobs");
+        for id in &self.seen {
+            if p.record(*id).is_ok() {
+                assert!(held.contains(id), "{what}: EX-7: job {id} forgotten while the lock retains it (first_id {})", p.first_id);
+            }
+        }
+        assert!(st.jobs.len() <= self.bound, "{what}: {} jobs > {}", st.jobs.len(), self.bound);
+        for j in &st.jobs {
+            assert!(u64::from(j.id) + 256 > u64::from(st.newest), "{what}: job {} kept with newest {}", j.id, st.newest);
+        }
+        self.seen.extend(held.iter().copied());
+        self.checks += 1;
+        self.max_jobs = self.max_jobs.max(st.jobs.len());
+        (p.first_id, st)
+    }
 }
 
 /// Every storage key/value of `id` (the whole contract state, raw bytes).
@@ -290,8 +402,9 @@ pub fn basic_config(owner: &AccountId, recipes: &[(&AccountId, &AccountId)]) -> 
     }
 }
 
-/// F-1's configuration (brief, "Confirmed finding"): m(0,10,5), m(-100,100,5);
-/// t(1,0,1,target); r(a1,x1,[-2,0],[2,-5],1,[]).
+/// F-1's configuration (v1.0.0 brief, "Confirmed finding"): m(0,10,5),
+/// m(-100,100,5); t(1,0,1,target); r(a1,x1,[-2,0],[2,-5],1,[]). v1.1.0
+/// refuses its submit after observe [12, 5] (Bounds).
 pub fn wedge_config(owner: &AccountId, actor: &AccountId, executor: &AccountId) -> Config {
     Config {
         name: "wedge".into(),
@@ -299,6 +412,34 @@ pub fn wedge_config(owner: &AccountId, actor: &AccountId, executor: &AccountId) 
         metrics: vec![metric(0, 0, 10, 5), metric(1, -100, 100, 5)],
         terms: vec![term(1, 0, 1, Shape::Target)],
         recipes: vec![recipe("r", actor, executor, vec![-2, 0], vec![2, -5], 1)],
+        max_age_seconds: 0,
+    }
+}
+
+/// The cure-by-completion hedge of upstream crates/core/src/findings.rs (F-1
+/// fixed): F-1's metrics and term, recipe reserve [0, -1], complete [-3, 0],
+/// max 1. After observe [12, 5] it is admitted ([12, 4]) and its completion
+/// brings metric 0 back into range ([9, 4]).
+pub fn cure_config(owner: &AccountId, actor: &AccountId, executor: &AccountId) -> Config {
+    Config {
+        name: "cure".into(),
+        owner: owner.to_string(),
+        metrics: vec![metric(0, 0, 10, 5), metric(1, -100, 100, 5)],
+        terms: vec![term(1, 0, 1, Shape::Target)],
+        recipes: vec![recipe("r", actor, executor, vec![0, -1], vec![-3, 0], 1)],
+        max_age_seconds: 0,
+    }
+}
+
+/// One record holds one unit of a 10-unit capacity until it ends either way:
+/// upstream integration.rs's window and D-1 configuration.
+pub fn window_config(name: &str, owner: &AccountId, actor: &AccountId, executor: &AccountId) -> Config {
+    Config {
+        name: name.into(),
+        owner: owner.to_string(),
+        metrics: vec![Metric { name: "In flight".into(), unit: "jobs".into(), initial: 0, min: 0, max: 10 }],
+        terms: vec![term(0, 10, 1, Shape::Excess)],
+        recipes: vec![recipe("job", actor, executor, vec![1], vec![-1], 1)],
         max_age_seconds: 0,
     }
 }
@@ -328,15 +469,38 @@ impl Env {
         Env { worker, owner, actor, mallory, lock, exec }
     }
 
+    /// Another pool and executor in the same sandbox (`pool-<tag>`,
+    /// `exec-<tag>`), with the same owner, actor and mallory; nothing
+    /// initialized.
+    pub async fn fresh(&self, tag: &str) -> Env {
+        let lock = deploy(&self.worker, &format!("pool-{tag}"), 50, &contract_wasm()).await;
+        let exec = deploy(&self.worker, &format!("exec-{tag}"), 20, &executor_wasm()).await;
+        Env {
+            worker: self.worker.clone(),
+            owner: self.owner.clone(),
+            actor: self.actor.clone(),
+            mallory: self.mallory.clone(),
+            lock,
+            exec,
+        }
+    }
+
     /// `bare` plus `new` on both contracts, each called by its own account
     /// (both are #[private]); checks the initial state against Pool::new.
     pub async fn init(self, cfg: &Config) -> Env {
+        let operator = self.owner.id().clone();
+        self.init_with(cfg, &operator).await
+    }
+
+    /// `init` with the executor's operator `operator` (RT-D1 keeps it apart
+    /// from the owner).
+    pub async fn init_with(self, cfg: &Config, operator: &AccountId) -> Env {
         ok(self.lock.as_account(), self.lock.id(), "new", json!({ "config": cfg })).await;
         ok(
             self.exec.as_account(),
             self.exec.id(),
             "new",
-            json!({ "lock": self.lock.id(), "operator": self.owner.id() }),
+            json!({ "lock": self.lock.id(), "operator": operator }),
         )
         .await;
         let p = pool(&self.lock).await;
@@ -389,7 +553,19 @@ impl Env {
     }
 
     pub async fn status(&self, id: u32) -> Status {
-        self.pool().await.records[id as usize].status.clone()
+        self.pool().await.record(id).unwrap().status.clone()
+    }
+
+    pub async fn jobs(&self) -> Vec<ExecJob> {
+        jobs(&self.exec).await
+    }
+
+    pub async fn newest(&self) -> u32 {
+        exec_state(&self.worker, self.exec.id()).await.newest
+    }
+
+    pub async fn raw_exec(&self) -> HashMap<Vec<u8>, Vec<u8>> {
+        raw_state(&self.worker, self.exec.id()).await
     }
 }
 
@@ -399,9 +575,16 @@ pub fn summary(p: &Pool) -> Value {
     for c in &p.records {
         *by_status.entry(format!("{:?}", c.status)).or_default() += 1;
     }
-    json!({ "values": p.values, "version": p.version, "paused": p.paused, "records": p.records.len(), "by_status": by_status })
+    json!({ "values": p.values, "version": p.version, "paused": p.paused, "records": p.records.len(), "first_id": p.first_id, "completed_units": p.completed_units, "by_status": by_status })
 }
 
 pub fn commitment(p: &Pool, id: u32) -> Commitment {
-    p.records[id as usize].clone()
+    p.record(id).unwrap().clone()
+}
+
+/// (receipt successes on the executor, on the lock) of a transaction, in the
+/// order the RPC lists them (upstream integration.rs's `on`).
+pub fn shape(r: &ExecutionFinalResult, exec: &AccountId, lock: &AccountId) -> (Vec<bool>, Vec<bool>) {
+    let on = |a: &AccountId| receipts_on(r, a).iter().map(|o| o.is_success()).collect::<Vec<bool>>();
+    (on(exec), on(lock))
 }

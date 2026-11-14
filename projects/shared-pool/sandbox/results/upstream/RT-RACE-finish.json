@@ -8,59 +8,59 @@
         "settle": null
       },
       "delay_ms": 0,
-      "order": "finish before execute: rejected (WebAssembly trap: An `unreachable` opcode was executed.); finished afterwards",
+      "order": "finish before execute: rejected (panicked at crates/executor/src/lib.rs:114:14:\nunknown job); finished afterwards",
       "version_delta_dispatch_to_terminal": 3
     },
     {
       "attempt": 1,
       "blocks": {
-        "callback": 43,
-        "execute": 42,
+        "callback": 44,
+        "execute": 43,
         "settle": null
       },
       "delay_ms": 150,
-      "order": "finish before execute: rejected (WebAssembly trap: An `unreachable` opcode was executed.); finished afterwards",
+      "order": "finish before execute: rejected (panicked at crates/executor/src/lib.rs:114:14:\nunknown job); finished afterwards",
       "version_delta_dispatch_to_terminal": 3
     },
     {
       "attempt": 2,
       "blocks": {
-        "callback": 55,
-        "execute": 54,
+        "callback": 58,
+        "execute": 57,
         "settle": null
       },
       "delay_ms": 200,
-      "order": "finish before execute: rejected (WebAssembly trap: An `unreachable` opcode was executed.); finished afterwards",
+      "order": "finish before execute: rejected (panicked at crates/executor/src/lib.rs:114:14:\nunknown job); finished afterwards",
       "version_delta_dispatch_to_terminal": 3
     },
     {
       "attempt": 3,
       "blocks": {
-        "callback": 68,
-        "execute": 67,
+        "callback": 72,
+        "execute": 71,
         "settle": null
       },
       "delay_ms": 225,
-      "order": "finish before execute: rejected (WebAssembly trap: An `unreachable` opcode was executed.); finished afterwards",
+      "order": "finish before execute: rejected (panicked at crates/executor/src/lib.rs:114:14:\nunknown job); finished afterwards",
       "version_delta_dispatch_to_terminal": 3
     },
     {
       "attempt": 4,
       "blocks": {
-        "callback": 81,
-        "execute": 80,
-        "settle": null
+        "callback": 86,
+        "execute": 85,
+        "settle": 87
       },
       "delay_ms": 250,
-      "order": "finish before execute: rejected (WebAssembly trap: An `unreachable` opcode was executed.); finished afterwards",
+      "order": "dispatch, callback, finish->settle",
       "version_delta_dispatch_to_terminal": 3
     },
     {
       "attempt": 5,
       "blocks": {
-        "callback": 94,
-        "execute": 93,
-        "settle": 95
+        "callback": 97,
+        "execute": 96,
+        "settle": 98
       },
       "delay_ms": 275,
       "order": "dispatch, callback, finish->settle",
@@ -69,9 +69,9 @@
     {
       "attempt": 6,
       "blocks": {
-        "callback": 104,
-        "execute": 103,
-        "settle": 105
+        "callback": 107,
+        "execute": 106,
+        "settle": 108
       },
       "delay_ms": 300,
       "order": "dispatch, callback, finish->settle",
@@ -80,9 +80,9 @@
     {
       "attempt": 7,
       "blocks": {
-        "callback": 114,
-        "execute": 113,
-        "settle": 116
+        "callback": 117,
+        "execute": 116,
+        "settle": 119
       },
       "delay_ms": 400,
       "order": "dispatch, callback, finish->settle",
@@ -91,53 +91,53 @@
     {
       "attempt": 8,
       "blocks": {
-        "callback": 125,
-        "execute": 124,
+        "callback": 128,
+        "execute": 127,
         "settle": null
       },
       "delay_ms": 0,
-      "order": "finish before execute: rejected (WebAssembly trap: An `unreachable` opcode was executed.); finished afterwards",
+      "order": "finish before execute: rejected (panicked at crates/executor/src/lib.rs:114:14:\nunknown job); finished afterwards",
       "version_delta_dispatch_to_terminal": 3
     },
     {
       "attempt": 9,
       "blocks": {
-        "callback": 137,
-        "execute": 136,
+        "callback": 141,
+        "execute": 140,
         "settle": null
       },
       "delay_ms": 150,
-      "order": "finish before execute: rejected (WebAssembly trap: An `unreachable` opcode was executed.); finished afterwards",
+      "order": "finish before execute: rejected (panicked at crates/executor/src/lib.rs:114:14:\nunknown job); finished afterwards",
       "version_delta_dispatch_to_terminal": 3
     },
     {
       "attempt": 10,
       "blocks": {
-        "callback": 150,
-        "execute": 149,
+        "callback": 155,
+        "execute": 154,
         "settle": null
       },
       "delay_ms": 200,
-      "order": "finish before execute: rejected (WebAssembly trap: An `unreachable` opcode was executed.); finished afterwards",
+      "order": "finish before execute: rejected (panicked at crates/executor/src/lib.rs:114:14:\nunknown job); finished afterwards",
       "version_delta_dispatch_to_terminal": 3
     },
     {
       "attempt": 11,
       "blocks": {
-        "callback": 163,
-        "execute": 162,
+        "callback": 169,
+        "execute": 168,
         "settle": null
       },
       "delay_ms": 225,
-      "order": "finish before execute: rejected (WebAssembly trap: An `unreachable` opcode was executed.); finished afterwards",
+      "order": "finish before execute: rejected (panicked at crates/executor/src/lib.rs:114:14:\nunknown job); finished afterwards",
       "version_delta_dispatch_to_terminal": 3
     },
     {
       "attempt": 12,
       "blocks": {
-        "callback": 176,
-        "execute": 175,
-        "settle": 177
+        "callback": 183,
+        "execute": 182,
+        "settle": 184
       },
       "delay_ms": 250,
       "order": "dispatch, callback, finish->settle",
@@ -146,9 +146,9 @@
     {
       "attempt": 13,
       "blocks": {
-        "callback": 186,
-        "execute": 185,
-        "settle": 187
+        "callback": 193,
+        "execute": 192,
+        "settle": 194
       },
       "delay_ms": 275,
       "order": "dispatch, callback, finish->settle",
@@ -157,9 +157,9 @@
     {
       "attempt": 14,
       "blocks": {
-        "callback": 196,
-        "execute": 195,
-        "settle": 197
+        "callback": 203,
+        "execute": 202,
+        "settle": 204
       },
       "delay_ms": 300,
       "order": "dispatch, callback, finish->settle",
@@ -168,9 +168,9 @@
     {
       "attempt": 15,
       "blocks": {
-        "callback": 206,
-        "execute": 205,
-        "settle": 208
+        "callback": 213,
+        "execute": 212,
+        "settle": 215
       },
       "delay_ms": 400,
       "order": "dispatch, callback, finish->settle",
@@ -178,14 +178,23 @@
     }
   ],
   "counts": {
-    "callback_first": 7,
-    "finish_before_execute": 9
+    "callback_first": 8,
+    "finish_before_execute": 8
   },
   "executor": "upstream pool_executor, operator finish",
+  "finish_receipts_ok": {
+    "executor": [
+      true,
+      true
+    ],
+    "lock": [
+      true
+    ]
+  },
   "near_sandbox": "2.13.4 (near-workspaces 0.23.0 / near-sandbox 0.3.16 default)",
   "note": "single shard: finish's notify is created after execute's data receipt, so the callback runs first",
-  "pool_contract_sha256": "8ddc9280c63157636fede6f201ebff30ef528307092ad21914730c00df380f7c",
-  "pool_executor_sha256": "ca76c3caf0505ab7fdb43ab3ecaef6234472eec94bb4256679e69c5a4785b0e5",
+  "pool_contract_sha256": "e6383aabed62dcf694ac2f97da4520a019b18c9db637b1ee2afc7180c697e2ea",
+  "pool_executor_sha256": "b92f146919be69f36f517edc10f1e04e6ee96430ba0d745e4422132615634e83",
   "property": "RT-RACE",
   "wasm_variant": "upstream"
 }

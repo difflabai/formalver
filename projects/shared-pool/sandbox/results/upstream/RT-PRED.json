@@ -26,31 +26,31 @@
     {
       "case": "actor.test.near signs relay.forward(dispatch)",
       "core": "Unauthorized",
-      "observed_panic": "WebAssembly trap: An `unreachable` opcode was executed.",
+      "observed_panic": "Unauthorized",
       "storage_unchanged": true
     },
     {
       "case": "actor.test.near signs relay.forward(cancel)",
       "core": "Unauthorized",
-      "observed_panic": "WebAssembly trap: An `unreachable` opcode was executed.",
+      "observed_panic": "Unauthorized",
       "storage_unchanged": true
     },
     {
       "case": "exec.test.near signs relay.forward(settle)",
       "core": "Unauthorized",
-      "observed_panic": "WebAssembly trap: An `unreachable` opcode was executed.",
+      "observed_panic": "Unauthorized",
       "storage_unchanged": true
     },
     {
       "case": "owner.test.near signs relay.forward(set_paused)",
       "core": "Unauthorized",
-      "observed_panic": "WebAssembly trap: An `unreachable` opcode was executed.",
+      "observed_panic": "Unauthorized",
       "storage_unchanged": true
     },
     {
       "case": "owner.test.near signs relay.forward(observe)",
       "core": "Unauthorized",
-      "observed_panic": "WebAssembly trap: An `unreachable` opcode was executed.",
+      "observed_panic": "Unauthorized",
       "storage_unchanged": true
     },
     {
@@ -59,8 +59,8 @@
     }
   ],
   "near_sandbox": "2.13.4 (near-workspaces 0.23.0 / near-sandbox 0.3.16 default)",
-  "pool_contract_sha256": "8ddc9280c63157636fede6f201ebff30ef528307092ad21914730c00df380f7c",
-  "pool_executor_sha256": "ca76c3caf0505ab7fdb43ab3ecaef6234472eec94bb4256679e69c5a4785b0e5",
+  "pool_contract_sha256": "e6383aabed62dcf694ac2f97da4520a019b18c9db637b1ee2afc7180c697e2ea",
+  "pool_executor_sha256": "b92f146919be69f36f517edc10f1e04e6ee96430ba0d745e4422132615634e83",
   "property": "RT-PRED",
   "result": "pass",
   "wasm_variant": "upstream"
