@@ -1,11 +1,16 @@
 # shared-pool CI: the layers of projects/shared-pool against the pinned
 # shared-pool-controls commit (status.toml pinned_commit, 57b3f02: the merge
-# commit of upstream PR #4 on main, shared-pool-controls v1.1.0). The v1.1.0
-# re-verification is in progress: the layers still hold v1.0.0's artifacts
-# (pin a4bb5c3, PR #31, tag shared-pool-v1.0.0) until each is re-done, so
-# jobs that check those artifacts against the new pin (kani-record first)
-# fail until then. The pin job fails unless PR #4's head 6fcbd56 holds the
-# pin's code byte for byte (status.toml [project] identity).
+# commit of upstream PR #4 on main, shared-pool-controls v1.1.0). The pin
+# job fails unless PR #4's head 6fcbd56, where the fixes were reviewed,
+# holds the pin's code byte for byte (status.toml [project] identity).
+# Conformance, TLA+, Lean, Prolog, near-tests and the sandbox are re-done
+# for v1.1.0 (each layer's RESULTS.md). Kani is not yet: kani/RESULTS.md,
+# the local record (kani/local) and the kani, kani-large, kani-mutants and
+# kani-mutants-large matrices still hold v1.0.0's harnesses and mutants, so
+# the Kani jobs that check them against the pin (kani-record first) fail
+# until the v1.1.0 record is committed. The v1.0.0 verification (pin
+# a4bb5c3) is on PR #31's branch, its layer results at commit a072a2d; it
+# is to be tagged shared-pool-v1.0.0 when #31 merges.
 # Each layer has its own runner, projects/shared-pool/<layer>/run.sh (exit 0 =
 # every check passes, vacuity guards included); the jobs below call them.
 # The Kani jobs (plain, mutants, kani, kani-large, kani-record, covers,
@@ -1057,11 +1062,17 @@ jobs:
           retention-days: 14
 
   tla:
-    # TLA-SAFE and the TLA-WIT witnesses (MC_Safety), LIVE-2 on the completion
-    # path and its required failures (TLA-LIVE-1, TLA-LIVE-F1, TLA-LIVE-F2),
-    # REF-5 (TraceCheck replays every conformance trace), then the 31 spec
-    # mutants. TLA-IND (Apalache) is not implemented; run.sh would print skip.
-    # On a 10-core Mac: 573 s for safety liveness trace, 150 s for mutants.
+    # TLA-SAFE (MC_Safety, MC_Recovery, MC_F2b), TLA-CAP (MC_Cap) and the 20
+    # TLA-WIT witnesses; LIVE-2 and WIN-LIVE in seven liveness configs
+    # (TLA-LIVE-1, TLA-LIVE-F1 and TLA-LIVE-F2 now hold, and LIVE-2 without
+    # fairness must fail); REF-5 (TraceCheck replays the 216 conformance
+    # traces). Then TLA-EXEC (Executor.tla) and the 52 spec mutants (46 core,
+    # 6 executor). TLA-IND (Apalache) is not implemented; run.sh would print
+    # skip. On a 10-core Mac shared with other jobs, 4 workers
+    # (tla/RESULTS.md): 5 min 8 s for safety liveness trace (MC_Safety
+    # 181 s, trace 9 s), 6 min 57 s (417 s) for mutants; the executor step
+    # below. About 17 to 18 minutes in all; the timeout leaves room for a
+    # slower hosted runner.
     needs: pin
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 120
@@ -1088,7 +1099,8 @@ jobs:
         run: projects/shared-pool/tla/run.sh safety liveness trace
       - name: Executor model (TLA-EXEC)
         # The unmutated Executor.tla must hold before its mutants (49-54)
-        # count as killed. About 6 min on a 10-core Mac.
+        # count as killed. WINDOW 2 (86 s) and WINDOW 3 (184 s) on a 10-core
+        # Mac (tla/RESULTS.md), then its 12 witnesses: about 5 to 6 minutes.
         env:
           TLA_HEAP: ${{ runner.environment == 'github-hosted' && '5g' || '12g' }}
           TLA_LOG_DIR: ${{ runner.temp }}/tla-logs
@@ -1109,10 +1121,14 @@ jobs:
           retention-days: 14
 
   lean:
-    # LEAN-IND, LEAN-STEP, LEAN-LIVE1 and LEAN-GUARD for states of every size,
-    # LEAN-WIT (F-1 proved permanent), the axiom audit, the canaries, REF-5L
-    # (every conformance trace on the Lean machine) and the 16 mutants.
-    # 227 s on a 10-core Mac, most of it the mutants.
+    # LEAN-IND (Inv with INV-RES, INV-VERCAP, WIN-1 and WIN-2), LEAN-STEP,
+    # LEAN-LIVE-ALL, LEAN-LIVE1 and LEAN-GUARD for states of every size,
+    # LEAN-WIT, the axiom audit (65 headline theorems), the canaries (False,
+    # NotInv and LiveAllNoRes must fail to compile), the F-5 regression
+    # (Live1NoPremise must compile), REF-5L (every conformance trace on the
+    # Lean machine) and the 26 mutants (16 re-anchored from v1.0.0, 10 that
+    # each restore a v1.0.0 behaviour). 185 s on a 10-core Mac
+    # (lean/RESULTS.md), most of it the mutants.
     needs: pin
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 60
@@ -1144,17 +1160,19 @@ jobs:
           retention-days: 14
 
   prolog:
-    # Requirement checks C-1..C-6, MC-1 (three small universes), MC-2 (every
+    # Requirement checks C-1..C-6, MC-1 (seven small universes), MC-2 (every
     # conformance trace through step/4), COV-2 (test_reads: the core's
     # preview and best_quantity in traces/reads.txt against the model), the
-    # canaries, the PROP tags and the 33 mutants (the 2 reads mutants patch
-    # the core and rebuild the conformance generator with cargo).
+    # canaries, the PROP tags and the 47 mutants (32 model, 2 requirements,
+    # 11 code and 2 reads; the reads mutants patch the core and rebuild the
+    # conformance generator with cargo).
     # extract.py reads the pinned sources, so this job needs the submodule.
     # C-6 compares the catalogue in traceability.pl with section 5 of
     # projects/shared-pool/strategy.md (the path filters include that file
-    # again); a missing file or section fails it. About 30 minutes on a
-    # 10-core Mac (v1.0.0: 511 s), most of it the MC-1 mutants; the timeout
-    # leaves room for slower hosted runners.
+    # again); a missing file or section fails it. 1,777 s, about 30 minutes,
+    # on a 10-core Mac shared with other jobs (prolog/RESULTS.md; v1.0.0:
+    # 511 s), most of it the MC-1 mutants; the timeout leaves room for
+    # slower hosted runners.
     needs: pin
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 120
@@ -1203,12 +1221,16 @@ jobs:
 
   near-unit:
     # The near-sdk shell on near-sdk's mocked runtime (near-tests/run.sh all):
-    # 29 tests on the host path and on two wasm builds run by wasmi (plain
-    # cargo, exactly upstream scripts/build.sh, and --cfg near), every
-    # conformance trace through the shell included; the wasm surface (SURF-1;
-    # SURF-2 is the known finding NT-F3, reported expected-fail); the 21 shell
-    # mutants. Both wasm builds are plain cargo builds: no cargo-near.
-    # On a 10-core Mac: about 1 min of tests and 9 min of mutants, warm.
+    # the PROP tag check (check-tags.py), then 38 tests on the host path and
+    # on the documented wasm build run by wasmi (upstream scripts/build.sh,
+    # RUSTFLAGS="--cfg near"), every conformance trace through the shell
+    # included; the wasm surface (SURF-1, SURF-2 and SURF-3 must all pass:
+    # NT-F3 is fixed in v1.1.0); the 41 shell mutants (s01-s38 with s32a and
+    # s32b, and s00a/s00b, the v1.0.0 contract and executor). A second wasm
+    # build without --cfg near is only the NT-F1 negative control
+    # (nt_f1_* and SURF-3(b)). Both are plain cargo builds: no cargo-near.
+    # On a 10-core Mac: about 22 minutes, 21 of them the mutants
+    # (near-tests/RESULTS.md).
     needs: pin
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 120
@@ -1251,12 +1273,17 @@ jobs:
 
   sandbox:
     # The real wasm on a local near-sandbox 2.13.4 (sandbox/run.sh): the
-    # lockfile rule, both wasm variants (upstream and cfg-near), RT-PRED,
-    # RT-PRIVATE, RT-CALLBACK, RT-REVERT, RT-RACE, RT-WEDGE (F-1), the SB-1
-    # witness, and RES-1 at the 256-record state. Manual dispatch only, with
-    # the `sandbox` input. 438 s warm on a 10-core Mac before the second
-    # RES-1 test, which adds about 9 minutes (sandbox/RESULTS.md, Run
-    # times); a cold build of near-workspaces and the wasm adds more.
+    # lockfile rule, the documented build (upstream scripts/build.sh, which
+    # sets --cfg near; one variant, its artifacts/build.json checked),
+    # RT-PRED, RT-PRIVATE, RT-CALLBACK, RT-REVERT, RT-RACE, RT-WEDGE (F-1 and
+    # F-2 fixed), RT-WINDOW, RT-D1, SB-1 (fixed), and RES-1 at the
+    # 256-record state and at 512 executor jobs. Manual dispatch only, with
+    # the `sandbox` input. 1041 s warm on a 10-core Mac (sandbox/RESULTS.md,
+    # Run times): tests/runtime.rs 509.5 s with 3 test threads, RES-1 523.4 s.
+    # Here a hosted runner runs the runtime tests one at a time, RT-D1
+    # (about 500 s) and RT-WINDOW (about 320 s) among them: an estimated
+    # 17 minutes, then RES-1; a cold build of near-workspaces and the wasm
+    # adds more.
     needs: pin
     if: github.event_name == 'workflow_dispatch' && inputs.sandbox
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
