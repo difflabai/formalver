@@ -1061,6 +1061,14 @@ jobs:
           TLA_LOG_DIR: ${{ runner.temp }}/tla-logs
           TLA_CACHE: ${{ runner.environment != 'github-hosted' && format('{0}/formalver-tla', runner.tool_cache) || '' }}
         run: projects/shared-pool/tla/run.sh safety liveness trace
+      - name: Executor model (TLA-EXEC)
+        # The unmutated Executor.tla must hold before its mutants (49-54)
+        # count as killed. About 6 min on a 10-core Mac.
+        env:
+          TLA_HEAP: ${{ runner.environment == 'github-hosted' && '5g' || '12g' }}
+          TLA_LOG_DIR: ${{ runner.temp }}/tla-logs
+          TLA_CACHE: ${{ runner.environment != 'github-hosted' && format('{0}/formalver-tla', runner.tool_cache) || '' }}
+        run: projects/shared-pool/tla/run.sh executor
       - name: Spec mutants
         env:
           TLA_HEAP: ${{ runner.environment == 'github-hosted' && '5g' || '12g' }}
