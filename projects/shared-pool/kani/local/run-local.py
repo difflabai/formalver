@@ -6,9 +6,10 @@ mutants of .github/workflows/shared-pool.yml (measured peaks above 13 GB,
 which ubuntu-latest cannot hold in memory), each with its matrix timeout as
 KANI_TIMEOUT. Each job is kani/run.sh (`kani <harness>` or
 `mutants --kani 'NN-*'`) from an exact copy of the commit's Kani inputs
-(git archive of projects/shared-pool/kani and conformance/traces/core.txt,
-and of the source-mirror submodule at the commit's gitlink), one copy per
-lane, with its own KANI_LOG_DIR and KEEP_LOGS and KANI_DEFER_COVERS=1. At
+(git archive of projects/shared-pool/kani, conformance/traces/core.txt and
+the repository's .cargo/config[.toml] above kani/ if it has any, and of
+the source-mirror submodule at the commit's gitlink), one copy per lane,
+with its own KANI_LOG_DIR and KEEP_LOGS and KANI_DEFER_COVERS=1. At
 most --lanes jobs run at once, and only while their measured peaks
 (kani/RESULTS.md) sum to at most --budget-gb; the longest start first.
 Memory is sampled every 3 s: the run.sh process tree and its largest cbmc
@@ -22,9 +23,12 @@ when a variable that changes what run.sh runs or how cargo builds is set
 (KANI, KANI_FLAGS, KANI_MOD, RUSTFLAGS, CARGO_ENCODED_RUSTFLAGS,
 RUSTUP_TOOLCHAIN, RUSTC, RUSTC_WRAPPER, RUSTC_WORKSPACE_WRAPPER,
 CARGO_BUILD_*, CARGO_PROFILE_*, CARGO_TARGET_*_RUSTFLAGS), or when a cargo
-configuration file outside the Kani tree (CARGO_HOME's, or a .cargo/ above
-the run directory or TMPDIR) sets rustflags, rustc or a wrapper, or a
-profile. env.txt records the other KANI_* variables and those files.
+configuration file outside the lanes (CARGO_HOME's, or a .cargo/ above the
+run directory or TMPDIR) sets rustflags, rustc or a wrapper, or a profile.
+That includes the work tree's own (such as kani/.cargo/config.toml) when
+the run directory is inside the repository, the default: cargo would read
+it on top of the lane's copy of the commit's. Then pass --out outside the
+repository. env.txt records the other KANI_* variables and those files.
 
 usage: run-local.py [--out DIR] [--rev REV] [--lanes N] [--budget-gb GB]
                     [--record] [--dry-run]
@@ -150,11 +154,11 @@ def cargo_configs(*dirs):
     return seen
 
 
-def make_lane(lane, commit, core):
-    """An exact copy of the commit's Kani inputs at lane/."""
+def make_lane(lane, commit, core, cargo_above):
+    """An exact copy of the commit's Kani inputs at lane/ (cargo_above: its .cargo/config[.toml] above kani/)."""
     os.makedirs(lane)
     a = subprocess.Popen(["git", "-C", ROOT, "archive", "--format=tar", commit, SP + "/kani",
-                          SP + "/conformance/traces/core.txt"], stdout=subprocess.PIPE)
+                          SP + "/conformance/traces/core.txt"] + cargo_above, stdout=subprocess.PIPE)
     subprocess.run(["tar", "-x", "-C", lane], stdin=a.stdout, check=True)
     if a.wait() != 0:
         sys.exit("run-local.py: git archive %s failed" % commit)
@@ -257,9 +261,18 @@ def main():
         with open(p) as f:
             if CARGO_BUILD_KEYS.search(f.read()):
                 bad.append(p)
+    in_repo = [p for p in bad if p.startswith(ROOT + os.sep)]
+    if in_repo:
+        # The lanes have the commit's copies (fingerprinted); cargo would
+        # read the work tree's above them as well.
+        sys.exit("run-local.py: %s set rustflags, rustc or a wrapper, or a profile, and are in the work tree above "
+                 "the run directory %s, so cargo would read them in every lane; the lanes have %s's own cargo "
+                 "configuration (the fingerprinted one) from git archive: pass --out outside the repository and "
+                 "start again" % (", ".join(in_repo), out, commit[:12]))
     if bad:
         sys.exit("run-local.py: %s set rustflags, rustc or a wrapper, or a profile, for the run's builds; the record's "
                  "fingerprint does not see them: move them aside and start again" % ", ".join(bad))
+    cargo_above = sh(sys.executable, "-I", CHECK, "cargo-configs", commit).splitlines()
     kani_env = " ".join("%s=%s" % (k, os.environ[k]) for k in sorted(os.environ)
                         if k.startswith("KANI_") and k not in OWN_ENV) or "none"
 
@@ -288,7 +301,7 @@ def main():
     os.makedirs(os.path.join(out, "logs"))
     lanes = ["lane%d" % i for i in range(1, a.lanes + 1)]
     for lane in lanes:
-        make_lane(os.path.join(out, "lanes", lane), commit, core)
+        make_lane(os.path.join(out, "lanes", lane), commit, core, cargo_above)
     with open(os.path.join(out, "env.txt"), "w") as f:
         f.write("commit %s\nkani-tree %s\ncore-pin %s\nkani %s\nCBMC %s\ncbmc %s\nrustc %s\nhost %s\n"
                 "lanes %d\nbudget-gb %g\nkani-max-gb %s\nkani-env %s\ncargo-config %s\n"

@@ -309,7 +309,8 @@ checks that:
   inputs are every file under `kani/` except `kani/local` and the
   Markdown, with the git object ids of `kani/src`, `Cargo.toml`,
   `Cargo.lock`, `mutants`, `run.sh` and `.gitignore` on lines of their
-  own, the core's gitlink and `conformance/traces/core.txt`, and
+  own, the core's gitlink and `conformance/traces/core.txt`, the
+  repository's `.cargo/config[.toml]` above `kani/` (none here), and
   `tools/versions.env`'s `KANI` and `CBMC`;
 - `jobs.tsv` and `covers.tsv` match the digest in `provenance.txt`, and
   the fingerprint is the hash of the record's input lines and, where the
@@ -323,8 +324,10 @@ checks that:
 
 A change to any Kani input fails that job until
 `kani/local/run-local.py --record` has been run at the new commit and
-the record committed (or, on a `KANI_RUNNER`, until the run's
-`kani-large` and `kani-mutants-large` jobs verify all it records). The
+the record committed. On a `KANI_RUNNER`, a run whose `kani-large` and
+`kani-mutants-large` jobs verify all it records passes with a warning,
+but `kani-mutants-large` runs only on a manual run with `mutants`, so
+pull requests and pushes still need the new record. The
 `covers` job checks the record's covers with the groups'. CI cannot
 check that the run took place as recorded: the record, like the tables
 above, rests on the word of whoever ran it. Anyone with a 64 GB machine

@@ -186,9 +186,11 @@ bad() { rm -rf "$t/r"; cp -R "$t/good" "$t/r"; }
 expect 1 "no record" "no local Kani record" run_check "$t/empty"
 
 # Commits with other Kani inputs, in the scratch object directory: HEAD plus
-# kani/.cargo/config.toml (a new file, which can set rustflags), HEAD with
-# kani/run.sh changed, and HEAD with only the Markdown and kani/local
-# changed. at <commit> <command...>: the check compares with that commit.
+# kani/.cargo/config.toml (a new file, which can set rustflags), HEAD plus a
+# .cargo/config.toml at the repository's root (above kani/, which cargo also
+# reads), HEAD with kani/run.sh changed, and HEAD with only the Markdown and
+# kani/local changed. at <commit> <command...>: the check compares with that
+# commit.
 objs="$t/objects"; mkdir -p "$objs"
 alt="$(cd "$root" && cd "$(git rev-parse --git-common-dir)" && pwd)/objects"
 sgit() {
@@ -209,11 +211,14 @@ at() { local rev=$1; shift; KANI_RECORD_REV=$rev GIT_OBJECT_DIRECTORY=$objs GIT_
 k=projects/shared-pool/kani
 c_cfg=$(commit_with "$k/.cargo/config.toml" '[build]
 rustflags = ["-C", "overflow-checks=off"]')
+c_root=$(commit_with ".cargo/config.toml" '[profile.dev]
+overflow-checks = false')
 c_run=$(commit_with "$k/run.sh" "$(git -C "$root" show "HEAD:$k/run.sh")
 # changed")
 c_doc=$(commit_with "$k/RESULTS.md" "$(git -C "$root" show "HEAD:$k/RESULTS.md")
 more prose" "$k/local/provenance.txt" "another record")
-if [ -z "$c_cfg" ] || [ -z "$c_run" ] || [ -z "$c_doc" ] || [ -n "$(git -C "$root" cat-file -t "$c_cfg" 2>/dev/null)" ]; then
+if [ -z "$c_cfg" ] || [ -z "$c_root" ] || [ -z "$c_run" ] || [ -z "$c_doc" ] ||
+   [ -n "$(git -C "$root" cat-file -t "$c_cfg" 2>/dev/null)" ]; then
   echo "FAIL: could not make the scratch commits (or they reached the repository's objects)"; fail=1
 fi
 cfg_changed='kani/\(all but local, \*\.md\) changed \(projects/shared-pool/kani/\.cargo/config\.toml\)'
@@ -223,10 +228,14 @@ expect 0 "stale with --stale-ok (kani-large and kani-mutants-large run)" "warnin
   at "$c_cfg" run_check "$t/good" "" "" --stale-ok
 expect 0 "stale with --stale-ok-harnesses --stale-ok-mutants" "warning: .*$cfg_changed" \
   at "$c_cfg" run_check "$t/good" "" "" --stale-ok-harnesses --stale-ok-mutants
-expect 1 "stale with --stale-ok-harnesses only (no kani-mutants-large)" "verifies its [0-9]+ mutants \(no kani-mutants-large jobs\)" \
+expect 1 "stale with --stale-ok-harnesses only (no kani-mutants-large)" "verifies its [0-9]+ mutants \(no kani-mutants-large jobs\);.*a manual run with .kani. and .mutants. verifies them" \
   at "$c_cfg" run_check "$t/good" "" "" --stale-ok-harnesses
 expect 1 "stale with --stale-ok-mutants only (no kani-large)" "verifies its [0-9]+ harnesses \(no kani-large jobs\);" \
   at "$c_cfg" run_check "$t/good" "" "" --stale-ok-mutants
+expect 1 "a .cargo/config.toml at the root (above kani/): stale" '\.cargo/config\[\.toml\] above kani/ \(the root, projects, projects/shared-pool\) changed \(\.cargo/config\.toml\)' \
+  at "$c_root" run_check "$t/good"
+[ "$(at "$c_root" "$check" cargo-configs "$c_root")" = .cargo/config.toml ] && [ -z "$("$check" cargo-configs HEAD)" ] ||
+  { echo "FAIL: cargo-configs: not the commit's .cargo/config[.toml] above kani/"; fail=1; }
 expect 1 "kani/run.sh changed: stale" "kani/run.sh, projects/shared-pool/kani/\(all but local, \*\.md\) changed \(projects/shared-pool/kani/run\.sh\)" \
   at "$c_run" run_check "$t/good"
 expect 0 "only the Markdown and kani/local changed: current" "local Kani record ok: .*fingerprint [0-9a-f]{12};" \
@@ -304,10 +313,11 @@ awk -F'\t' 'NF != 3 {bad=1} END {exit bad}' "$t/covers.tsv" && [ "$(wc -l <"$t/c
   { echo "FAIL: covers: not run.sh's covers.tsv format, or check-covers.sh rejects it"; fail=1; }
 
 # The fingerprint: each named input's git object id, the kani/ tree less
-# local/ and the Markdown, and versions.env's KANI and CBMC, in a repository
-# with only those paths. One input changed changes its line(s) and the
-# fingerprint only; a new file under kani/ changes the kani/ line; the
-# Markdown and kani/local change nothing.
+# local/ and the Markdown, the .cargo/config[.toml] files above kani/ (none,
+# then one), and versions.env's KANI and CBMC, in a repository with only
+# those paths. One input changed changes its line(s) and the fingerprint
+# only; a new file under kani/ changes the kani/ line; the Markdown and
+# kani/local change nothing.
 g="$t/repo"
 mkdir -p "$g/projects/shared-pool/kani/src" "$g/projects/shared-pool/kani/mutants" "$g/projects/shared-pool/conformance/traces" "$g/tools"
 ( cd "$g" && git init -q && git config user.email t@example.invalid && git config user.name t &&
@@ -322,18 +332,24 @@ mkdir -p "$g/projects/shared-pool/kani/src" "$g/projects/shared-pool/kani/mutant
   mkdir projects/shared-pool/kani/.cargo && echo '[build]' >projects/shared-pool/kani/.cargo/config.toml &&
   git add projects/shared-pool/kani/.cargo && git commit -qm four &&
   echo more >>projects/shared-pool/kani/RESULTS.md && mkdir projects/shared-pool/kani/local &&
-  echo record >projects/shared-pool/kani/local/provenance.txt && git add projects/shared-pool/kani && git commit -qm five ) ||
+  echo record >projects/shared-pool/kani/local/provenance.txt && git add projects/shared-pool/kani && git commit -qm five &&
+  mkdir projects/shared-pool/.cargo && echo '[build]' >projects/shared-pool/.cargo/config &&
+  git add projects/shared-pool/.cargo && git commit -qm six ) ||
   { echo "FAIL: could not build the fingerprint repository"; fail=1; }
 fp() { KANI_RECORD_ROOT="$g" "$check" fingerprint "$1"; }
 changed() { diff <(fp "$1") <(fp "$2") | grep '^>' | cut -f1 | tr '\n' ' '; }
 all='projects/shared-pool/kani/(all but local, *.md)'
-if [ "$(changed HEAD~4 HEAD~3)" != "> projects/shared-pool/kani/run.sh > $all > fingerprint " ] ||
-   [ "$(changed HEAD~3 HEAD~2)" != "> tools/versions.env:KANI > fingerprint " ] ||
-   [ "$(changed HEAD~2 HEAD~1)" != "> $all > fingerprint " ] || [ -n "$(changed HEAD~1 HEAD)" ] ||
-   [ "$(fp HEAD~4 | grep -c .)" != 12 ] || ! fp HEAD | grep -qx "projects/shared-pool/source-mirror$(printf '\t')$(printf '%040d' 1)"; then
+cargo='.cargo/config[.toml] above kani/ (the root, projects, projects/shared-pool)'
+tab=$(printf '\t')
+if [ "$(changed HEAD~5 HEAD~4)" != "> projects/shared-pool/kani/run.sh > $all > fingerprint " ] ||
+   [ "$(changed HEAD~4 HEAD~3)" != "> tools/versions.env:KANI > fingerprint " ] ||
+   [ "$(changed HEAD~3 HEAD~2)" != "> $all > fingerprint " ] || [ -n "$(changed HEAD~2 HEAD~1)" ] ||
+   [ "$(changed HEAD~1 HEAD)" != "> $cargo > fingerprint " ] ||
+   [ "$(fp HEAD~5 | grep -c .)" != 13 ] || ! fp HEAD~1 | grep -qxF "$cargo${tab}none" ||
+   ! fp HEAD | grep -qx "projects/shared-pool/source-mirror$tab$(printf '%040d' 1)"; then
   echo "FAIL: fingerprint: one changed input must change its line(s) and the fingerprint only"
-  for n in 4 3 2 1; do echo "  HEAD~$n to HEAD~$((n - 1)): $(changed "HEAD~$n" "HEAD~$((n - 1))")"; done
-  fp HEAD~4 | sed 's/^/  /'; fail=1
+  for n in 5 4 3 2 1; do echo "  HEAD~$n to HEAD~$((n - 1)): $(changed "HEAD~$n" "HEAD~$((n - 1))")"; done
+  fp HEAD~5 | sed 's/^/  /'; fail=1
 fi
 expect 1 "fingerprint of a missing input" "is not in the repository" env KANI_RECORD_ROOT="$t" "$check" fingerprint HEAD
 

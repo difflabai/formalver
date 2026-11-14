@@ -1028,7 +1028,9 @@ the path filters include it again. `sandbox` runs only on
 take hours, so they and `covers` run only when the change reaches the
 Kani layer: `kani/` (not its Markdown, nor `kani/local/*.py`, the local
 runner and recorder; a change to the record's data counts), the gitlink or
-`.gitmodules`, `conformance/traces/core.txt`, `tools/versions.env`, the
+`.gitmodules`, `conformance/traces/core.txt`, `tools/versions.env`, a
+`.cargo/config[.toml]` at the root, in `projects/` or in
+`projects/shared-pool/` (cargo reads those above the crate too), the
 scripts they call, or the workflow (the `pin` job's `kani` output; a
 manual run sets it with the `kani` input, default on). Every input of the
 local record's fingerprint is among these paths. `plain`, `mutants` and
@@ -1057,12 +1059,14 @@ each job's result, time, peak and limit. The inputs are every file under
 `kani/.cargo/config.toml`, counts), with the git object ids of
 `kani/src`, `Cargo.toml`, `Cargo.lock`, `mutants`, `run.sh` and
 `.gitignore` on lines of their own; the core's gitlink and
-`conformance/traces/core.txt`; and `tools/versions.env`'s `KANI` and
-`CBMC`. `run-local.py` refuses to run when the environment or a cargo
-configuration file outside the Kani tree sets something that changes a
-verdict but not the fingerprint (`KANI_FLAGS`, `RUSTFLAGS`, a profile,
-and the like). The current record is the run at `89f99d6` on a 10-core,
-64 GB Apple M1 Max (`kani/RESULTS.md`, Local record, which renders it).
+`conformance/traces/core.txt`; the repository's cargo configuration
+above `kani/` (none at the record's commit; `run-local.py` copies it into
+its lanes); and `tools/versions.env`'s `KANI` and `CBMC`. `run-local.py`
+refuses to run when the environment or a cargo configuration file
+outside its lanes sets something that changes a verdict but not the
+fingerprint (`KANI_FLAGS`, `RUSTFLAGS`, a profile, and the like). The
+current record is the run at `89f99d6` on a 10-core, 64 GB Apple M1 Max
+(`kani/RESULTS.md`, Local record, which renders it).
 
 `kani-record` runs on every change, in about a minute and without the
 submodule: the self-test `tools/scripts/test-check-kani-record.sh`, then
@@ -1091,9 +1095,11 @@ swap step. Their runner-size step fails a group whose peak is above the
 runner's memory plus swap, or, on a hosted runner, above its memory. A
 stale record is then only a warning if the run verifies everything it
 records: `kani-large` its harnesses and `kani-mutants-large` (manual,
-`mutants: true`) its mutants. Otherwise it fails as before, so a pull
-request that changes the Kani inputs needs a new record even with
-`KANI_RUNNER`. When `kani-large` runs, `covers` uses the groups' logs
+`mutants: true`) its mutants. Otherwise it fails as before. So a change
+to the Kani inputs needs a new record whatever `KANI_RUNNER` is: until it
+is re-made, `kani-record` fails on every pull request and push, and only
+a manual run with `kani` and `mutants` on `KANI_RUNNER` passes without
+it. When `kani-large` runs, `covers` uses the groups' logs
 alone. The Kani jobs take `KANI_RUNNER`, then
 `CI_RUNNER`, then `ubuntu-latest`, as near-approval's do. Routed runs
 (Dependabot, automated agents) always get `ubuntu-latest`, and so the

@@ -264,7 +264,7 @@ def provenance(env, rows):
          % (env.get("lanes"), env.get("budget-gb"))),
         ("kani_max_gb", env.get("kani-max-gb") or "40 (run.sh's default)"),
         ("kani_env", env.get("kani-env") or "not recorded (the run's other KANI_* variables)"),
-        ("cargo_config", env.get("cargo-config") or "not recorded (cargo configuration outside the Kani tree)"),
+        ("cargo_config", env.get("cargo-config") or "not recorded (cargo configuration outside the lanes)"),
         ("runner", env.get("runner") or "sched.py, the prototype of kani/local/run-local.py (same jobs, lanes "
                                          "and sampling)"),
         ("jobs", "%d harnesses, %d mutants" % (nh, len(rows) - nh)),

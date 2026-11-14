@@ -33,6 +33,10 @@ instead of re-running the large part:
                                            writes them
   check-kani-record.py pathspecs           the inputs as git pathspecs (for
                                            git diff)
+  check-kani-record.py cargo-configs [REV] the repository's .cargo/config[.toml]
+                                           files above kani/ at REV (default
+                                           HEAD; an input, for run-local.py's
+                                           lanes)
   check-kani-record.py matrix JOB          JOB's matrix entries in the
                                            workflow (name, gb, timeout)
   check-kani-record.py harnesses           the recorded harnesses
@@ -75,7 +79,8 @@ RECORD_PY = os.path.join(ROOT, SP, "kani/local/record.py")
 # fingerprint too. The named paths of the crate are in that line and also
 # have their own, which say what changed. Then the pinned core (a gitlink:
 # its commit id), the conformance traces plain mode replays (a mutant's
-# plain verdict), and the tool versions: of versions.env only KANI and CBMC
+# plain verdict), the repository's cargo configuration above kani/
+# (CARGO_ABOVE), and the tool versions: of versions.env only KANI and CBMC
 # (the rest pins other layers' tools; RUST_TOOLCHAIN, plain mode's, is not
 # in it: CI's mutants job reruns every mutant's plain mode on every run).
 KANI_DIR = SP + "/kani"
@@ -91,6 +96,15 @@ INPUT_PATHS = [
     SP + "/conformance/traces/core.txt",
 ]
 INPUT_VERSIONS = ["KANI", "CBMC"]  # tools/versions.env
+# Cargo also reads .cargo/config[.toml] in every directory above the crate,
+# so such a file in the repository above kani/ can set rustflags or a
+# profile for the groups' builds. Those the commit has are one line, "none"
+# when it has none (the record's commit has none); run-local.py copies them
+# into its lanes. Cargo configuration outside the repository (CARGO_HOME's,
+# or above the checkout) is the host's, not in the record: run-local.py
+# refuses one that changes a build.
+CARGO_CONFIGS_ABOVE = [d + ".cargo/" + n for d in ("", "projects/", SP + "/") for n in ("config", "config.toml")]
+CARGO_ABOVE = ".cargo/config[.toml] above kani/ (the root, projects, projects/shared-pool)"
 # The kani and kani-mutants jobs run on ubuntu-latest (16 GB, 15.6 usable):
 # their entries must have peaked at this or less (kani/RESULTS.md).
 IN_MEMORY_GB = 13
@@ -133,6 +147,26 @@ def kani_all(rev):
     return h.hexdigest()
 
 
+def cargo_above_entries(rev):
+    """rev's .cargo/config[.toml] files above kani/: [b"mode type object-id\tpath"]."""
+    r = subprocess.run(["git", "-C", ROOT, "ls-tree", "--full-tree", "-r", "-z", rev, "--"] + CARGO_CONFIGS_ABOVE,
+                       capture_output=True)
+    if r.returncode != 0:
+        raise Fail("%s is not a commit of the repository" % rev)
+    return [e for e in r.stdout.split(b"\0") if e]
+
+
+def cargo_above(rev):
+    """sha256 of rev's .cargo/config[.toml] files above kani/ (mode, type, object id, path), or none."""
+    entries = cargo_above_entries(rev)
+    if not entries:
+        return "none"
+    h = hashlib.sha256()
+    for entry in entries:
+        h.update(entry + b"\n")
+    return h.hexdigest()
+
+
 def fingerprint(rev="HEAD"):
     """[(name, value)], sha256 hex of their lines."""
     lines = []
@@ -143,6 +177,7 @@ def fingerprint(rev="HEAD"):
             raise Fail("%s:%s is not in the repository" % (rev, p))
         lines.append((p, r.stdout.strip()))
     lines.append((KANI_ALL, kani_all(rev)))
+    lines.append((CARGO_ABOVE, cargo_above(rev)))
     env = run(["git", "-C", ROOT, "show", "%s:tools/versions.env" % rev])
     for k in INPUT_VERSIONS:
         m = re.search(r"^%s=(\S+)\s*$" % k, env, re.M)
@@ -155,7 +190,8 @@ def fingerprint(rev="HEAD"):
 def pathspecs():
     """The inputs as git pathspecs: the files fingerprint reads, and versions.env whole."""
     return ([KANI_DIR, ":(exclude)%s/local" % KANI_DIR, ":(exclude)%s/*.md" % KANI_DIR]
-            + [p for p in INPUT_PATHS if not p.startswith(KANI_DIR + "/")] + ["tools/versions.env"])
+            + [p for p in INPUT_PATHS if not p.startswith(KANI_DIR + "/")] + ["tools/versions.env"]
+            + CARGO_CONFIGS_ABOVE)
 
 
 def is_commit(c):
@@ -321,7 +357,12 @@ def check(stale_ok_harnesses, stale_ok_mutants):
         if rec_m and not stale_ok_mutants:
             unverified.append("its %d mutants (no kani-mutants-large jobs)" % len(rec_m))
         if unverified:
-            errs.append(msg + "nothing in this run verifies " + " or ".join(unverified) + "; " + RERUN)
+            # kani-mutants-large runs only on a manual run with `mutants`, so
+            # without a new record a pull request or push fails here even
+            # on KANI_RUNNER.
+            errs.append(msg + "nothing in this run verifies " + " or ".join(unverified) + "; " + RERUN
+                        + (" (on KANI_RUNNER, a manual run with `kani` and `mutants` verifies them instead, for "
+                           "that run only)" if stale_ok_harnesses else ""))
         else:
             warns.append(msg + "this run's kani-large and kani-mutants-large jobs verify what it records; " + RERUN)
     if REV == "HEAD":
@@ -454,6 +495,10 @@ def main(argv):
             return 0
         if args == ["pathspecs"]:
             print("\n".join(pathspecs()))
+            return 0
+        if args[0] == "cargo-configs" and len(args) <= 2:
+            for e in cargo_above_entries(args[1] if len(args) == 2 else "HEAD"):
+                print(e.split(b"\t", 1)[1].decode())
             return 0
         if args[0] == "matrix" and len(args) == 2:
             wf = matrices()

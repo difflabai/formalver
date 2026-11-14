@@ -19,7 +19,7 @@ The split is in `.github/workflows/shared-pool.yml`:
 
 | File | Written by | Contents |
 |---|---|---|
-| `provenance.txt` | `record.py` | The run's provenance as `key<TAB>value` lines: `commit` (the commit run), `kani_tree` (its `projects/shared-pool/kani` tree), one `input<TAB>name<TAB>value` line per Kani input, `fingerprint`, `digest` (sha256 of `jobs.tsv` then `covers.tsv`), `kani`, `cbmc`, `rustc`, `host`, `started`, `finished`, `parallel` (lanes and memory budget), `kani_max_gb`, `kani_env` (the run's other `KANI_*` variables), `cargo_config` (cargo configuration files outside the Kani tree), `runner`, `jobs` (counts). |
+| `provenance.txt` | `record.py` | The run's provenance as `key<TAB>value` lines: `commit` (the commit run), `kani_tree` (its `projects/shared-pool/kani` tree), one `input<TAB>name<TAB>value` line per Kani input, `fingerprint`, `digest` (sha256 of `jobs.tsv` then `covers.tsv`), `kani`, `cbmc`, `rustc`, `host`, `started`, `finished`, `parallel` (lanes and memory budget), `kani_max_gb`, `kani_env` (the run's other `KANI_*` variables), `cargo_config` (the cargo configuration files outside the lanes that `run-local.py` found), `runner`, `jobs` (counts). |
 | `jobs.tsv` | `record.py` | One row per job: `kind` (harness or mutant), `name` (a mutant's full patch name), `result` (`ok`, `ok-FAILED` for `h_canary`; a mutant's expect/plain/kani, such as `killed/killed/killed`), `seconds` (`run.sh`'s time for a harness; the whole job for a mutant), `job_seconds`, `cbmc_peak_gb` (CBMC's largest resident memory, sampled every 3 s), `tree_peak_gb` (the whole `run.sh` process tree), `limit_s` (the job's `KANI_TIMEOUT`, its matrix timeout), `covers` (a harness's "N of M"), `kani_harnesses` (the harnesses a mutant ran), `started_utc`. Harnesses come first, in `run.sh list` order, then mutants by name. |
 | `covers.tsv` | `record.py` | The recorded harnesses' cover results: `family`, `cover`, `status` (`run.sh`'s `covers.tsv`, run with `KANI_DEFER_COVERS=1`) plus the `harness`. The `covers` job checks them with the hosted groups' covers. |
 | `run-local.py` | (source) | Runs the jobs on this machine and, with `--record`, records them. |
@@ -47,6 +47,13 @@ they are unchanged:
   core's commit
 - `projects/shared-pool/conformance/traces/core.txt`: the traces a
   mutant's plain mode replays (`src/conform.rs`)
+- the repository's cargo configuration above `kani/`:
+  `.cargo/config` and `.cargo/config.toml` at the root, in `projects/`
+  and in `projects/shared-pool/`. `kani/` is a standalone workspace, but
+  cargo reads such a file in every directory above the crate, so one
+  that sets `rustflags` or a profile changes the groups' builds. The
+  record's commit has none (the line is `none`). `run-local.py` copies
+  those the commit has into each lane, so a run sees them as CI does.
 - `tools/versions.env`: `KANI` and `CBMC`. The file's other pins are for
   other layers' tools, and `RUST_TOOLCHAIN`, the toolchain of a mutant's
   plain mode, is left out: the record does not cover the plain half of a
@@ -56,8 +63,10 @@ A named path's value is its git object id at the commit (`git rev-parse
 REV:path`): a tree id for a directory, a blob id for a file, a commit id
 for the gitlink. The line `projects/shared-pool/kani/(all but local, *.md)`
 is the sha256 of `git ls-tree -r REV:projects/shared-pool/kani` (each
-file's mode, type, blob id and path), less `local/` and `*.md`. The two
-versions are their values. The fingerprint is the sha256 of the
+file's mode, type, blob id and path), less `local/` and `*.md`. The cargo
+configuration's line is `none`, or the sha256 of those files' `git
+ls-tree` entries when the commit has any. The two versions are their
+values. The fingerprint is the sha256 of the
 `name<TAB>value\n` lines in that order. Git objects are all it reads, so
 CI computes it in a shallow checkout without the submodule:
 
@@ -67,8 +76,9 @@ CI computes it in a shallow checkout without the submodule:
 These do not change the fingerprint: the Markdown, this directory, the
 workflow, and the rest of the repository. The workflow's matrices are
 checked separately (see CI below). Neither do the run's environment and
-the host's cargo configuration, so `run-local.py` refuses those that can
-change a verdict (below).
+the host's cargo configuration outside the repository (`CARGO_HOME`'s,
+or a `.cargo/` above the checkout), so `run-local.py` refuses those that
+can change a verdict (below).
 
 ## Commands
 
@@ -96,8 +106,9 @@ change a verdict (below).
 setup`), the Rust toolchain `RUST_TOOLCHAIN` (`rustup toolchain install
 <RUST_TOOLCHAIN> --profile minimal`) and the submodule (`git submodule
 update --init projects/shared-pool/source-mirror`). It runs `kani/run.sh`
-unchanged in a `git archive` copy of the commit's inputs, one copy per
-lane, with each job's matrix timeout as `KANI_TIMEOUT`,
+unchanged in a `git archive` copy of the commit's inputs (with the
+repository's cargo configuration above `kani/`, if it has any), one copy
+per lane, with each job's matrix timeout as `KANI_TIMEOUT`,
 `KANI_DEFER_COVERS=1`, and `KEEP_LOGS` set to the job's log directory. The
 mutant jobs also get `RUSTUP_TOOLCHAIN=<RUST_TOOLCHAIN>` for their plain
 mode, as CI's `kani-mutants` jobs do. It writes to `kani/target/local-run/`
@@ -109,10 +120,15 @@ It refuses to start when the environment sets a variable that changes what
 `RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`, `RUSTUP_TOOLCHAIN`, `RUSTC`,
 `RUSTC_WRAPPER`, `RUSTC_WORKSPACE_WRAPPER`, `CARGO_BUILD_*`,
 `CARGO_PROFILE_*` or `CARGO_TARGET_*_RUSTFLAGS`. It also refuses when a
-cargo configuration file outside the Kani tree (`CARGO_HOME`'s, or a
+cargo configuration file outside the lanes (`CARGO_HOME`'s, or a
 `.cargo/config[.toml]` above the run directory or `TMPDIR`) sets
-`rustflags`, `rustc` or a wrapper, or a profile. `env.txt` records the
-other `KANI_*` variables (`kani-env`) and those files (`cargo-config`).
+`rustflags`, `rustc` or a wrapper, or a profile. With the default run
+directory, inside the repository, that includes the work tree's own,
+such as `kani/.cargo/config.toml`: cargo would read it on top of the
+lane's copy of the commit's, so a `rustflags` there would apply twice.
+For such a file, pass `--out` outside the repository. `env.txt` records
+the other `KANI_*` variables (`kani-env`) and those files
+(`cargo-config`).
 
 `record.py` refuses a run, leaving the record and RESULTS.md untouched,
 when any of these holds:
@@ -171,9 +187,12 @@ to `ubuntu-latest`, the pin job's `large` output is true. Then
 once. `kani-record` still checks the record, and a stale record is only a
 warning when this run verifies everything it records: `kani-large` its
 harnesses (`--stale-ok-harnesses`) and `kani-mutants-large` its mutants
-(`--stale-ok-mutants`). So a change to the Kani inputs on a pull request
-still needs a new record, since `kani-mutants-large` runs only on manual
-runs. When `kani-large` runs, `covers` uses the groups' covers alone.
+(`--stale-ok-mutants`). `kani-mutants-large` runs only on a manual run
+with `mutants`, so a change to the Kani inputs needs a new record
+whatever `KANI_RUNNER` is: until it is re-made, `kani-record` fails on
+every pull request and push, and passes (with a warning) only on a
+manual run with `kani` and `mutants` on `KANI_RUNNER`, for that run
+alone. When `kani-large` runs, `covers` uses the groups' covers alone.
 
 ## Notes on the recorded run
 

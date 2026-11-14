@@ -29,6 +29,12 @@ on:
       - "tools/scripts/get-tla-tools.sh"
       - "tools/versions.env"
       - ".gitmodules"
+      # Cargo configuration above kani/ (an input of the Kani builds and of
+      # the local record's fingerprint; projects/shared-pool/** has its own).
+      - ".cargo/config"
+      - ".cargo/config.toml"
+      - "projects/.cargo/config"
+      - "projects/.cargo/config.toml"
       - "!**/*.md"
       - "!**/*.mdx"
       - "!**/*.rst"
@@ -52,6 +58,12 @@ on:
       - "tools/scripts/get-tla-tools.sh"
       - "tools/versions.env"
       - ".gitmodules"
+      # Cargo configuration above kani/ (an input of the Kani builds and of
+      # the local record's fingerprint; projects/shared-pool/** has its own).
+      - ".cargo/config"
+      - ".cargo/config.toml"
+      - "projects/.cargo/config"
+      - "projects/.cargo/config.toml"
       - "!**/*.md"
       - "!**/*.mdx"
       - "!**/*.rst"
@@ -129,12 +141,14 @@ jobs:
           # data, which the covers job merges with the groups' covers), the
           # pinned core (the gitlink, .gitmodules), the conformance traces
           # (a mutant's plain mode replays them), the tool versions, the
-          # scripts the Kani jobs call, or this workflow: every input of the
-          # local record's fingerprint among them. plain, mutants and
-          # kani-record (minutes) run on every change. A manual run follows
-          # the `kani` input; a base commit that cannot be read runs the
-          # matrix.
-          re='^(projects/shared-pool/kani/|projects/shared-pool/source-mirror$|projects/shared-pool/conformance/traces/core\.txt$|\.gitmodules$|tools/versions\.env$|tools/scripts/(ci-submodule|check-covers)\.sh$|tools/scripts/check-kani-record\.py$|\.github/workflows/shared-pool\.yml$)'
+          # cargo configuration above kani/ (.cargo/config[.toml] at the
+          # root, projects/ and projects/shared-pool/, which cargo reads
+          # too), the scripts the Kani jobs call, or this workflow: every
+          # input of the local record's fingerprint among them. plain,
+          # mutants and kani-record (minutes) run on every change. A manual
+          # run follows the `kani` input; a base commit that cannot be read
+          # runs the matrix.
+          re='^(projects/shared-pool/kani/|projects/shared-pool/source-mirror$|projects/shared-pool/conformance/traces/core\.txt$|\.gitmodules$|tools/versions\.env$|(projects/(shared-pool/)?)?\.cargo/config(\.toml)?$|tools/scripts/(ci-submodule|check-covers)\.sh$|tools/scripts/check-kani-record\.py$|\.github/workflows/shared-pool\.yml$)'
           kani=true
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
             kani=${KANI_INPUT:-true}
@@ -273,7 +287,8 @@ jobs:
   #   inputs (every file under kani/ but kani/local and the Markdown, with
   #   the git object ids of kani/src, Cargo.toml, Cargo.lock, mutants,
   #   run.sh and .gitignore on their own lines; the source-mirror gitlink
-  #   and conformance/traces/core.txt; versions.env's KANI and CBMC), each
+  #   and conformance/traces/core.txt; the repository's .cargo/config[.toml]
+  #   above kani/, which cargo also reads; versions.env's KANI and CBMC), each
   #   harness's and mutant's result, time, peak and limit, and the
   #   harnesses' covers.
   # kani-large and kani-mutants-large run only when the KANI_RUNNER
@@ -675,7 +690,10 @@ jobs:
     # core's commit). A stale record fails, unless this run verifies all
     # it records on KANI_RUNNER: kani-large its harnesses (the pin job's
     # `kani` and `large`), kani-mutants-large its mutants (`mutants` and
-    # `large`). Then it is a warning.
+    # `large`). Then it is a warning. kani-mutants-large runs only on a
+    # manual run with `mutants`, so a pull request or push that changes a
+    # Kani input fails here until the record is re-made, KANI_RUNNER or
+    # not.
     needs: pin
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
