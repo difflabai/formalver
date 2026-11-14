@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Self-test for check-kani-record.py and kani/local/record.py: a synthetic
+# Self-test for check-kani-record.py, kani/local/record.py and
+# run-local.py's environment and cargo configuration checks: a synthetic
 # finished local run of the kani-large and kani-mutants-large jobs (at HEAD)
 # records and passes the check; an incomplete, failed or foreign run is
 # refused and leaves the record alone; and each kind of stale, wrong or
@@ -382,6 +383,53 @@ if [ "$(changed HEAD~5 HEAD~4)" != "> projects/shared-pool/kani/run.sh > $all > 
   fp HEAD~5 | sed 's/^/  /'; fail=1
 fi
 expect 1 "fingerprint of a missing input" "is not in the repository" env KANI_RECORD_ROOT="$t" "$check" fingerprint HEAD
+
+# --- run-local.py's refusals (--dry-run checks as a run does) ---------------
+# The environment, and the cargo configuration outside the lanes (CARGO_HOME
+# here, and a .cargo/ above the run directory), parsed as TOML: every
+# spelling of rustflags, rustc or a wrapper, a profile, or an include is
+# refused, and so is a file that does not parse; other settings are not.
+runlocal="$root/projects/shared-pool/kani/local/run-local.py"
+mkdir -p "$t/ch" "$t/tmpdir" "$t/above/.cargo"
+dry() { # dry <run dir> [VAR=value...]: a dry run in a clean environment
+  local out=$1; shift
+  env -i PATH="$PATH" HOME="$HOME" CARGO_HOME="$t/ch" TMPDIR="$t/tmpdir" "$@" python3 -I "$runlocal" --dry-run --out "$out"
+}
+ok_dry='^commit [0-9a-f]{12}; [0-9]+ jobs'
+cfg() { printf '%s\n' "$2" >"$t/ch/$1"; }
+expect 0 "run-local.py: no cargo configuration" "$ok_dry" dry "$t/lr"
+while IFS='|' read -r name keys text; do
+  cfg config.toml "$(printf '%b' "$text")"
+  expect 1 "run-local.py: $name" "ch/config\.toml \($keys\) set rustflags, rustc or a wrapper, a profile or an include" \
+    dry "$t/lr"
+done <<'CASES'
+a quoted key in [build]|build\.rustflags|[build]\n"rustflags" = ["-C", "overflow-checks=off"]
+a dotted key|build\.rustflags|build.rustflags = ["-C", "overflow-checks=off"]
+an inline table|build\.rustflags|build = { rustflags = ["-C", "overflow-checks=off"] }
+a target's rustflags|target\."cfg\(unix\)"\.rustflags|[target.'cfg(unix)']\nrustflags = ["-C", "overflow-checks=off"]
+a quoted rustc-wrapper|build\.rustc-wrapper|[build]\n'rustc-wrapper' = "sccache"
+build.rustc|build\.rustc|[build]\nrustc = "/somewhere/rustc"
+a dotted profile key|profile|profile.dev.opt-level = 0
+a profile table|profile|[profile.release]\noverflow-checks = false
+an include|include|include = "other.toml"
+CASES
+cfg config.toml '[build'
+expect 1 "run-local.py: a cargo configuration that does not parse" "unparsable cargo configuration .*ch/config\.toml" dry "$t/lr"
+cfg config.toml '[net]
+offline = true
+[build]
+jobs = 2
+[env]
+RUST_LOG = "rustflags"'
+expect 0 "run-local.py: other cargo settings" "$ok_dry" dry "$t/lr"
+rm "$t/ch/config.toml"; cfg config '[build]
+"rustflags" = ["-C", "overflow-checks=off"]'
+expect 1 "run-local.py: CARGO_HOME/config (no .toml)" "ch/config \(build\.rustflags\) set" dry "$t/lr"
+rm "$t/ch/config"; printf '[profile.dev]\noverflow-checks = false\n' >"$t/above/.cargo/config.toml"
+expect 1 "run-local.py: a .cargo/config.toml above the run directory" "above/\.cargo/config\.toml \(profile\) set" \
+  dry "$t/above/lr"
+expect 0 "run-local.py: ... not above another run directory" "$ok_dry" dry "$t/lr"
+expect 1 "run-local.py: RUSTFLAGS in the environment" "RUSTFLAGS set in the environment" dry "$t/lr" RUSTFLAGS=-Coverflow-checks=off
 
 [ "$fail" = 0 ] && echo "check-kani-record: all cases pass"
 exit "$fail"

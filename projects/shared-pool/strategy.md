@@ -1063,8 +1063,9 @@ each job's result, time, peak and limit. The inputs are every file under
 above `kani/` (none at the record's commit; `run-local.py` copies it into
 its lanes); and `tools/versions.env`'s `KANI` and `CBMC`. `run-local.py`
 refuses to run when the environment or a cargo configuration file
-outside its lanes sets something that changes a verdict but not the
-fingerprint (`KANI_FLAGS`, `RUSTFLAGS`, a profile, and the like). The
+outside its lanes (parsed as TOML, so any spelling of a key counts) sets
+something that changes a verdict but not the fingerprint (`KANI_FLAGS`,
+`RUSTFLAGS`, a profile, and the like). The
 current record is the run at `89f99d6` on a 10-core, 64 GB Apple M1 Max
 (`kani/RESULTS.md`, Local record, which renders it).
 

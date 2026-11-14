@@ -24,11 +24,15 @@ when a variable that changes what run.sh runs or how cargo builds is set
 RUSTUP_TOOLCHAIN, RUSTC, RUSTC_WRAPPER, RUSTC_WORKSPACE_WRAPPER,
 CARGO_BUILD_*, CARGO_PROFILE_*, CARGO_TARGET_*_RUSTFLAGS), or when a cargo
 configuration file outside the lanes (CARGO_HOME's, or a .cargo/ above the
-run directory or TMPDIR) sets rustflags, rustc or a wrapper, or a profile.
-That includes the work tree's own (such as kani/.cargo/config.toml) when
-the run directory is inside the repository, the default: cargo would read
-it on top of the lane's copy of the commit's. Then pass --out outside the
-repository. env.txt records the other KANI_* variables and those files.
+run directory or TMPDIR) sets rustflags, rustc or a wrapper (at any depth,
+such as target.<triple>.rustflags), a profile, or an include. The files
+are parsed as TOML, as cargo reads them, so every spelling of those keys
+(quoted, dotted, an inline table) counts, and one that does not parse is
+refused too. That includes the work tree's own (such as
+kani/.cargo/config.toml) when the run directory is inside the repository,
+the default: cargo would read it on top of the lane's copy of the
+commit's. Then pass --out outside the repository. env.txt records the
+other KANI_* variables and those files.
 
 usage: run-local.py [--out DIR] [--rev REV] [--lanes N] [--budget-gb GB]
                     [--record] [--dry-run]
@@ -36,7 +40,8 @@ usage: run-local.py [--out DIR] [--rev REV] [--lanes N] [--budget-gb GB]
   --rev REV      the commit to run (default HEAD)
   --record       when every job passed, run record.py DIR (writes kani/local;
                  then commit it)
-  --dry-run      print the jobs and exit
+  --dry-run      check the environment and cargo configuration as a run
+                 does, print the jobs and exit
 
 Output, as record.py reads it: env.txt (commit, kani-tree, core-pin, tool
 versions, host, lanes, budget, start and end), jobs.json, progress.log
@@ -45,7 +50,8 @@ peak_tree_gb peak_cbmc_gb est_peak_gb est_secs; a harness's verdict is
 run.sh's result, a mutant's expect/plain/kani with "!" if run.sh flagged it
 UNEXPECTED), logs/<job>/ (stdout.txt, covers.tsv, the Kani and plain logs).
 About 4 hours for the 36 harnesses and 16 mutants on a 10-core, 64 GB Mac
-with the defaults. Needs Kani and its CBMC at tools/versions.env's versions
+with the defaults. Needs Python 3.11 or later (tomllib, for the cargo
+configuration), Kani and its CBMC at tools/versions.env's versions
 (cargo install --locked kani-verifier --version <KANI>; cargo kani setup),
 the Rust toolchain RUST_TOOLCHAIN (rustup toolchain install <RUST_TOOLCHAIN>
 --profile minimal) and the source-mirror submodule (git submodule update
@@ -62,6 +68,11 @@ import subprocess
 import sys
 import time
 
+try:
+    import tomllib
+except ImportError:  # Python < 3.11: build_keys refuses (fails closed)
+    tomllib = None
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
 SP = "projects/shared-pool"
@@ -74,9 +85,12 @@ REFUSED_ENV = re.compile(r"^(KANI|KANI_FLAGS|KANI_MOD|RUSTFLAGS|CARGO_ENCODED_RU
                          r"|CARGO_TARGET_\w+_RUSTFLAGS)$")
 # Set per job by this script.
 OWN_ENV = {"KANI_LOG_DIR", "KANI_DEFER_COVERS", "KANI_TIMEOUT", "KANI_CBMC", "KEEP_LOGS"}
-# A cargo configuration key or table that changes how cargo builds.
-CARGO_BUILD_KEYS = re.compile(r"^\s*(rustflags|rustc|rustc-wrapper|rustc-workspace-wrapper)\s*=|^\s*\[profile[.\]]",
-                              re.M)
+# Cargo configuration keys that change how cargo builds: these at any depth
+# (build.rustflags, target.<triple>.rustflags, ...), and at the top level
+# profile (any profile's settings) and include (another file, which the
+# check would not read).
+BUILD_KEYS = {"rustflags", "rustc", "rustc-wrapper", "rustc-workspace-wrapper"}
+TOP_BUILD_KEYS = {"profile", "include"}
 
 
 def sh(*args, **kw):
@@ -84,6 +98,35 @@ def sh(*args, **kw):
     if r.returncode != 0:
         sys.exit("run-local.py: %s: exit %d: %s" % (" ".join(args), r.returncode, (r.stderr or r.stdout).strip()))
     return r.stdout
+
+
+def build_keys(text):
+    """The key paths (such as build.rustflags) in a cargo configuration file's text that change how cargo builds.
+
+    The text is parsed as TOML, as cargo parses it, so a quoted, dotted or
+    inline-table spelling of a key is the same path. Raises ValueError
+    (tomllib.TOMLDecodeError) when the text is not TOML.
+    """
+    if tomllib is None:
+        sys.exit("run-local.py needs Python 3.11+ (tomllib) to check cargo configuration (%s is %s)"
+                 % (sys.executable, platform.python_version()))
+    found = []
+
+    def name(path):
+        return ".".join(k if re.fullmatch(r"[A-Za-z0-9_-]+", k) else json.dumps(k) for k in path)
+
+    def walk(v, path):
+        if isinstance(v, dict):
+            for k, x in v.items():
+                if k in BUILD_KEYS or (not path and k in TOP_BUILD_KEYS):
+                    found.append(name(path + [k]))
+                else:
+                    walk(x, path + [k])
+        elif isinstance(v, list):
+            for x in v:
+                walk(x, path)
+    walk(tomllib.loads(text), [])
+    return found
 
 
 def now():
@@ -232,19 +275,8 @@ def main():
     jobs = jobs_from_workflow()
     if not jobs:
         sys.exit("run-local.py: no kani-large or kani-mutants-large entries in the workflow")
-    if a.dry_run:
-        print("commit %s; %d jobs (KANI_TIMEOUT, measured peak GB, estimated s):" % (commit[:12], len(jobs)))
-        for j in jobs:
-            print("  %-28s %-8s %5d s  %5.1f GB  %5.0f s  run.sh %s" % (j["name"], j["kind"], j["timeout"], j["peak"],
-                                                                     j["est"], " ".join(j["args"])))
-        return 0
-    if sh("git", "-C", ROOT, "diff", "--name-only", commit, "--",
-          *sh(sys.executable, "-I", CHECK, "pathspecs").splitlines()).strip():
-        print("run-local.py: note: the work tree's Kani inputs differ from %s; the run uses %s's" % (commit[:12],
-              commit[:12]), file=sys.stderr)
-
     # The environment and cargo configuration: nothing the fingerprint does
-    # not see may change a verdict.
+    # not see may change a verdict. A dry run checks them too.
     refused = sorted(k for k, v in os.environ.items() if REFUSED_ENV.match(k) and v != "")
     if refused:
         sys.exit("run-local.py: %s set in the environment, which changes what run.sh runs or how cargo builds; "
@@ -256,22 +288,44 @@ def main():
     if os.path.exists(out):
         sys.exit("run-local.py: %s exists" % out)
     configs = cargo_configs(out, os.environ.get("TMPDIR") or "/tmp")
-    bad = []
+    bad, unparsable = [], []
     for p in configs:
-        with open(p) as f:
-            if CARGO_BUILD_KEYS.search(f.read()):
-                bad.append(p)
-    in_repo = [p for p in bad if p.startswith(ROOT + os.sep)]
+        try:
+            with open(p, "rb") as f:
+                keys = build_keys(f.read().decode("utf-8"))
+        except ValueError as e:  # not TOML (or not UTF-8): cargo would not read it either
+            unparsable.append("%s (%s)" % (p, e))
+            continue
+        if keys:
+            bad.append((p, keys))
+    if unparsable:
+        sys.exit("run-local.py: unparsable cargo configuration %s: cannot tell whether it sets rustflags, rustc or a "
+                 "wrapper, a profile or an include: move it aside and start again" % "; ".join(unparsable))
+
+    def named(ps):
+        return ", ".join("%s (%s)" % (path, ", ".join(ks)) for path, ks in ps)
+    in_repo = [(path, ks) for path, ks in bad if path.startswith(ROOT + os.sep)]
     if in_repo:
         # The lanes have the commit's copies (fingerprinted); cargo would
         # read the work tree's above them as well.
-        sys.exit("run-local.py: %s set rustflags, rustc or a wrapper, or a profile, and are in the work tree above "
-                 "the run directory %s, so cargo would read them in every lane; the lanes have %s's own cargo "
-                 "configuration (the fingerprinted one) from git archive: pass --out outside the repository and "
-                 "start again" % (", ".join(in_repo), out, commit[:12]))
+        sys.exit("run-local.py: %s set rustflags, rustc or a wrapper, a profile or an include, and are in the work "
+                 "tree above the run directory %s, so cargo would read them in every lane; the lanes have %s's own "
+                 "cargo configuration (the fingerprinted one) from git archive: pass --out outside the repository "
+                 "and start again" % (named(in_repo), out, commit[:12]))
     if bad:
-        sys.exit("run-local.py: %s set rustflags, rustc or a wrapper, or a profile, for the run's builds; the record's "
-                 "fingerprint does not see them: move them aside and start again" % ", ".join(bad))
+        sys.exit("run-local.py: %s set rustflags, rustc or a wrapper, a profile or an include, for the run's builds; "
+                 "the record's fingerprint does not see them: move them aside and start again" % named(bad))
+    if a.dry_run:
+        print("commit %s; %d jobs (KANI_TIMEOUT, measured peak GB, estimated s):" % (commit[:12], len(jobs)))
+        for j in jobs:
+            print("  %-28s %-8s %5d s  %5.1f GB  %5.0f s  run.sh %s" % (j["name"], j["kind"], j["timeout"], j["peak"],
+                                                                     j["est"], " ".join(j["args"])))
+        return 0
+    if sh("git", "-C", ROOT, "diff", "--name-only", commit, "--",
+          *sh(sys.executable, "-I", CHECK, "pathspecs").splitlines()).strip():
+        print("run-local.py: note: the work tree's Kani inputs differ from %s; the run uses %s's" % (commit[:12],
+              commit[:12]), file=sys.stderr)
+
     cargo_above = sh(sys.executable, "-I", CHECK, "cargo-configs", commit).splitlines()
     kani_env = " ".join("%s=%s" % (k, os.environ[k]) for k in sorted(os.environ)
                         if k.startswith("KANI_") and k not in OWN_ENV) or "none"

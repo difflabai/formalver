@@ -704,6 +704,21 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+      - name: Python >= 3.11 (tomllib)
+        # The self-test runs kani/local/run-local.py --dry-run, which parses
+        # cargo configuration with tomllib.
+        if: runner.os == 'macOS'
+        run: |
+          python3 -c 'import tomllib' 2>/dev/null && exit 0
+          for py in python3.13 python3.12 python3.11; do
+            if p=$(command -v "$py"); then
+              mkdir -p "$RUNNER_TEMP/python-bin"
+              ln -sf "$p" "$RUNNER_TEMP/python-bin/python3"
+              echo "$RUNNER_TEMP/python-bin" >> "$GITHUB_PATH"
+              exit 0
+            fi
+          done
+          echo "::error::no python3 >= 3.11 on PATH"; exit 1
       - name: Record check self-test
         run: tools/scripts/test-check-kani-record.sh
       - name: The local record is this commit's, ok, and splits the harnesses and mutants with the groups

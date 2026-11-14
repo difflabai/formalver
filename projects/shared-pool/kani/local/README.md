@@ -90,7 +90,8 @@ can change a verdict (below).
     projects/shared-pool/kani/local/run-local.py --record
     git add projects/shared-pool/kani/local projects/shared-pool/kani/RESULTS.md
 
-    # The jobs, without running them:
+    # The jobs, without running them (after the environment and cargo
+    # configuration checks below, as a run makes them):
     projects/shared-pool/kani/local/run-local.py --dry-run
 
     # Record a run directory that has already finished:
@@ -103,7 +104,8 @@ can change a verdict (below).
     tools/scripts/check-kani-record.py
     tools/scripts/test-check-kani-record.sh
 
-`run-local.py` needs Kani and CBMC at `tools/versions.env`'s versions
+`run-local.py` needs Python 3.11 or later (`tomllib`, for the cargo
+configuration check), Kani and CBMC at `tools/versions.env`'s versions
 (`cargo install --locked kani-verifier --version <KANI>; cargo kani
 setup`), the Rust toolchain `RUST_TOOLCHAIN` (`rustup toolchain install
 <RUST_TOOLCHAIN> --profile minimal`) and the submodule (`git submodule
@@ -124,7 +126,12 @@ It refuses to start when the environment sets a variable that changes what
 `CARGO_PROFILE_*` or `CARGO_TARGET_*_RUSTFLAGS`. It also refuses when a
 cargo configuration file outside the lanes (`CARGO_HOME`'s, or a
 `.cargo/config[.toml]` above the run directory or `TMPDIR`) sets
-`rustflags`, `rustc` or a wrapper, or a profile. With the default run
+`rustflags`, `rustc` or a wrapper (at any depth, such as
+`target.<triple>.rustflags`), a profile, or an `include`. It parses each
+file as TOML, as cargo does, so every spelling of a key counts (`[build]`
+then `"rustflags" = ...`, `build.rustflags = ...`, `build = { rustflags =
+... }`), and the error names the keys it found; a file that does not
+parse is refused too. With the default run
 directory, inside the repository, that includes the work tree's own,
 such as `kani/.cargo/config.toml`: cargo would read it on top of the
 lane's copy of the commit's, so a `rustflags` there would apply twice.
