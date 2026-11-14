@@ -12,10 +12,20 @@
 #     the cells and statuses it relies on, or uses a row that is not Kani's,
 #     so the v1.1.0 Kani record (which rewrites the Kani rows) leaves the
 #     cases valid. They need shared-pool's files to pass the lint as they
-#     are (the first expect_sp case).
+#     are, with the catalogue check on (the first expect_sp case and its
+#     summary line: without `catalogue =` the check is silently off).
+# With an argument, only that project's cases run: near-approval.yml runs
+# `near-approval`, so a shared-pool edit cannot fail near-approval's CI;
+# shared-pool.yml runs every case (the generic rules are tested on
+# near-approval's file).
 #
-# usage: tools/scripts/test-check-status.sh
+# usage: tools/scripts/test-check-status.sh [near-approval|shared-pool]
 set -uo pipefail
+only=${1:-}
+case "$only" in
+  "" | near-approval | shared-pool) ;;
+  *) echo "usage: test-check-status.sh [near-approval|shared-pool]" >&2; exit 2 ;;
+esac
 here=$(cd "$(dirname "$0")" && pwd)
 toml="$here/../../projects/near-approval/status.toml"
 sp="$here/../../projects/shared-pool"
@@ -44,6 +54,7 @@ run() {
 # expect <0|1> <name> <python edit of s, near-approval's status.toml> [<pattern>]
 expect() {
   local want=$1 name=$2 edit=$3 pat=${4:-}
+  [ "$only" != shared-pool ] || return 0
   if ! python3 -I -c "import sys
 s=open(sys.argv[1]).read()
 $edit
@@ -146,6 +157,7 @@ expect 1 "finding names no [findings] table" \
 # key, value) an assumption's; move(id, module) moves a property's line.
 expect_sp() {
   local want=$1 name=$2 edit=$3 pat=${4:-}
+  [ "$only" != near-approval ] || return 0
   mkdir -p "$tmp/sp"
   if ! python3 -I -c 'import json, re, sys
 s = open(sys.argv[1]).read()
@@ -203,10 +215,25 @@ open(sys.argv[4], "w").write("\n".join(L))' \
   run "$want" "$name" shared-pool "$tmp/sp/status.toml" "$pat"
 }
 
+# sp_summary <name> <ERE>: the summary line (the last line) of the expect_sp
+# case just run must match.
+sp_summary() {
+  [ "$only" != near-approval ] || return 0
+  if ! tail -n 1 "$tmp/out" | grep -Eq -- "$2"; then
+    echo "FAIL: $1: want a summary line matching /$2/"; sed 's/^/  /' "$tmp/out"; fail=1
+  fi
+}
+
 expect_sp 0 "shared-pool status.toml agrees with strategy.md section 5" "pass"
+# ...with the catalogue check on: deleting `catalogue =` from shared-pool's
+# status.toml would turn it off and still pass.
+sp_summary "shared-pool status.toml keeps [project] catalogue" \
+  '^status-lint: [0-9]+ properties, [0-9]+ assumptions, [0-9]+ findings, [1-9][0-9]* strategy\.md section 5 rows, 0 problem\(s\)$'
 # Without [project] catalogue nothing is compared (near-approval has none).
 expect_sp 0 "no catalogue key, no catalogue check" \
   's = s.replace("\ncatalogue = \"strategy.md\"", "\n#", 1); drop("C-4")'
+sp_summary "no catalogue key, no catalogue summary" \
+  '^status-lint: [0-9]+ properties, [0-9]+ findings, 0 problem\(s\)$'
 expect_sp 1 "catalogue file missing" \
   'assert "catalogue = \"strategy.md\"" in s; s = s.replace("catalogue = \"strategy.md\"", "catalogue = \"nope.md\"", 1)' \
   '^catalogue: nope\.md not found'
@@ -267,6 +294,15 @@ expect_sp 1 "verified-with-assumptions the Status cell does not name" \
   "^SH-2: status 'verified-with-assumptions', but .* records a result at the pin: in-progress$"
 expect_sp 0 "verified-with-assumptions the Status cell names" \
   's = s.replace("spec_reviewer = \"\"", "spec_reviewer = \"someone\"", 1); prop("SH-2", "status", "verified-with-assumptions"); cell("SH-2", -1, "tested; verified-with-assumptions")'
+# The cell's markup and negations.
+expect_sp 1 "in-progress, Status cell \"not tested\"" \
+  'cell("SH-2", -1, "not tested")' \
+  "^SH-2: status 'in-progress', but strategy\.md:[0-9]+ Status 'not tested' records no result: unverified$"
+expect_sp 1 "in-progress, Status cell stale in markup" \
+  'cell("WIN-LIVE", -1, "**stale**; v1.0.0: tested")' \
+  "^WIN-LIVE: status 'in-progress', but .* records a previous release's result, not re-checked at the pin: stale$"
+expect_sp 0 "markup around a result, a level and a word with _ in it" \
+  'prop("ROB-1", "status", "in-progress"); cell("ROB-1", -1, "`bounded proof` (_Kani_, h_rob)"); cell("SH-2", -1, "*tested*"); cell("ASM-EXEC", -1, "**policy**")'
 # Kani rows (ROB-1, Layer(s) kani only): what W13b's record must write.
 expect_sp 1 "Kani row in-progress, Status cell Kani: pending (v1.0.0: ...)" \
   'prop("ROB-1", "status", "in-progress"); cell("ROB-1", -1, "Kani: pending (v1.0.0: bounded proof)")' \
@@ -284,6 +320,9 @@ expect_sp 0 "Kani: pending with no previous result allows unverified" \
 expect_sp 1 "Kani: pending with a previous result needs stale" \
   'prop("ROB-1", "status", "unverified"); cell("ROB-1", -1, "Kani: pending (v1.0.0: bounded proof)")' \
   "^ROB-1: status 'unverified', but .* records a previous release's result, not re-checked at the pin: stale$"
+expect_sp 1 "Kani row in-progress, Status cell no bounded proof" \
+  'prop("ROB-1", "status", "in-progress"); cell("ROB-1", -1, "tested; no bounded proof yet")' \
+  "^ROB-1: status 'in-progress', but .* records no Kani result \(\`bounded proof\`\): unverified$"
 # Assumptions: status and level.
 expect_sp 1 "assumption in-progress, Status cell policy" \
   'asm("ASM-EXEC", "status", "in-progress")' \
@@ -292,5 +331,5 @@ expect_sp 1 "assumption level not the Status cell's" \
   'asm("ASM-EXEC", "level", "high")' \
   "^ASM-EXEC: level 'high', but strategy\.md:[0-9]+ Status 'policy' says 'policy'$"
 
-if [ "$fail" = 0 ]; then echo "check-status self-test ok"; fi
+if [ "$fail" = 0 ]; then echo "check-status self-test ok${only:+ ($only cases only)}"; fi
 exit "$fail"

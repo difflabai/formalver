@@ -39,6 +39,9 @@
 #         model-checked, tested, checked, bounded proof; a Kani row needs
 #         `bounded proof`): in-progress, or a verified* status the cell
 #         names; no result word (open, untested, policy): unverified;
+#       the cell is read without markup (*, ` and _ outside a word), and a
+#         result word right after "not", "no" or "never" ("not tested",
+#         "no bounded proof") is no result;
 #   - an assumption's `level` is the cell's "(high)", "(med)", "(low)" or
 #     leading "policy".
 # In-progress K/V properties are allowed without sign-off: they record that
@@ -209,6 +212,11 @@ NEAR = {"near-tests": {"unit", "difftest", "wasm-check"}}
 PREV = re.compile(r"\(v\d+(?:\.\d+)*:")
 RESULT = re.compile(r"(?<![\w-])(?:proved|model-checked|tested|checked|bounded proof)(?![\w-])")
 BOUNDED = re.compile(r"(?<![\w-])bounded proof(?![\w-])")
+# Markdown emphasis and code marks; "_" only outside a word (f1_forever keeps it).
+MARKUP = re.compile(r"[*`]|(?<![A-Za-z0-9])_+|_+(?![A-Za-z0-9])")
+# A negated result or verified* word: removed before the result is looked for.
+NEGATED = re.compile(r"(?<![\w-])(?:not|no|never)\s+(?:yet\s+)?"
+                     r"(?:proved|model-checked|tested|checked|bounded proof|verified(?:-with-assumptions)?)(?![\w-])")
 
 def md_cells(line):
     # The trimmed cells of "| a | b |"; "\|" inside a cell is not a separator.
@@ -276,12 +284,13 @@ def drop_prev(cell):
 def implied(cell, kani):
     # (statuses the Status cell allows, what it records). kani: the row's
     # primary layer is Kani, or it is an assumption (any `Kani: pending`).
+    cell = MARKUP.sub("", cell)
     pending = kani and "Kani: pending" in cell
     if re.match(r"stale\b", cell) or (pending and re.search(r"Kani: pending \(v\d+(?:\.\d+)*:", cell)):
         return {"stale"}, "a previous release's result, not re-checked at the pin"
     if pending:
         return {"stale", "unverified"}, "`Kani: pending` with no previous result"
-    base = drop_prev(cell)
+    base = NEGATED.sub("", drop_prev(cell))
     if not (BOUNDED if kani == "kani" else RESULT).search(base):
         return {"unverified"}, "no Kani result (`bounded proof`)" if kani == "kani" else "no result"
     named = {v for v in ("verified", "verified-with-assumptions")
@@ -356,9 +365,9 @@ if cat_name:
             a = assumptions.get(rid)
             if not isinstance(a, dict):
                 continue
-            at = f"{cat_name}:{n}"
-            lv = re.search(r"\((high|med|low)\)", cell)
-            lv = lv.group(1) if lv else "policy" if re.match(r"policy\b", cell) else None
+            at, bare = f"{cat_name}:{n}", MARKUP.sub("", cell)
+            lv = re.search(r"\((high|med|low)\)", bare)
+            lv = lv.group(1) if lv else "policy" if re.match(r"policy\b", bare) else None
             if a.get("level") != lv:
                 errors.append(f"{rid}: level {a.get('level')!r}, but {at} Status {cell!r} says {lv!r}")
             ok, says = implied(cell, "assumption")
