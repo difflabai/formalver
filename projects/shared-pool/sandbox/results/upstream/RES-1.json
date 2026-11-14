@@ -441,6 +441,7 @@
   "largest_other_call_receipt": {
     "call": "submit #287 (255 open records, prunes the last Completed record)",
     "docs_api_md_tgas": 14.81,
+    "margin_to_attach_tgas": 15.19,
     "matches_docs": true,
     "tgas": 14.81
   },
@@ -463,7 +464,7 @@
   "result": "pass",
   "seconds": 163,
   "state": {
-    "build_seconds": 163,
+    "build_seconds": 156,
     "built_by": "real transactions only",
     "get_pool_json_bytes_at_full": 53401,
     "max_requires": 31,
@@ -731,7 +732,7 @@
     }
   ],
   "test": "res_1_gas_at_max_state",
-  "thresholds": "docs/api.md:44-59: every pool receipt < 30 Tgas (the attach for submit, cancel, settle, observe, set_paused); promise receipts under their attached gas; on_settled < 6 Tgas",
+  "thresholds": "docs/api.md:44-59: every pool receipt < 30 Tgas (the attach for submit, cancel, settle, observe, set_paused); the largest receipt of those five calls at least 10 Tgas below their 30 Tgas attach (docs/api.md:50); promise receipts under their attached gas; on_settled < 6 Tgas",
   "wasm_variant": "upstream",
   "worst_margin_to_30_tgas": 15.19,
   "worst_pool_receipt_tgas": 14.81

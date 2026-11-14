@@ -34,7 +34,10 @@
 //!
 //! Thresholds (docs/api.md:44-59), asserted: every pool receipt (other than
 //! `new`) under 30 Tgas, the documented attach for submit, cancel, settle,
-//! observe and set_paused; each least prepaid amount at least 10 Tgas below
+//! observe and set_paused, and the largest receipt of those five calls at
+//! least 10 Tgas below it (docs/api.md:50: each Attach is at least 10 Tgas
+//! above the least that succeeded; for calls without promises that is their
+//! largest receipt); each least prepaid amount at least 10 Tgas below
 //! its documented attach (dispatch 100, reconcile 60, finish and
 //! confirm_not_executed 70); every measured on_settled under 6 Tgas
 //! (res1.rs ON_SETTLED_LIMIT); each promise receipt under the gas attached
@@ -61,6 +64,9 @@ const ATTACH_DISPATCH: u64 = 100;
 const ATTACH_RECONCILE: u64 = 60;
 const ATTACH_EXECUTOR: u64 = 70;
 const ATTACH_OTHER: u64 = 30;
+/// docs/api.md:50: each Attach is at least this much above the least that
+/// succeeded (for the calls without promises: their largest receipt).
+const ATTACH_MARGIN_TGAS: u64 = 10;
 /// docs/api.md's "Least that succeeded" column (informational).
 const DOC_MIN_DISPATCH: u64 = 70;
 const DOC_MIN_RECONCILE: u64 = 46;
@@ -327,7 +333,8 @@ fn curve_rows(curve: &[(usize, u32, u64)]) -> Vec<Value> {
 
 /// The largest pool receipt over the rows whose call starts with one of
 /// docs/api.md's "other calls" (no promises): submit, cancel, settle,
-/// observe, set_paused.
+/// observe, set_paused. Asserts docs/api.md:50's rule for their row: the
+/// 30 Tgas attach is at least 10 Tgas above that receipt.
 fn worst_other(gas: &Gas) -> (u64, String) {
     let mut worst = (0, String::new());
     for r in &gas.rows {
@@ -341,6 +348,12 @@ fn worst_other(gas: &Gas) -> (u64, String) {
             }
         }
     }
+    let (g, call) = &worst;
+    assert!(!call.is_empty(), "no submit, cancel, settle, observe or set_paused row");
+    assert!(
+        g + ATTACH_MARGIN_TGAS * TGAS <= ATTACH_OTHER * TGAS,
+        "{call}: a pool receipt burnt {g} gas, not {ATTACH_MARGIN_TGAS} Tgas below the documented attach {ATTACH_OTHER} Tgas"
+    );
     worst
 }
 
@@ -350,6 +363,7 @@ async fn res_1_gas_at_max_state() {
     let t0 = Instant::now();
     let Max { worker, owner, actor, lock, exec, mut reference, a, x, now, expires_at: _, mut gas, curve, state_bytes, storage_usage, json_len, submit_max, get_pool_tx } =
         build_max(t0).await;
+    let build_seconds = t0.elapsed().as_secs();
     let pool_on = [(lock.id(), "pool")];
     // Pool receipts first (the call, then on_result), then the executor's.
     let both = [(lock.id(), "pool"), (exec.id(), "exec")];
@@ -413,8 +427,8 @@ async fn res_1_gas_at_max_state() {
 
     let worst = gas.worst_pool();
     assert!(worst < ATTACH_OTHER * TGAS, "a pool receipt burnt {worst} gas, not under {ATTACH_OTHER} Tgas");
+    // Also asserts the largest of them is at least 10 Tgas under the attach.
     let (other, other_call) = worst_other(&gas);
-    assert!(other < ATTACH_OTHER * TGAS);
     let on_settled_max = on_settled_g.iter().map(|(_, g)| *g).max().unwrap();
     record(
         "RES-1",
@@ -423,15 +437,15 @@ async fn res_1_gas_at_max_state() {
             "test": "res_1_gas_at_max_state",
             "result": "pass",
             "method": "upstream crates/sandbox/tests/res1.rs (v1.1.0) sections A-C, then 300 Tgas measurements of every promise path",
-            "thresholds": "docs/api.md:44-59: every pool receipt < 30 Tgas (the attach for submit, cancel, settle, observe, set_paused); promise receipts under their attached gas; on_settled < 6 Tgas",
+            "thresholds": "docs/api.md:44-59: every pool receipt < 30 Tgas (the attach for submit, cancel, settle, observe, set_paused); the largest receipt of those five calls at least 10 Tgas below their 30 Tgas attach (docs/api.md:50); promise receipts under their attached gas; on_settled < 6 Tgas",
             "state": {
                 "metrics": 32, "terms": 64, "recipes": 32, "max_requires": 31, "records": 256, "open_at_full": 256,
                 "state_bytes_at_full": state_bytes, "storage_usage_bytes_at_full": storage_usage, "get_pool_json_bytes_at_full": json_len,
-                "built_by": "real transactions only", "build_seconds": t0.elapsed().as_secs(),
+                "built_by": "real transactions only", "build_seconds": build_seconds,
             },
             "worst_pool_receipt_tgas": tgas(worst),
             "worst_margin_to_30_tgas": tgas(ATTACH_OTHER * TGAS - worst),
-            "largest_other_call_receipt": { "tgas": tgas(other), "call": other_call, "docs_api_md_tgas": DOC_LARGEST_OTHER_TGAS, "matches_docs": tgas(other) == DOC_LARGEST_OTHER_TGAS },
+            "largest_other_call_receipt": { "tgas": tgas(other), "call": other_call, "margin_to_attach_tgas": tgas(ATTACH_OTHER * TGAS - other), "docs_api_md_tgas": DOC_LARGEST_OTHER_TGAS, "matches_docs": tgas(other) == DOC_LARGEST_OTHER_TGAS },
             "submit_287_pool_receipt_tgas": tgas(submit_max),
             "get_pool_tx_tgas": tgas(get_pool_tx),
             "on_settled_tgas": on_settled_g.iter().map(|(w, g)| json!({ "call": w, "tgas": tgas(*g) })).collect::<Vec<Value>>(),
@@ -531,7 +545,7 @@ async fn min_prepaid(
 /// attach (asserted), and equal to the documented least (recorded).
 fn against_docs(call: &str, min: u64, attach: u64, documented: u64) -> Value {
     assert!(min > 40, "{call}: succeeded with 40 Tgas, the sweep's start");
-    assert!(min + 10 <= attach, "{call}: least prepaid {min} Tgas is not 10 Tgas below the documented attach {attach}");
+    assert!(min + ATTACH_MARGIN_TGAS <= attach, "{call}: least prepaid {min} Tgas is not {ATTACH_MARGIN_TGAS} Tgas below the documented attach {attach}");
     json!({ "call": call, "min_prepaid_tgas": min, "docs_attach_tgas": attach, "margin_to_attach_tgas": attach - min, "docs_least_tgas": documented, "matches_docs": min == documented })
 }
 
@@ -762,6 +776,8 @@ async fn res_1_min_prepaid_gas_and_executor_cap() {
     assert!(on_settled_max < ON_SETTLED_LIMIT);
     let worst = gas.worst_pool();
     assert!(worst < ATTACH_OTHER * TGAS, "a pool receipt burnt {worst} gas, not under {ATTACH_OTHER} Tgas");
+    // The settles by the executor key: at least 10 Tgas under the attach.
+    let (other, other_call) = worst_other(&gas);
     let table: Vec<String> = minimum
         .iter()
         .map(|m| format!("{:<32} min {:>3} Tgas, fails at {:>8}, first receipt {:>5} Tgas, {}", m["call"].as_str().unwrap(), m["min_prepaid_tgas"], m["fails_at_tgas"].as_str().unwrap(), m["first_receipt_burnt_tgas"], m["state"].as_str().unwrap()))
@@ -778,7 +794,7 @@ async fn res_1_min_prepaid_gas_and_executor_cap() {
             "test": "res_1_min_prepaid_gas_and_executor_cap",
             "result": "pass",
             "method": "upstream crates/sandbox/tests/res1.rs (v1.1.0) sections D-F: whole-Tgas sweep from 40 Tgas up; every amount below the minimum fails with the runtime's out-of-gas error in its first receipt, runs no other receipt, emits no event, and leaves both contracts' raw storage byte-identical and the pool equal to the core",
-            "thresholds": "docs/api.md:44-59: each least prepaid amount at least 10 Tgas below its documented attach (dispatch 100, reconcile 60, finish/confirm_not_executed 70); every on_settled < 6 Tgas; every pool receipt < 30 Tgas; promise receipts under their attached gas",
+            "thresholds": "docs/api.md:44-59: each least prepaid amount at least 10 Tgas below its documented attach (dispatch 100, reconcile 60, finish/confirm_not_executed 70); every on_settled < 6 Tgas; every pool receipt < 30 Tgas, and the largest receipt of submit, cancel, settle, observe and set_paused at least 10 Tgas below their 30 Tgas attach (docs/api.md:50); promise receipts under their attached gas",
             "minimum_prepaid_gas": minimum,
             "against_docs_api_md": docs,
             "dispatch_pool_receipt_burnt_tgas": { "at_minimum_prepaid": tgas(dispatch_burnt), "at_300_tgas": tgas(dispatch_burnt_300) },
@@ -793,6 +809,7 @@ async fn res_1_min_prepaid_gas_and_executor_cap() {
                 "confirm_not_executed_at_cap": { "result": "fails", "observed_panic": full, "lock_receipts": 0 },
             },
             "worst_pool_receipt_tgas": tgas(worst),
+            "largest_other_call_receipt": { "tgas": tgas(other), "call": other_call, "margin_to_attach_tgas": tgas(ATTACH_OTHER * TGAS - other) },
             "below_minimum_attempts": below,
             "calls": gas.rows,
             "seconds": t0.elapsed().as_secs(),

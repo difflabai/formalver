@@ -2043,6 +2043,11 @@
     "status_at_256_tgas": 1.76,
     "status_at_512_tgas": 2.29
   },
+  "largest_other_call_receipt": {
+    "call": "settle(true) by the executor key (about 250 other open records)",
+    "margin_to_attach_tgas": 19.16,
+    "tgas": 10.84
+  },
   "method": "upstream crates/sandbox/tests/res1.rs (v1.1.0) sections D-F: whole-Tgas sweep from 40 Tgas up; every amount below the minimum fails with the runtime's out-of-gas error in its first receipt, runs no other receipt, emits no event, and leaves both contracts' raw storage byte-identical and the pool equal to the core",
   "minimum_prepaid_gas": [
     {
@@ -2096,7 +2101,7 @@
   "result": "pass",
   "seconds": 523,
   "test": "res_1_min_prepaid_gas_and_executor_cap",
-  "thresholds": "docs/api.md:44-59: each least prepaid amount at least 10 Tgas below its documented attach (dispatch 100, reconcile 60, finish/confirm_not_executed 70); every on_settled < 6 Tgas; every pool receipt < 30 Tgas; promise receipts under their attached gas",
+  "thresholds": "docs/api.md:44-59: each least prepaid amount at least 10 Tgas below its documented attach (dispatch 100, reconcile 60, finish/confirm_not_executed 70); every on_settled < 6 Tgas; every pool receipt < 30 Tgas, and the largest receipt of submit, cancel, settle, observe and set_paused at least 10 Tgas below their 30 Tgas attach (docs/api.md:50); promise receipts under their attached gas",
   "wasm_variant": "upstream",
   "worst_pool_receipt_tgas": 10.92
 }

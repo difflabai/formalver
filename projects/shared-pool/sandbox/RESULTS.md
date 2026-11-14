@@ -339,7 +339,10 @@ call at 300 Tgas:
 - The worst pool receipt is submit #287 at 14.81 Tgas (docs: "largest receipt
   14.81 Tgas (a `submit` with 255 open records)"), 15.19 under the documented
   30 Tgas attach for `submit`, `cancel`, `settle`, `observe` and `set_paused`.
-  Every pool receipt in both tests is under 30 Tgas (asserted).
+  Every pool receipt in both tests is under 30 Tgas (asserted). The largest
+  receipt of those five calls is at least 10 Tgas under their attach
+  (asserted in both tests, docs/api.md:50's rule for that row: 15.19 here,
+  19.16 in test 2, whose largest is a settle by the executor key at 10.84).
 - Submit gas grows with the open records the envelope sums: 7.33 Tgas at 1
   record, 10.30 at 128, 14.02 at 256 (no prune), 14.81 with 256 open after a
   prune (`submit_gas_by_submit` in the record).
@@ -423,7 +426,8 @@ check and build-wasm.sh's hash checks still ran. The steps took:
   pace: each sends over 600 transactions and reads both contracts' state after
   every one (EX-7).
 - `tests/resources.rs` (RES-1): 2 tests in parallel in 523.4 s, each building
-  the 256-record state with about 360 real transactions (163 s for A-C);
+  the 256-record state with about 360 real transactions (A-C took 156 s in
+  `res_1_gas_at_max_state`, `state.build_seconds`; the whole test 163 s);
   `res_1_min_prepaid_gas_and_executor_cap` sets the pace (about 970
   transactions in all, 84 of them low-gas attempts). Upstream's single test took 469
   and 524 s (fix-1.md).
