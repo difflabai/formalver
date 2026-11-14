@@ -38,37 +38,55 @@ def kind : Op A → Kind
   | .observe .. => .observe
 
 open Out Err in
-/-- The code's guard order, call by call (lib.rs line of each check). -/
+/-- The code's guard order, call by call (lib.rs v1.1.0 line of each check,
+at the pin 57b3f02). Lean keeps the checks that cannot fire in a reachable
+state (the second `index`, the plain bump after the cap, the id add) so the
+list is the code's, check for check. -/
 def guardOrder : Kind → List Out
-  -- candidate 233-285, submit 326
-  | .submit => [err paused, err stale, err expired, err snapshotExpired, err full,
-                err invalidRecipe, err unauthorized, err invalidUnits, err prerequisite,
-                err invalidConfig, err arithmetic,       -- add (274)
-                err arithmetic, err bounds,              -- check_bounds (275)
-                err bounds, err bounds, err Err.energy,      -- energy before/after (276-280)
-                err invalidConfig, err arithmetic,       -- recovery add (282)
-                err bounds, err Err.energy,                  -- recovery energy (282)
-                err arithmetic]                          -- version (326)
-  -- 347-369
+  -- candidate 267-322, submit 360-366
+  | .submit => [err paused, err stale, err expired, err snapshotExpired,
+                err full,                                -- 287-289: 256 retained, front open
+                err invalidRecipe, err unauthorized, err invalidUnits,
+                err prerequisite,                        -- 301-306: completed_units
+                err invalidConfig, err arithmetic,       -- add (307)
+                err arithmetic, err bounds,              -- check_bounds (308)
+                err bounds, err bounds, err Err.energy,  -- energy before/after (309-313)
+                err invalidConfig, err arithmetic,       -- recovery add (315)
+                err bounds, err Err.energy,              -- recovery energy (315-317)
+                err arithmetic,                          -- VERSION_CAP (319-321)
+                err arithmetic,                          -- version checked_add (362)
+                err arithmetic]                          -- id checked_add (363-366)
+  -- 407-431
   | .dispatch => [err notFound, err unauthorized, err paused, err invalidState, err expired,
-                  err snapshotExpired, err arithmetic]
-  -- 375-389
-  | .ack => [err notFound, noop, noop, err arithmetic]
-  -- 394-406, then release 409-416
-  | .cancel => [err notFound, err unauthorized, noop, err pending,
+                  err snapshotExpired,
+                  err notFound,                          -- index (430)
+                  err arithmetic, err arithmetic]        -- bump_new (431 -> 401-405)
+  -- 436-452
+  | .ack => [err notFound, noop,
+             err notFound,                               -- index (448)
+             noop, err arithmetic]                       -- bump (452)
+  -- 456-474, then release 476-485
+  | .cancel => [err notFound, err unauthorized, noop,
+                err invalidState,                        -- Completed (467-469)
+                err pending,                             -- 470-472
                 err notFound, err invalidConfig, err arithmetic, err arithmetic, err bounds,
-                err arithmetic]
-  -- 424-445
+                err notFound, err arithmetic]            -- index (484), bump (485)
+  -- 492-515
   | .settleDone => [err notFound, err unauthorized, noop, err invalidState,
-                    err invalidConfig, err arithmetic, err arithmetic, err bounds, err arithmetic]
-  -- 424-441, then release 409-416
+                    err invalidConfig, err arithmetic,   -- add (512)
+                    err arithmetic, err bounds,          -- check_bounds (513)
+                    err notFound, err arithmetic]        -- index (514), bump (515)
+  -- 492-510, then release 476-485
   | .settleUndone => [err notFound, err unauthorized, noop, err invalidState,
                       err notFound, err invalidConfig, err arithmetic, err arithmetic, err bounds,
-                      err arithmetic]
-  -- 451-454
-  | .pause => [err unauthorized, err arithmetic]
-  -- 461-471
-  | .observe => [err unauthorized, err pending, err bounds, err bounds, err arithmetic]
+                      err notFound, err arithmetic]
+  -- 522-526
+  | .pause => [err unauthorized, err arithmetic, err arithmetic]
+  -- 534-545
+  | .observe => [err unauthorized,
+                 err pending,                            -- 538-540: changed values, some open
+                 err bounds, err bounds,                 -- 541-544
+                 err arithmetic, err arithmetic]         -- bump_new (545)
 
 /-- LEAN-GUARD: every call's guard list has exactly `guardOrder`'s outcomes, in order. -/
 theorem guards_order (cfg : Cfg A) (s : State) (op : Op A) :

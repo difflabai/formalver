@@ -1,6 +1,9 @@
+Lean mutant 15-settle-complete-uses-reserve
+settle(.., true) applies the reserve vector instead of complete.
+
 --- a/PoolLean/Machine.lean
 +++ b/PoolLean/Machine.lean
-@@ -394,7 +394,7 @@
+@@ -464,7 +464,7 @@
  
  /-- `settle(.., true)`'s new values. -/
  def completeNext (cfg : Cfg A) (s : State) (id : Nat) : List Int :=

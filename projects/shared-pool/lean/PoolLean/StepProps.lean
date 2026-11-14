@@ -1,8 +1,10 @@
 /-
 LEAN-STEP: every call from every state (no invariant needed) satisfies the
 step properties TX-0, TX-NOOP/TX-VER, LIFE-1, AUTH-1, STALE-1, ADM-1, ADM-2,
-HARD-STEP and ASYNC-1 (`stepProps`); TERM-1 (`term1`); STALE-1's no-replay
-over runs of any length (`stale1_no_replay`).
+HARD-STEP, WIN-1/WIN-2's step half (`firstId` grows by at most one, a
+pruned record never changes) and ASYNC-1 (`stepProps`); TERM-1 (`term1`,
+`term1_cancel`: cancelling a Completed record is `InvalidState`);
+STALE-1's no-replay over runs of any length (`stale1_no_replay`).
 -/
 import PoolLean.Inv
 import PoolLean.Guard
@@ -59,8 +61,8 @@ theorem exec_auth {cfg : Cfg A} {s : State} {op : Op A} (h : (exec cfg s op).1.i
     all_goals exact ⟨_, rfl⟩
   | dispatch c id now =>
     simp only [Auth1] at hn
-    simp only [outcome, guards, dispatchGuards, firstFail, foundGuard, hn, decide_not,
-      decide_false, Bool.not_false, ite_true]
+    simp only [outcome, guards, dispatchGuards, List.cons_append, List.nil_append, firstFail,
+      foundGuard, hn, decide_not, decide_false, Bool.not_false, ite_true]
     repeat' split
     all_goals exact ⟨_, rfl⟩
   | ack id acc => exact absurd trivial hn
@@ -109,6 +111,16 @@ theorem life1_append (rs : List Rec) (r u exp : Nat) :
     rw [List.getElem_append_right (Nat.le_refl _)]
     simp
 
+/-- A status update of a retained record leaves every pruned record alone. -/
+theorem prune_set {rs : List Rec} {k f : Nat} (hk : k < rs.length) (hf : f ≤ k) (st : Status) :
+    ∀ j (h : j < rs.length) (h' : j < (setStatus rs k st).length), j < f →
+      (setStatus rs k st)[j] = rs[j] := by
+  intro j h h' hj
+  rw [getElem_setStatus hk]
+  split
+  · omega
+  · rfl
+
 /-! ## Each effective call -/
 
 section calls
@@ -118,7 +130,7 @@ variable {cfg : Cfg A} {s : State}
 /-- The frame of a status update for HARD-STEP and ASYNC-1. -/
 theorem viol_close {k : Nat} {v : List Int} (henv : boundsFail cfg s v none (some k) = false)
     (i : Nat) (hi : i < cfg.n) : viol cfg v i ≤ viol cfg s.values i :=
-  Int.le_trans (viol_le_ev cfg s.records v none (some k) i) ((boundsFail_false.mp henv) i hi)
+  Int.le_trans (viol_le_ev cfg s.records v none (some k) i) ((boundsFail_false.mp henv) i hi).1
 
 theorem sp_none {op : Op A} (ho : outcome cfg s op = none)
     (hver : (effect cfg s op).version = s.version + 1)
@@ -129,6 +141,9 @@ theorem sp_none {op : Op A} (ho : outcome cfg s op = none)
         energy cfg (addv (effect cfg s op).values (cfg.recipe rc).complete u) < energy cfg s.values))
     (hhard : op.isObserve = false → ∀ i < cfg.n,
       viol cfg (effect cfg s op).values i ≤ viol cfg s.values i)
+    (hprune : s.firstId ≤ (effect cfg s op).firstId ∧ (effect cfg s op).firstId ≤ s.firstId + 1 ∧
+      ∀ j (h : j < s.records.length) (h' : j < (effect cfg s op).records.length), j < s.firstId →
+        (effect cfg s op).records[j] = s.records[j])
     (hasync : op.isAck = true → (effect cfg s op).values = s.values ∧
       (effect cfg s op).records.length = s.records.length ∧
       ∀ j (h : j < s.records.length) (h' : j < (effect cfg s op).records.length),
@@ -136,7 +151,7 @@ theorem sp_none {op : Op A} (ho : outcome cfg s op = none)
         ((effect cfg s op).records[j].status = .cancelled ↔ s.records[j].status = .cancelled)) :
     StepProps cfg s op (exec cfg s op).1 (exec cfg s op).2 := by
   rw [exec_none ho]
-  refine ⟨fun e he => ?_, fun _ => Or.inr hver, ?_, hlife, ?_, ?_, ?_, ?_, hhard, hasync⟩
+  refine ⟨fun e he => ?_, fun _ => Or.inr hver, ?_, hlife, ?_, ?_, ?_, ?_, hhard, hprune, hasync⟩
   · cases op <;> simp [okRes] at he
   · show s.version ≤ (effect cfg s op).version; omega
   · intro _; exact exec_auth (op := op) (by rw [exec_none ho]; cases op <;> rfl)
@@ -165,27 +180,35 @@ theorem stepProps (cfg : Cfg A) (s : State) (op : Op A) :
       exec_auth, fun c rc u ver exp now hop h => (hsub c rc u ver exp now hop h).elim,
       fun c rc u ver exp now hop h => (hsub c rc u ver exp now hop h).elim,
       fun c rc u ver exp now hop h => (hsub c rc u ver exp now hop h).elim,
-      fun _ i _ => by rw [hs]; exact Int.le_refl _, fun _ => ?_⟩
+      fun _ i _ => by rw [hs]; exact Int.le_refl _,
+      by rw [hs]; exact ⟨Nat.le_refl _, Nat.le_succ _, fun _ _ _ _ => rfl⟩, fun _ => ?_⟩
     rw [hs]
     exact ⟨rfl, rfl, fun j _ _ => ⟨rfl, Iff.rfl⟩⟩
   | none =>
     cases op with
     | submit c r u ver exp now =>
       have F := submit_ok ho
-      refine sp_none ho rfl (life1_append _ _ _ _) ?_ ?_ (by simp [Op.isAck])
+      refine sp_none ho rfl (life1_append _ _ _ _) ?_ ?_ ?_ (by simp [Op.isAck])
       · intro c' rc u' ver' exp' now' hop
         cases hop
         exact ⟨F.ver, F.adm1, F.adm2⟩
       · intro _ i hi
         exact Int.le_trans (viol_le_ev cfg s.records _ (some (r, u)) none i)
-          ((boundsFail_false.mp F.bnd) i hi)
+          ((boundsFail_false.mp F.bnd) i hi).1
+      · refine ⟨?_, ?_, fun j h h' _ => ?_⟩
+        · show s.firstId ≤ (if MAX_RECORDS ≤ s.records.length - s.firstId then s.firstId + 1 else s.firstId)
+          split <;> omega
+        · show (if MAX_RECORDS ≤ s.records.length - s.firstId then s.firstId + 1 else s.firstId) ≤ s.firstId + 1
+          split <;> omega
+        · exact List.getElem_append_left h
     | dispatch c id now =>
       have F := dispatch_ok ho
       have hk := F.found
       have hst := F.reserved
       rw [record_eq hk] at hst
       refine sp_none ho rfl (life1_set hk (by rw [hst]; rfl)) (fun _ _ _ _ _ _ h => by cases h)
-        (fun _ i _ => Int.le_refl _) (by simp [Op.isAck])
+        (fun _ i _ => Int.le_refl _) ⟨Nat.le_refl _, Nat.le_succ _, prune_set hk F.inWin _⟩
+        (by simp [Op.isAck])
     | ack id acc =>
       have F := ack_ok (cfg := cfg) ho
       have hk := F.found
@@ -196,7 +219,8 @@ theorem stepProps (cfg : Cfg A) (s : State) (op : Op A) :
         rw [record_eq hk] at hne
         rcases hst with h | h <;> cases acc <;> simp_all [ackStatus, edge]
       refine sp_none ho rfl (life1_set hk he) (fun _ _ _ _ _ _ h => by cases h)
-        (fun _ i _ => Int.le_refl _) (fun _ => ⟨rfl, length_setStatus _ _ _, fun j h h' => ?_⟩)
+        (fun _ i _ => Int.le_refl _) ⟨Nat.le_refl _, Nat.le_succ _, prune_set hk F.inWin _⟩
+        (fun _ => ⟨rfl, length_setStatus _ _ _, fun j h h' => ?_⟩)
       have h'' : j < (setStatus s.records id (ackStatus acc)).length := h'
       show ((setStatus s.records id (ackStatus acc))[j]'h'').status.isOpen =
           s.records[j].status.isOpen ∧
@@ -213,7 +237,8 @@ theorem stepProps (cfg : Cfg A) (s : State) (op : Op A) :
       have hst := F.reserved
       rw [record_eq hk] at hst
       refine sp_none ho rfl (life1_set hk (by rw [hst]; rfl)) (fun _ _ _ _ _ _ h => by cases h)
-        (fun _ i hi => viol_close F.release.bnd i hi) (by simp [Op.isAck])
+        (fun _ i hi => viol_close F.release.bnd i hi)
+        ⟨Nat.le_refl _, Nat.le_succ _, prune_set hk F.inWin _⟩ (by simp [Op.isAck])
     | settle c id done =>
       have F := settle_ok ho
       have hk := F.found
@@ -223,19 +248,23 @@ theorem stepProps (cfg : Cfg A) (s : State) (op : Op A) :
       | true =>
         have G := F.complete rfl
         refine sp_none ho rfl (life1_set hk ?_) (fun _ _ _ _ _ _ h => by cases h)
-          (fun _ i hi => viol_close G.bnd i hi) (by simp [Op.isAck])
+          (fun _ i hi => viol_close G.bnd i hi)
+          ⟨Nat.le_refl _, Nat.le_succ _, prune_set hk F.inWin _⟩ (by simp [Op.isAck])
         revert hst; cases s.records[id].status <;> simp [inFlight, edge]
       | false =>
         have G := F.release rfl
         refine sp_none ho rfl (life1_set hk ?_) (fun _ _ _ _ _ _ h => by cases h)
-          (fun _ i hi => viol_close G.bnd i hi) (by simp [Op.isAck])
+          (fun _ i hi => viol_close G.bnd i hi)
+          ⟨Nat.le_refl _, Nat.le_succ _, prune_set hk F.inWin _⟩ (by simp [Op.isAck])
         revert hst; cases s.records[id].status <;> simp [inFlight, edge]
     | pause c b =>
       exact sp_none ho rfl (life1_refl _) (fun _ _ _ _ _ _ h => by cases h)
-        (fun _ i _ => Int.le_refl _) (by simp [Op.isAck])
+        (fun _ i _ => Int.le_refl _) ⟨Nat.le_refl _, Nat.le_succ _, fun _ _ _ _ => rfl⟩
+        (by simp [Op.isAck])
     | observe c vals now =>
       exact sp_none ho rfl (life1_refl _) (fun _ _ _ _ _ _ h => by cases h)
-        (by simp [Op.isObserve]) (by simp [Op.isAck])
+        (by simp [Op.isObserve]) ⟨Nat.le_refl _, Nat.le_succ _, fun _ _ _ _ => rfl⟩
+        (by simp [Op.isAck])
 
 /-- LEAN-STEP over `step`. -/
 theorem stepProps_step (cfg : Cfg A) (s : State) (op : Op A) :
@@ -243,9 +272,11 @@ theorem stepProps_step (cfg : Cfg A) (s : State) (op : Op A) :
 
 /-! ## TERM-1 -/
 
-/-- TERM-1: by the executor, settling a terminal record again with the same
-outcome is an `Ok` no-op; with the opposite outcome it is `InvalidState`. -/
-theorem term1 (cfg : Cfg A) (s : State) {id : Nat} (hk : id < s.records.length) (done : Bool)
+/-- TERM-1: by the executor, settling a retained terminal record again with
+the same outcome is an `Ok` no-op; with the opposite outcome it is
+`InvalidState`. -/
+theorem term1 (cfg : Cfg A) (s : State) {id : Nat} (hw : s.firstId ≤ id)
+    (hk : id < s.records.length) (done : Bool)
     (hterm : s.records[id].status = .completed ∨ s.records[id].status = .cancelled) :
     exec cfg s (.settle (cfg.recipe s.records[id].recipe).executor id done) =
       (if (done = true ∧ s.records[id].status = .completed) ∨
@@ -254,18 +285,20 @@ theorem term1 (cfg : Cfg A) (s : State) {id : Nat} (hk : id < s.records.length) 
   have hr := record_eq hk
   rcases hterm with h | h <;> cases done <;>
     simp [exec, outcome, guards, settleGuards, foundGuard, firstFail, hr, h, hk, inFlight,
-      Nat.not_le.mpr hk]
+      Nat.not_le.mpr hk, Nat.not_lt.mpr hw]
 
-/-- TERM-1 for `cancel`: cancelling a cancelled record again is an `Ok`
-no-op; a completed one is `Pending`. -/
-theorem term1_cancel (cfg : Cfg A) (s : State) {id : Nat} (hk : id < s.records.length) (now : Nat)
+/-- TERM-1 for `cancel` (v1.1.0, lib.rs 467-469): cancelling a retained
+cancelled record again is an `Ok` no-op; a completed one is `InvalidState`
+(v1.0.0 answered `Pending`). -/
+theorem term1_cancel (cfg : Cfg A) (s : State) {id : Nat} (hw : s.firstId ≤ id)
+    (hk : id < s.records.length) (now : Nat)
     (hterm : s.records[id].status = .completed ∨ s.records[id].status = .cancelled) :
     exec cfg s (.cancel cfg.owner id now) =
-      (if s.records[id].status = .cancelled then .ok else .err .pending, s) := by
+      (if s.records[id].status = .cancelled then .ok else .err .invalidState, s) := by
   have hr := record_eq hk
   rcases hterm with h | h <;>
     simp [exec, outcome, guards, cancelGuards, foundGuard, firstFail, hr, h, hk,
-      Nat.not_le.mpr hk]
+      Nat.not_le.mpr hk, Nat.not_lt.mpr hw]
 
 /-! ## STALE-1 over runs -/
 

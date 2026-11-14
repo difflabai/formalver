@@ -1,6 +1,9 @@
+Lean mutant 12-adm1-energy-check-dropped
+ADM-1's energy guard dropped from submit.
+
 --- a/PoolLean/Machine.lean
 +++ b/PoolLean/Machine.lean
-@@ -343,7 +343,7 @@
+@@ -408,7 +408,7 @@
    boundsGuards cfg s next (some (r, u)) none ++
    [(.err .bounds, energyBad cfg s.values),
     (.err .bounds, energyBad cfg next),

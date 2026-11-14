@@ -1,19 +1,33 @@
 /-
 LEAN-WIT: concrete witnesses, all checked by `decide` / `rfl` in the kernel
-(never `native_decide`).
+(never `native_decide`). Each v1.1.0 finding fixed, on a concrete config
+(the configs are the candidate corpus's traces; accounts o = 0, a1 = 1,
+x1 = 2, a2 = 3):
 
-* F-1 (the wedge, trace 0 of core.txt): the state is reachable from `init`,
-  satisfies `Inv`, has B ≠ 0, and there `settle(true)`, `settle(false)`,
-  `cancel` and `observe` all fail. `f1_forever`: from the wedge, for EVERY
-  sequence of calls, the values stay [10, 5] and record 0 stays Active, so
-  the record never becomes terminal and every `observe` fails `Pending`.
-* Non-vacuity: a valid config, a reachable healthy state where the
-  premises of LIVE-1 hold (and its conclusion is observed concretely), and
-  reachable Completed and Cancelled records.
-
-Accounts: o = 0, a1 = 1, x1 = 2.
+* F-1 (trace 0): after `observe [12, 5]` the F-1 hedge `submit` is
+  rejected `Bounds` (`f1_rejected`): the hull counts the hedge's release,
+  which would leave metric 0 at 12 (v1.0.0 admitted it, and the pool
+  wedged: `f1_forever` on the v1.0.0 tag). The recovery hedge of trace 214,
+  whose completion lowers metric 0, is admitted and settles
+  (`recovery_admitted`).
+* F-2 (trace 209): the risk config's hedge, admitted on v1.0.0 on the
+  strength of the open position, is rejected `Bounds` (`f2_rejected`).
+* F-4 (trace 210): a recipe whose actor is its executor fails `validate`
+  (`self_executor_invalid`); the owner may still execute (trace 213,
+  `owner_executor_valid`).
+* F-5 (`cap_instance`): a reachable state at `VERSION_CAP` (4294966527)
+  with a Dispatched and a Reserved record, reached from `init` by a run of
+  `VERSION_CAP` calls (`cap_reach`, by induction, not evaluation): new work
+  (`submit`, `dispatch`, `set_paused`, `observe`) fails `Arithmetic`, and
+  every open record is still resolved `Ok` (`cap_drain`).
+* F-6 (trace 211): with records open and the snapshot expired, the owner's
+  refresh is `Ok`, keeps the values and records, and unblocks `dispatch`
+  (`refresh_instance`); a changed value is still `Pending`.
+* Non-vacuity: a valid config and a reachable state with an in-flight
+  record where LIVE-1 applies (and its conclusion is observed concretely),
+  and reachable Completed and Cancelled records.
 -/
-import PoolLean.Live
+import PoolLean.Window
 
 namespace Pool.Witness
 open Pool
@@ -27,6 +41,12 @@ theorem reach_run {A : Type} [DecidableEq A] [Inhabited A] {cfg : Cfg A} {s : St
 theorem run_cons {A : Type} [DecidableEq A] [Inhabited A] (cfg : Cfg A) (s : State) (op : Op A)
     (ops : List (Op A)) : run cfg s (op :: ops) = run cfg (step cfg s op) ops := rfl
 
+theorem run_append {A : Type} [DecidableEq A] [Inhabited A] (cfg : Cfg A) (s : State)
+    (l₁ l₂ : List (Op A)) : run cfg s (l₁ ++ l₂) = run cfg (run cfg s l₁) l₂ := by
+  simp [run, List.foldl_append]
+
+/-! ## F-1 -/
+
 /-- The F-1 config: m(0,10,5), m(-100,100,5); t(1,0,1,target);
 r(a1,x1,[-2,0],[2,-5],1,[]). -/
 def wcfg : Cfg Nat :=
@@ -35,187 +55,251 @@ def wcfg : Cfg Nat :=
     terms := [⟨1, 0, 1, .target⟩],
     recipes := [⟨1, 2, [-2, 0], [2, -5], 1, []⟩] }
 
-theorem wcfg_valid : Valid wcfg := by
-  refine ⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide, by decide,
-    ?_⟩
-  intro k hk
-  have : k = 0 := by simp [wcfg] at hk; omega
-  subst this
-  have e : wcfg.recipes[0]'hk = ⟨1, 2, [-2, 0], [2, -5], 1, []⟩ := rfl
-  rw [e]
-  exact ⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide, by decide,
-    by decide⟩
+theorem wcfg_valid : Valid wcfg := (valid_iff wcfg).mp (by decide)
 
-/-! ## F-1 -/
+/-- After the owner observes [12, 5] (metric 0 above its max of 10)... -/
+def f1obs : State := run wcfg (init wcfg 100) [.observe 0 [12, 5] 100]
 
-def f1ops : List (Op Nat) :=
-  [.observe 0 [12, 5] 100, .submit 1 0 1 1 200 100, .dispatch 1 0 101, .ack 0 true]
-
-def wedge : State := run wcfg (init wcfg 100) f1ops
-
-/-- The record of the wedge. -/
-def r0 : Rec := ⟨0, 0, 1, 200, .active⟩
-
-theorem wedge_eq : wedge =
-    { values := [10, 5], version := 4, observedAt := 100, paused := false, records := [r0],
-      base := [12, 5], k0 := 0, eff := 4 } := by decide
-
-/-- Every call of the F-1 run is `Ok` (`submit` returns id 0). -/
-theorem f1_results :
+/-- ... the F-1 hedge is rejected `Bounds`: its release would leave metric 0
+at 12 (violation 2), above the candidate's 0. On v1.0.0 it was admitted
+and the pool wedged (trace 0). -/
+theorem f1_rejected :
     (exec wcfg (init wcfg 100) (.observe 0 [12, 5] 100)).1 = .ok ∧
-    (exec wcfg (run wcfg (init wcfg 100) (f1ops.take 1)) (.submit 1 0 1 1 200 100)).1 = .okId 0 ∧
-    (exec wcfg (run wcfg (init wcfg 100) (f1ops.take 2)) (.dispatch 1 0 101)).1 = .ok ∧
-    (exec wcfg (run wcfg (init wcfg 100) (f1ops.take 3)) (.ack 0 true)).1 = .ok := by decide
+      exec wcfg f1obs (.submit 1 0 1 1 200 100) = (.err .bounds, f1obs) := by decide
 
-theorem wedge_reach : Reach wcfg wedge := reach_run (Reach.init 100) f1ops
+/-- The envelope that rejects it: low [10, 0], high [12, 5]; EV₀ = 2 while
+the candidate's own violation is 0. -/
+theorem f1_envelope :
+    low wcfg f1obs.records [10, 5] (some (0, 1)) none 0 = 10 ∧
+      high wcfg f1obs.records [10, 5] (some (0, 1)) none 0 = 12 ∧
+      ev wcfg f1obs.records [10, 5] (some (0, 1)) none 0 = 2 ∧ viol wcfg [10, 5] 0 = 0 := by
+  decide
 
-theorem wedge_inv : Inv wcfg wedge := reach_inv wcfg_valid wedge_reach
+/-- The recovery config of trace 214: r(a1,x1,[0,-1],[-3,0],1,[]). -/
+def rcfg : Cfg Nat :=
+  { owner := 0, maxAge := 0,
+    metrics := [⟨0, 10, 5⟩, ⟨-100, 100, 5⟩],
+    terms := [⟨1, 0, 1, .target⟩],
+    recipes := [⟨1, 2, [0, -1], [-3, 0], 1, []⟩] }
 
-/-- The baseline is disturbed (B ≠ 0): LIVE-1's premise fails, as it must. -/
-theorem wedge_B : B wcfg wedge 0 = 2 := by decide
+theorem rcfg_valid : Valid rcfg := (valid_iff rcfg).mp (by decide)
 
-/-- ... although the current point is healthy. -/
-theorem wedge_healthy_now : viol wcfg wedge.values 0 = 0 ∧ viol wcfg wedge.values 1 = 0 := by decide
+def rops : List (Op Nat) :=
+  [.observe 0 [12, 5] 100, .submit 1 0 1 1 200 100, .dispatch 1 0 100, .ack 0 true,
+   .settle 2 0 true]
 
-theorem f1_settle_true : exec wcfg wedge (.settle 2 0 true) = (.err .bounds, wedge) := by decide
-theorem f1_settle_false : exec wcfg wedge (.settle 2 0 false) = (.err .bounds, wedge) := by decide
-theorem f1_cancel_owner : exec wcfg wedge (.cancel 0 0 102) = (.err .pending, wedge) := by decide
-theorem f1_cancel_actor : exec wcfg wedge (.cancel 1 0 102) = (.err .pending, wedge) := by decide
-theorem f1_observe : exec wcfg wedge (.observe 0 [5, 5] 103) = (.err .pending, wedge) := by decide
+/-- F-1 recovery (trace 214): a hedge whose completion lowers metric 0 is
+admitted in the disturbed state, and settles, bringing metric 0 to 9. -/
+theorem recovery_admitted :
+    (exec rcfg (run rcfg (init rcfg 100) (rops.take 1)) (.submit 1 0 1 1 200 100)).1 = .okId 0 ∧
+      (exec rcfg (run rcfg (init rcfg 100) (rops.take 4)) (.settle 2 0 true)).1 = .ok ∧
+      (run rcfg (init rcfg 100) rops).values = [9, 4] ∧
+      (run rcfg (init rcfg 100) rops).records = [⟨0, 0, 1, 200, .completed⟩] := by decide
 
-/-- The wedge's frozen part: values and records. -/
-def Frozen (s : State) : Prop := s.values = [10, 5] ∧ s.records = [r0]
+/-- The v1.0.0 wedge, as a v1.1.0 state: record 0 Active, values [10, 5]
+after the observation [12, 5]. v1.1.0 never reaches it (`f1_rejected`). -/
+def w10 : State :=
+  { values := [10, 5], version := 4, observedAt := 100, paused := false,
+    records := [⟨0, 0, 1, 200, .active⟩], firstId := 0, base := [12, 5], k0 := 0, eff := 4 }
 
-theorem frozen_wedge : Frozen wedge := by rw [wedge_eq]; exact ⟨rfl, rfl⟩
+/-- INV-RES is what LIVE-ALL needs: the wedge satisfies every other
+conjunct of `Inv`, yet both of the executor's settles fail `Bounds`. So
+the canary `canary/LiveAllNoRes.lean` states a false theorem. -/
+theorem res_needed :
+    WF wcfg w10 ∧ Ledger wcfg w10 ∧ PvB wcfg w10 ∧ Dep wcfg w10 ∧ Ver w10 ∧ VerCap w10 ∧
+      ¬ InvRes wcfg w10 ∧
+      exec wcfg w10 (.settle 2 0 true) = (.err .bounds, w10) ∧
+      exec wcfg w10 (.settle 2 0 false) = (.err .bounds, w10) := by
+  refine ⟨⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide, by decide,
+    fun j hj => ?_⟩, by unfold Ledger; decide, by unfold PvB; decide, fun j hj pu hpu => ?_,
+    by unfold Ver; decide, by unfold VerCap; decide, by unfold InvRes; decide, by decide,
+    by decide⟩
+  · have : j = 0 := by simp [w10] at hj; omega
+    subst this
+    exact ⟨rfl, by simp [w10, wcfg], by simp [w10], by simp [w10, wcfg, Cfg.recipe],
+      fun h => absurd h (by simp [w10]), fun h => absurd h (by simp [w10])⟩
+  · have : j = 0 := by simp [w10] at hj; omega
+    subst this
+    simp [w10, wcfg, Cfg.recipe] at hpu
 
-theorem rec0 {s : State} (hr : s.records = [r0]) {id : Nat} (hk : id < s.records.length) :
-    id = 0 ∧ s.record id = r0 := by
-  rw [hr] at hk
-  have : id = 0 := by simp at hk; omega
-  subst this
-  exact ⟨rfl, by simp [State.record, hr]⟩
+theorem live_all_needs_res : ¬ ∀ s : State, WF wcfg s → Ledger wcfg s → PvB wcfg s →
+    Dep wcfg s → Ver s → VerCap s → ∀ id (hk : id < s.records.length),
+      inFlight s.records[id].status = true →
+      outcome wcfg s (.settle (wcfg.recipe s.records[id].recipe).executor id true) = none := by
+  intro h
+  obtain ⟨W, L, P, D, V, VC, -, hs, -⟩ := res_needed
+  have := h w10 W L P D V VC 0 (by decide) (by decide)
+  have e : (wcfg.recipe (w10.records[0]'(by decide)).recipe).executor = 2 := rfl
+  rw [e] at this
+  rw [exec_none this] at hs
+  cases hs
 
-/-- One step from a frozen state stays frozen: every call that could move
-record 0 or the values fails. -/
-theorem frozen_step {s : State} (h : Frozen s) (op : Op Nat) : Frozen (step wcfg s op) := by
-  obtain ⟨hv, hr⟩ := h
-  rcases exec_cases wcfg s op with h | ⟨ho, he⟩
-  · simp only [step, h]; exact ⟨hv, hr⟩
-  · cases op with
-    | submit c r u ver exp now =>
-      exfalso
-      have F := submit_ok ho
-      have hr0 : r = 0 := by have := F.recipe; simp [wcfg] at this; omega
-      subst hr0
-      have hu : u = 1 := by
-        have h1 := F.unitsLe; have h2 := F.unitsPos
-        simp [wcfg, Cfg.recipe] at h1; omega
-      subst hu
-      have := F.bnd
-      simp only [boundsFail, hv, hr] at this
-      revert this; decide
-    | dispatch c id now =>
-      exfalso
-      have F := dispatch_ok ho
-      obtain ⟨-, h0⟩ := rec0 hr F.found
-      have := F.reserved; rw [h0] at this; cases this
-    | ack id acc =>
-      exfalso
-      have F := ack_ok (cfg := wcfg) ho
-      obtain ⟨-, h0⟩ := rec0 hr F.found
-      have := F.inflight; rw [h0] at this; simp [r0] at this
-    | cancel c id now =>
-      exfalso
-      have F := cancel_ok ho
-      obtain ⟨-, h0⟩ := rec0 hr F.found
-      have := F.reserved; rw [h0] at this; cases this
-    | settle c id done =>
-      exfalso
-      have F := settle_ok ho
-      obtain ⟨hid, h0⟩ := rec0 hr F.found
-      subst hid
-      cases done with
-      | true =>
-        have := (F.complete rfl).bnd
-        simp only [boundsFail, completeNext, h0, hv, hr] at this
-        revert this; decide
-      | false =>
-        have := (F.release rfl).bnd
-        simp only [boundsFail, releaseNext, h0, hv, hr] at this
-        revert this; decide
-    | pause c b => simp only [step, he, effect]; exact ⟨hv, hr⟩
-    | observe c vals now =>
-      exfalso
-      have F := observe_ok ho
-      have := F.closed r0 (by rw [hr]; simp)
-      simp [r0, Status.isOpen] at this
+/-! ## F-2 -/
 
-theorem frozen_run {s : State} (h : Frozen s) (ops : List (Op Nat)) : Frozen (run wcfg s ops) := by
-  induction ops generalizing s with
-  | nil => exact h
-  | cons op ops ih => exact ih (frozen_step h op)
+/-- The risk config of trace 209 (a2 = 3). -/
+def f2cfg : Cfg Nat :=
+  { owner := 0, maxAge := 300,
+    metrics := [⟨0, 100, 60⟩, ⟨0, 80, 40⟩, ⟨0, 60, 30⟩, ⟨0, 40, 40⟩],
+    terms := [⟨0, 80, 1, .excess⟩, ⟨1, 60, 1, .excess⟩, ⟨2, 40, 1, .excess⟩],
+    recipes := [⟨1, 2, [20, 5, 0, -5], [0, 0, 0, 0], 20, []⟩,
+                ⟨3, 2, [10, 0, 5, -5], [0, 0, 0, 0], 20, []⟩,
+                ⟨3, 2, [0, 10, 5, -5], [0, 0, 0, 0], 20, []⟩,
+                ⟨3, 2, [0, 0, 0, -2], [-10, 0, 0, 0], 20, []⟩] }
 
-/-- F-1 is permanent: whatever calls follow (any caller, argument, time,
-`pause`, new submits), the values stay [10, 5] and record 0 stays Active. -/
-theorem f1_forever (ops : List (Op Nat)) :
-    (run wcfg wedge ops).values = [10, 5] ∧ (run wcfg wedge ops).records = [r0] :=
-  frozen_run frozen_wedge ops
+theorem f2cfg_valid : Valid f2cfg := (valid_iff f2cfg).mp (by decide)
 
-/-- ... so record 0 never becomes terminal ... -/
-theorem f1_never_terminal (ops : List (Op Nat)) :
-    ∃ h : 0 < (run wcfg wedge ops).records.length,
-      (run wcfg wedge ops).records[0].status = .active := by
-  have := (f1_forever ops).2
-  refine ⟨by rw [this]; decide, ?_⟩
-  simp only [this]; rfl
+def f2open : State := run f2cfg (init f2cfg 100) [.submit 1 0 1 0 200 100]
 
-/-- ... and every later `observe` fails (`Pending`, or `Unauthorized` for a
-non-owner), so the pool is frozen for observations. -/
-theorem f1_observe_forever (ops : List (Op Nat)) (c : Nat) (vals : List Int) (now : Nat) :
-    ∃ e, exec wcfg (run wcfg wedge ops) (.observe c vals now) =
-      (.err e, run wcfg wedge ops) := by
-  have hr := (f1_forever ops).2
-  generalize run wcfg wedge ops = s at hr
-  cases h : outcome wcfg s (.observe c vals now) with
-  | none =>
-    have := (observe_ok h).closed r0 (by rw [hr]; simp)
-    simp [r0, Status.isOpen] at this
-  | some o =>
-    cases o with
-    | err e => exact ⟨e, exec_err h⟩
-    | noop => have := noop_kind h; simp [Op.isAck] at this
+/-- F-2 (trace 209): with position 0 open, the hedge (recipe 3, 8 units) is
+rejected `Bounds`: releasing position 0 would take metric 0 to 60 - 80 =
+-20 below its min of 0. v1.0.0 admitted it on the position's strength. -/
+theorem f2_rejected :
+    (exec f2cfg (init f2cfg 100) (.submit 1 0 1 0 200 100)).1 = .okId 0 ∧
+      exec f2cfg f2open (.submit 3 3 8 1 200 100) = (.err .bounds, f2open) := by decide
 
-/-- ... and every later `settle` of record 0 fails. -/
-theorem f1_settle_forever (ops : List (Op Nat)) (c : Nat) (done : Bool) :
-    ∃ e, exec wcfg (run wcfg wedge ops) (.settle c 0 done) = (.err e, run wcfg wedge ops) := by
-  have ⟨hv, hr⟩ := f1_forever ops
-  generalize run wcfg wedge ops = s at hv hr
-  cases h : outcome wcfg s (.settle c 0 done) with
-  | none =>
-    have := frozen_step ⟨hv, hr⟩ (.settle c 0 done)
-    have hs := exec_none h
-    simp only [Frozen, step, hs, effect] at this
-    cases done with
-    | true =>
-      simp only [ite_true] at this
-      have h2 := this.2
-      simp [hr, setStatus, r0] at h2
-    | false =>
-      simp only [Bool.false_eq_true, ite_false, release] at this
-      have h2 := this.2
-      simp [hr, setStatus, r0] at h2
-  | some o =>
-    cases o with
-    | err e => exact ⟨e, exec_err h⟩
-    | noop =>
-      exfalso
-      simp only [outcome, guards, settleGuards, foundGuard, hr, State.record] at h
-      by_cases hc : c = 2
-      · subst hc
-        cases done <;> simp [firstFail, wcfg, Cfg.recipe, r0, inFlight] at h <;>
-          · have := Guard.firstFail_mem h
-            simp [releaseGuards, addGuards, boundsGuards, verGuard, foundGuard] at this
-      · simp [firstFail, hc, wcfg, Cfg.recipe, r0] at h
+/-! ## F-4 -/
+
+/-- Trace 210: recipe 0's actor a1 is its executor (and recipe 1's is the
+owner). -/
+def scfg : Cfg Nat :=
+  { owner := 0, maxAge := 0,
+    metrics := [⟨0, 10, 5⟩],
+    terms := [⟨0, 0, 1, .excess⟩],
+    recipes := [⟨1, 1, [-1], [0], 2, []⟩, ⟨0, 0, [-1], [0], 2, []⟩] }
+
+/-- F-4: `validate` refuses a recipe whose actor is its own executor. -/
+theorem self_executor_invalid : validate scfg = false ∧ ¬ Valid scfg := by
+  refine ⟨by decide, fun h => ?_⟩
+  have := (valid_iff scfg).mpr h
+  revert this; decide
+
+/-- Trace 213: the owner may be a recipe's executor. -/
+def ocfg : Cfg Nat :=
+  { owner := 0, maxAge := 0,
+    metrics := [⟨0, 10, 5⟩],
+    terms := [⟨0, 0, 1, .excess⟩],
+    recipes := [⟨1, 0, [-1], [0], 2, []⟩] }
+
+theorem owner_executor_valid : Valid ocfg := (valid_iff ocfg).mp (by decide)
+
+/-! ## F-5 -/
+
+/-- A config whose recipe moves nothing: m(0,100,50); t(0,50,1,target);
+r(a1,x1,[0],[0],1,[]). -/
+def ccfg : Cfg Nat :=
+  { owner := 0, maxAge := 0,
+    metrics := [⟨0, 100, 50⟩],
+    terms := [⟨0, 50, 1, .target⟩],
+    recipes := [⟨1, 2, [0], [0], 1, []⟩] }
+
+theorem ccfg_valid : Valid ccfg := (valid_iff ccfg).mp (by decide)
+
+def cpre : List (Op Nat) := [.submit 1 0 1 0 200 100, .submit 1 0 1 1 200 100, .dispatch 1 0 101]
+
+/-- Record 0 Dispatched, record 1 Reserved, at version 3. -/
+def s3 : State :=
+  { values := [50], version := 3, observedAt := 100, paused := false,
+    records := [⟨0, 0, 1, 200, .dispatched⟩, ⟨1, 0, 1, 200, .reserved⟩], firstId := 0,
+    base := [50], k0 := 0, eff := 3 }
+
+theorem cpre_eq : run ccfg (init ccfg 100) cpre = s3 := by decide
+
+/-- Below the cap, the owner's `set_paused(false)` from an unpaused state
+only bumps the version. -/
+theorem pause_run (s : State) (hp : s.paused = false) (n : Nat)
+    (h : s.version + n ≤ VERSION_CAP) :
+    run ccfg s (List.replicate n (.pause 0 false)) =
+      { s with version := s.version + n, eff := s.eff + n } := by
+  induction n generalizing s with
+  | zero => cases s; simp at hp ⊢; simp [run, hp]
+  | succ n ih =>
+    have hv : s.version < VERSION_CAP := by omega
+    have ho : outcome ccfg s (.pause 0 false) = none := by
+      simp only [outcome, guards, pauseGuards, bumpNewGuards, capGuard, verGuard,
+        firstFail_eq_none, noFire_cons, noFire_nil, List.cons_append, List.nil_append, and_true]
+      refine ⟨by decide, decide_eq_false (by omega),
+        decide_eq_false (by simp only [VERSION_CAP, MAX_RECORDS] at hv ⊢; omega)⟩
+    rw [List.replicate_succ, run_cons]
+    have hs : step ccfg s (.pause 0 false) =
+        { s with version := s.version + 1, eff := s.eff + 1 } := by
+      simp only [step, exec_none ho, effect]
+      cases s; simp at hp ⊢; exact hp
+    rw [hs, ih { s with version := s.version + 1, eff := s.eff + 1 } hp
+      (by show s.version + 1 + n ≤ VERSION_CAP; omega)]
+    simp only [Nat.add_assoc, Nat.add_comm 1 n]
+
+/-- `cpre`, then `VERSION_CAP - 3` pauses. -/
+def capOps : List (Op Nat) := cpre ++ List.replicate (VERSION_CAP - 3) (.pause 0 false)
+
+/-- The state at the cap. -/
+def scap : State := { s3 with version := VERSION_CAP, eff := VERSION_CAP }
+
+theorem cap_eq : run ccfg (init ccfg 100) capOps = scap := by
+  rw [capOps, run_append, cpre_eq, pause_run s3 rfl _ (by simp [s3, VERSION_CAP, MAX_RECORDS, U32_MAX])]
+  simp [scap, s3, VERSION_CAP, MAX_RECORDS, U32_MAX]
+
+theorem cap_reach : Reach ccfg scap := cap_eq ▸ reach_run (Reach.init 100) capOps
+
+/-- F-5 at the cap: new work fails `Arithmetic` (`submit` with the current
+version, `dispatch` of the Reserved record, `set_paused`, `observe` of the
+current values), while the open records are resolved `Ok`: the executor
+settles the Dispatched one either way, the actor cancels the Reserved one,
+and `acknowledge` moves the Dispatched one. -/
+theorem cap_instance :
+    exec ccfg scap (.submit 1 0 1 VERSION_CAP 200 100) = (.err .arithmetic, scap) ∧
+      exec ccfg scap (.dispatch 1 1 101) = (.err .arithmetic, scap) ∧
+      exec ccfg scap (.pause 0 true) = (.err .arithmetic, scap) ∧
+      exec ccfg scap (.observe 0 [50] 102) = (.err .arithmetic, scap) ∧
+      (exec ccfg scap (.settle 2 0 true)).1 = .ok ∧
+      (exec ccfg scap (.settle 2 0 false)).1 = .ok ∧
+      (exec ccfg scap (.cancel 1 1 102)).1 = .ok ∧
+      (exec ccfg scap (.ack 0 true)).1 = .ok := by
+  simp only [scap, s3, VERSION_CAP, MAX_RECORDS, U32_MAX]
+  decide
+
+/-- ... and both open records can be resolved in turn, past the cap. -/
+theorem cap_drain :
+    run ccfg scap [.ack 0 true, .settle 2 0 true, .cancel 1 1 102] =
+      { scap with version := VERSION_CAP + 3, eff := VERSION_CAP + 3,
+                  records := [⟨0, 0, 1, 200, .completed⟩, ⟨1, 0, 1, 200, .cancelled⟩] } := by
+  simp only [scap, s3, VERSION_CAP, MAX_RECORDS, U32_MAX]
+  decide
+
+/-- INV-VERCAP is tight enough: at the cap the headroom left is 762. -/
+theorem cap_headroom : scap.version + remSum scap.records + 762 = U32_MAX := by
+  simp only [scap, s3, VERSION_CAP, MAX_RECORDS, U32_MAX]
+  decide
+
+/-! ## F-6 -/
+
+/-- Trace 211's config: m(0,10,5); t(0,0,1,excess); two recipes
+r(a1,x1,[-1],[0],2,[]); max_age 50. -/
+def fcfg : Cfg Nat :=
+  { owner := 0, maxAge := 50,
+    metrics := [⟨0, 10, 5⟩],
+    terms := [⟨0, 0, 1, .excess⟩],
+    recipes := [⟨1, 2, [-1], [0], 2, []⟩, ⟨1, 2, [-1], [0], 2, []⟩] }
+
+theorem fcfg_valid : Valid fcfg := (valid_iff fcfg).mp (by decide)
+
+def fops : List (Op Nat) :=
+  [.submit 1 0 1 0 1000 100, .dispatch 1 0 100, .ack 0 true, .submit 1 1 1 3 1000 120]
+
+/-- Record 0 Active, record 1 Reserved, values [3], observed at 100. -/
+def fstate : State := run fcfg (init fcfg 100) fops
+
+/-- F-6 (trace 211): at time 151 the snapshot has expired, so `dispatch`
+fails; a changed observation is `Pending` (records are open); restating
+the values is `Ok`, keeps values and records, and after it the `dispatch`
+is `Ok`. v1.0.0 answered `Pending` to the refresh too. -/
+theorem refresh_instance :
+    (exec fcfg fstate (.dispatch 1 1 151)).1 = .err .snapshotExpired ∧
+      (exec fcfg fstate (.observe 0 [4] 151)).1 = .err .pending ∧
+      (exec fcfg fstate (.observe 0 [3] 151)).1 = .ok ∧
+      (step fcfg fstate (.observe 0 [3] 151)).values = fstate.values ∧
+      (step fcfg fstate (.observe 0 [3] 151)).records = fstate.records ∧
+      (exec fcfg (step fcfg fstate (.observe 0 [3] 151)) (.dispatch 1 1 152)).1 = .ok := by
+  decide
 
 /-! ## Non-vacuity: the healthy path -/
 
@@ -226,24 +310,19 @@ def hstate : State := run wcfg (init wcfg 100) hops
 
 theorem hstate_eq : hstate =
     { values := [3, 5], version := 2, observedAt := 100, paused := false,
-      records := [⟨0, 0, 1, 200, .dispatched⟩], base := [5, 5], k0 := 0, eff := 2 } := by decide
+      records := [⟨0, 0, 1, 200, .dispatched⟩], firstId := 0, base := [5, 5], k0 := 0,
+      eff := 2 } := by decide
 
 theorem hstate_reach : Reach wcfg hstate := reach_run (Reach.init 100) hops
 
-/-- LIVE-1's premises are satisfiable on a reachable state. -/
-theorem live1_premises :
-    (∀ i < wcfg.n, B wcfg hstate i = 0) ∧ hstate.version < U32_MAX ∧
-      ∃ h : 0 < hstate.records.length, inFlight hstate.records[0].status = true := by
-  rw [hstate_eq]
-  refine ⟨?_, by decide, by decide, by decide⟩
-  intro i hi
-  have : i = 0 ∨ i = 1 := by simp [wcfg, Cfg.n] at hi; omega
-  rcases this with rfl | rfl <;> decide
+/-- LIVE-1 applies on a reachable state with an in-flight record. -/
+theorem live1_premises : ∃ h : 0 < hstate.records.length, inFlight hstate.records[0].status = true := by
+  rw [hstate_eq]; exact ⟨by decide, by decide⟩
 
 /-- `live1` applied to it, and the concrete settle agreeing. -/
 theorem live1_instance : outcome wcfg hstate (.settle 2 0 true) = none := by
-  have ⟨hB, hv, hk, hst⟩ := live1_premises
-  have := live1_reach wcfg_valid hstate_reach hB hv hk hst
+  have ⟨hk, hst⟩ := live1_premises
+  have := live1_reach wcfg_valid hstate_reach hk hst
   have e : (wcfg.recipe (hstate.records[0]'hk).recipe).executor = 2 := by
     simp only [hstate_eq]; rfl
   rw [e] at this
@@ -252,14 +331,16 @@ theorem live1_instance : outcome wcfg hstate (.settle 2 0 true) = none := by
 theorem healthy_settle :
     exec wcfg hstate (.settle 2 0 true) =
       (.ok, { values := [5, 0], version := 3, observedAt := 100, paused := false,
-              records := [⟨0, 0, 1, 200, .completed⟩], base := [5, 5], k0 := 0, eff := 3 }) := by
+              records := [⟨0, 0, 1, 200, .completed⟩], firstId := 0, base := [5, 5], k0 := 0,
+              eff := 3 }) := by
   decide
 
 /-- A Cancelled record is reachable too (submit, then the actor cancels). -/
 theorem cancelled_reach :
     run wcfg (init wcfg 100) [.submit 1 0 1 0 200 100, .cancel 1 0 102] =
       { values := [5, 5], version := 2, observedAt := 100, paused := false,
-        records := [⟨0, 0, 1, 200, .cancelled⟩], base := [5, 5], k0 := 0, eff := 2 } := by decide
+        records := [⟨0, 0, 1, 200, .cancelled⟩], firstId := 0, base := [5, 5], k0 := 0,
+        eff := 2 } := by decide
 
 /-- STALE-1 concretely: a submit carrying an old version fails `Stale`. -/
 theorem stale_instance : (exec wcfg hstate (.submit 1 0 1 0 300 102)).1 = .err .stale := by decide
@@ -269,5 +350,11 @@ then settles: the Unknown branch of LIVE-1. -/
 theorem unknown_settle :
     (exec wcfg (run wcfg hstate [.ack 0 false]) (.settle 2 0 true)).1 = .ok ∧
       (run wcfg hstate [.ack 0 false]).records = [⟨0, 0, 1, 200, .unknown⟩] := by decide
+
+/-- TERM-1 concretely: cancelling the completed record is `InvalidState`
+(v1.0.0: `Pending`). -/
+theorem cancel_completed_instance :
+    (exec wcfg (step wcfg hstate (.settle 2 0 true)) (.cancel 0 0 102)).1 = .err .invalidState := by
+  decide
 
 end Pool.Witness

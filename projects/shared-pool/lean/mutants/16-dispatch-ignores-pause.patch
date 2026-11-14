@@ -1,6 +1,9 @@
+Lean mutant 16-dispatch-ignores-pause
+dispatch's pause check dropped.
+
 --- a/PoolLean/Machine.lean
 +++ b/PoolLean/Machine.lean
-@@ -354,7 +354,7 @@
+@@ -421,7 +421,7 @@
    let c := s.record id
    [foundGuard s id,
     (.err .unauthorized, decide (caller ≠ (cfg.recipe c.recipe).actor)),
