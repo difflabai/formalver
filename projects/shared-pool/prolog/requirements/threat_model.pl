@@ -125,6 +125,7 @@ assumption('ASM-SPEC', "The specs (and this layer's transcription of the docs) m
 assumption('ASM-MODEL', "Kani's small scope (and MC-1's small universe) is representative.", med).
 assumption('ASM-LEAN-TLA', "The Lean and TLA+ models transcribe the code's semantics.", med).
 assumption('ASM-COMPILE', "The release profile has overflow-checks = true.", high).
+assumption('ASM-GAS', "Callers attach at least the prepaid gas api.md documents; a receipt that runs out of gas changes nothing (ASM-ATOMIC) and can be retried.", med).
 
 assumption_checked_by('ASM-PRED', 'RT-PRED').      assumption_checked_by('ASM-PRED', 'SH-1').
 assumption_checked_by('ASM-PRIVATE', 'RT-PRIVATE'). assumption_checked_by('ASM-PRIVATE', 'SH-2').
@@ -138,3 +139,4 @@ assumption_checked_by('ASM-LEAN-TLA', 'REF-3').    assumption_checked_by('ASM-LE
 assumption_checked_by('ASM-LEAN-TLA', 'REF-5').    assumption_checked_by('ASM-LEAN-TLA', 'REF-5L').
 assumption_checked_by('ASM-LEAN-TLA', 'C-2').
 assumption_checked_by('ASM-COMPILE', 'tools/scripts/check-pin.sh').
+assumption_checked_by('ASM-GAS', 'RES-1').

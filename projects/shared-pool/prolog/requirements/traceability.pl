@@ -51,6 +51,7 @@ property('TX-PAUSE', [kani, tla, lean, prolog], "set_paused: exact result in gua
 property('TX-OBSERVE', [kani, tla, lean, prolog], "observe: exact result in guard order, exact post-state, frame").
 property('TX-NOOP', [kani, tla, lean, prolog], "idempotent Ok paths change nothing, version included").
 property('TX-VER', [kani, tla, lean, prolog], "every other Ok increments version by exactly 1").
+property('VER-CAP', [kani, tla, lean, prolog], "version >= VERSION_CAP => submit, dispatch, set_paused, observe fail Arithmetic; ack, settle, cancel use the plain bump").  % v1.1.0
 property('AUTH-1', [kani, tla, lean, prolog], "effective submit/dispatch => actor; cancel => actor or owner; settle => executor; pause/observe => owner").
 property('STALE-1', [kani, tla, lean, prolog], "submit Ok => req.version = version; versions never repeat").
 property('ADM-1', [kani, tla, lean, prolog], "submit Ok => energy(post) <= energy(pre)").
@@ -62,6 +63,8 @@ property('ASYNC-1', [kani, tla, lean, prolog], "acknowledge never changes values
 property('TERM-1', [kani, tla, lean, prolog], "same terminal repeated = Ok no-op; opposite terminal = InvalidState").
 property('OBS-1', [kani, tla, lean, prolog], "observe Ok => no open record, config unchanged").
 property('PAUSE-1', [kani, tla, lean, prolog], "paused => no submit/dispatch effect; settle/ack/cancel/observe unaffected").
+property('OBS-2', [kani, tla, lean, prolog], "observe Ok with an open record changes only observed_at and version; no re-base").  % v1.1.0
+property('WIN-2', [kani, tla, lean, prolog], "a pruned id was terminal and is NotFound; ids never reused").  % v1.1.0
 % Invariants
 property('INV-WF', [tla, lean, kani, prolog], "values length n and bounded; record ids/recipes/units in range; #records <= 256; config never changes").
 property('INV-LEDGER', [tla, lean, kani, prolog], "values = base + open/completed reservations + completed completions since the last observe").
@@ -69,12 +72,19 @@ property('INV-HARD', [tla, lean, kani, prolog], "envelope over open records comp
 property('INV-HEALTHY', [tla, lean, kani, prolog], "B = 0 => every subset of open completions lands in bounds").
 property('INV-DEP', [tla, lean, kani, prolog], "every record's prerequisites are met by Completed records of lower index").
 property('INV-VER', [tla, lean, kani, prolog], "version = number of effective transitions").
+property('INV-RES', [tla, lean, kani, prolog], "release-aware envelope computable, endpoints within +-1e6, EV_i = PV_i(values)").  % v1.1.0
+property('INV-VERCAP', [tla, lean, kani, prolog], "version + sum over open records of rem(status) <= u32::MAX").  % v1.1.0
+property('WIN-1', [tla, lean, kani, prolog], "records[k].id = first_id + k; len <= 256; first_id + len <= version; completed_units = saturated lifetime count").  % v1.1.0
 % Reads
 property('RD-PREVIEW', [kani, 'near-tests', prolog], "preview.allowed <=> candidate Ok; preview.allowed and version < u32::MAX => submit Ok").
 property('RD-BEST', [kani, prolog], "best_quantity sound and minimal as documented").
 % Liveness
 property('LIVE-1', [lean, tla, prolog], "INV, B = 0, version < u32::MAX => settle(executor, id, true) Ok for every Dispatched/Active/Unknown record").
 property('LIVE-2', [tla, prolog], "every dispatched record eventually terminal under executor fairness; only without disturbing observes (F-1)").
+property('LIVE-ALL', [lean, tla, kani, prolog], "every open record can be resolved: cancel (actor, owner) of Reserved, settle both ways of in-flight are Ok; no premise").  % v1.1.0
+property('WIN-ESC', [lean, tla, kani, prolog], "Full iff 256 retained and the front open; resolving the front makes a submit pass the Full guard").  % v1.1.0
+property('REFRESH-1', [lean, tla, kani, prolog], "below the cap, the owner's observe of the current values is Ok in every reachable state").  % v1.1.0
+property('WIN-LIVE', [tla], "[](Full => <>~Full) under fairness of resolving the front").  % v1.1.0
 % Shell
 property('SH-1', ['near-tests'], "caller = predecessor").
 property('SH-2', ['near-tests'], "new private + init once").
@@ -87,11 +97,16 @@ property('SH-8', ['near-tests'], "Borsh state round trip").
 property('SH-9', ['near-tests'], "views; get_commitments paging <= 50").
 property('SH-10', ['near-tests'], "nonpayable methods reject deposits").
 property('SH-11', ['near-tests'], "wasm exports are the documented methods plus contract_source_metadata; no upgrade, migrate or reset export").
+property('SH-12', ['near-tests'], "wasm imports equal the build.sh allowlist; no deploy, key, transfer, stake, account, global-contract or promise_batch import").  % v1.1.0
+property('SCN-1', ['near-tests'], "the published scenarios/<name>/trace.json equal the core's run of each fixture").  % v1.1.0
 property('EX-1', ['near-tests'], "only lock executes").
 property('EX-2', ['near-tests'], "payload binding and dedupe").
 property('EX-3', ['near-tests'], "only operator finishes/confirms/sets mode").
 property('EX-4', ['near-tests'], "terminal conflict rejected").
 property('EX-5', ['near-tests'], "notify calls lock.settle").
+property('EX-6', ['near-tests'], "executor window: newest, retention id + 256 > newest, at most 512 jobs, forgotten ids cancelled / stale id").  % v1.1.0
+property('EX-7', ['near-tests', sandbox], "the executor never forgets the job of a record the lock retains").  % v1.1.0
+property('EX-8', ['near-tests', sandbox], "on_settled private, exactly one promise result, advances only on a successful settle").  % v1.1.0
 % Sandbox
 property('RT-PRED', [sandbox], "relay attribution").
 property('RT-PRIVATE', [sandbox], "new, on_result reject foreign callers").
@@ -100,6 +115,8 @@ property('RT-REVERT', [sandbox], "core error leaves state unchanged").
 property('RT-RACE', [sandbox], "finish before execute callback; late ack ignored").
 property('RT-WEDGE', [sandbox], "F-1 end to end").
 property('RES-1', [sandbox], "gas at max-size state < 300 Tgas").
+property('RT-WINDOW', [sandbox], "F-3 end to end: window past 256 records through the executor").  % v1.1.0
+property('RT-D1', [sandbox], "D-1 chain stays within 256 jobs").  % v1.1.0
 % Prolog
 property('C-1', [prolog], "authority matrix spec = code").
 property('C-2', [prolog], "guard order spec = code = TLA").
@@ -117,10 +134,13 @@ property('TLA-LIVE-F1', [tla], "F-1 counterexample (must be violated)").
 property('TLA-LIVE-F2', [tla], "F-2 counterexample, healthy observations and a fair honest executor (must be violated)").
 property('TLA-WIT', [tla], "witnesses").
 property('REF-5', [tla], "TLA+ trace replay").
+property('TLA-CAP', [tla], "near-cap TLC harness").  % v1.1.0
+property('TLA-EXEC', [tla], "executor protocol model: no retained record's job forgotten; accepted confirmations never fill the cap").  % v1.1.0
 % Lean
 property('LEAN-IND', [lean], "inductive invariant").
 property('LEAN-STEP', [lean], "step properties").
 property('LEAN-LIVE1', [lean], "LIVE-1 at every size").
+property('LEAN-LIVE-ALL', [lean], "LIVE-ALL at every size").  % v1.1.0
 property('LEAN-WIT', [lean], "F-1 witness and others").
 property('REF-5L', [lean], "Lean trace replay").
 property('LEAN-GUARD', [lean], "guard lists = code order").
@@ -143,6 +163,7 @@ property('ASM-SPEC', [assumption], "specs mean what we intend").
 property('ASM-MODEL', [assumption], "Kani small scope").
 property('ASM-LEAN-TLA', [assumption], "transcription").
 property('ASM-COMPILE', [assumption], "overflow-checks on").
+property('ASM-GAS', [assumption], "callers attach the documented prepaid gas").  % v1.1.0
 
 %%% ========================================================
 %%% What this layer does for each property it carries
@@ -166,6 +187,10 @@ prolog_evidence(P, test("MC-2: exact result and post-state of every replayed cal
 prolog_evidence('LIVE-2', 'model-check'("MC-1: healthy universe has no dead or release-blocked record; wedge universe has dead in-flight records (F-1); reliance universe has release-blocked in-flight records with B = 0 (F-2)")).
 prolog_evidence('RD-PREVIEW', test("COV-2 differential (test_reads): the real core's preview (allowed, reason, candidate, energies) at 1,246 trace states, 36,797 requests (conformance/traces/reads.txt) equals the model's; model unit tests (preview_allowed <=> submit Ok)")).
 prolog_evidence('RD-BEST', test("COV-2 differential (test_reads): the real core's best_quantity on the same 36,797 requests equals the model's best_quantity/4; model unit test against brute force on small cases")).
+% v1.1.0 (W1): planned. The model (W3) and the requirements (W6) replace this
+% clause with what they check; until then run.sh's PROP-tag step fails on these IDs.
+prolog_evidence(P, test("planned for v1.1.0: MC-2 on every trace state and MC-1 on the model's reachable graph (W3, W6)")) :-
+    member(P, ['VER-CAP', 'OBS-2', 'WIN-2', 'INV-RES', 'INV-VERCAP', 'WIN-1', 'LIVE-ALL', 'WIN-ESC', 'REFRESH-1']).
 
 %%% ========================================================
 %%% Requirements -> properties
