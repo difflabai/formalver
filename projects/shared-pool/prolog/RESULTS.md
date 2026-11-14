@@ -11,12 +11,13 @@ suite run as
 and python3 for `extract.py` (run with `-I`, stdlib only). Property
 catalogue: `projects/shared-pool/strategy.md` §5 (118 IDs), which C-6 reads.
 Run: `projects/shared-pool/prolog/run.sh` (optional `PROLOG_LOGS=<dir>`).
-Last full run: 2026-11-14, one uninterrupted run of `run.sh` (exit 0) in a
-scratch copy of the committed `prolog/`, `tla/` and `conformance/` at
-`51d4ca2` with the v1.1.0 corpus and the trace reader, both since
-committed: every step passes and all 47 mutants are killed, in 1,735 s,
-about 29 minutes (suites 188 s, mutants 1,510 s summed, most of it the
-MC-1 mutants).
+Last full run: 2026-11-14, one uninterrupted run of `run.sh` (exit 0) at
+the integration commit `a7781c7` (the v1.1.0 corpus and the trace reader
+committed together): every step passes and all 47 mutants are killed, in
+1,777 s, about 30 minutes (suites 182 s, mutants 1,554 s summed, most of it
+the MC-1 mutants), on a machine shared with other jobs. The first such run,
+in a scratch copy at `51d4ca2` with the same corpus and reader, took
+1,735 s.
 
 Conformance traces (v1.1.0 corpus, generated from the real core by
 `conformance/`): `core.txt`, sha256
@@ -78,14 +79,14 @@ traces, the COV-2 reads differential and the step/4 unit tests).
 | MC-1 `window1` (window 1) | same | no violation; prune 928, Full on an open front 2,120, prerequisite after prune 168, NotFound on the pruned id 8,450 | 2,186 states, 65,070 edges, complete |
 | MC-1 `cap` (window 2, VERSION_CAP = u32::MAX - 6, from 4 below it; F-5) | MC-1, VER-CAP, INV-VERCAP, LIVE-ALL | no violation; no dead record; at the cap submit (768 edges), dispatch (158), set_paused (2,968) and observe (3,592) stop with `Arithmetic`, while ack (276), cancel (540) and settle (392 + 392) stay Ok past it | 1,834 states, 52,770 edges, complete; the key keeps the version |
 | MC-1 `f2b` (trace 208's config; F-2b) | MC-1, INV-RES | no violation; no dead or release-blocked record; a submit whose envelope would leave ±1e6 fails `Arithmetic` at admission (147 edges, 16 of them only through a release term; shortest: recipe 1 × 67 from [0, 0]) | 1,776 states, 43,240 edges, complete |
-| MC-1 suite total (8 tests, including "the window is 256 again after the scaled runs") | | | 108 s |
-| MC-2: every trace replayed through `step/4` from the code's pre-state; result and post-state compared exactly; a refused config must be refused by `valid_config/1`; invariants, step properties and probes checked on the code's own states | MC-2, TX-*, INV-*, WIN-*, OBS-*, LIVE-1, LIVE-ALL, REFRESH-1, WIN-ESC | 0 divergences, 0 violations | 216 traces, 8,865 calls (2,565 Ok); every op kind Ok and all 15 reachable error kinds (`full` 1, `arithmetic` 3, `not_found` 2,869 calls); traces 0, 208-215 checked for their fixed shapes; suite (23 tests) 13.6 s |
+| MC-1 suite total (8 tests, including "the window is 256 again after the scaled runs") | | | 111 s |
+| MC-2: every trace replayed through `step/4` from the code's pre-state; result and post-state compared exactly; a refused config must be refused by `valid_config/1`; invariants, step properties and probes checked on the code's own states | MC-2, TX-*, INV-*, WIN-*, OBS-*, LIVE-1, LIVE-ALL, REFRESH-1, WIN-ESC | 0 divergences, 0 violations | 216 traces, 8,865 calls (2,565 Ok); every op kind Ok and all 15 reachable error kinds (`full` 1, `arithmetic` 3, `not_found` 2,869 calls); traces 0, 208-215 checked for their fixed shapes; suite (23 tests) 14.0 s |
 | step/4 unit tests (doc-cited), including the F-1..F-6 "fixed" tests (each keeps its v1.0.0 outcome in a comment), the RD-PREVIEW/RD-BEST model checks and the checkers' vacuity tests | TX-*, RD-*, WIN-*, VER-CAP | 34 pass | 1.4 s |
-| COV-2 reads differential: at each state of `reads.txt` the real core's `preview` and `best_quantity` equal the model's | RD-PREVIEW, RD-BEST | 0 divergences | 1,300 states (12 at VERSION_CAP or u32::MAX), 39,627 requests: 1,785 allowed, 37,842 rejected (paused 4,919, stale 1,998, expired 3,384, snapshot_expired 815, full 26, invalid_recipe 2,202, unauthorized 5,505, invalid_units 13,484, prerequisite 642, arithmetic 61, bounds 3,712, energy 1,094); best some 6,233, none 33,394 (1,912 above MAX_UNITS); suite (3 tests) 40.9 s |
-| Requirements suite (C-1..C-6 and their non-vacuity tests) | C-* | 19 tests | 13.8 s |
+| COV-2 reads differential: at each state of `reads.txt` the real core's `preview` and `best_quantity` equal the model's | RD-PREVIEW, RD-BEST | 0 divergences | 1,300 states (12 at VERSION_CAP or u32::MAX), 39,627 requests: 1,785 allowed, 37,842 rejected (paused 4,919, stale 1,998, expired 3,384, snapshot_expired 815, full 26, invalid_recipe 2,202, unauthorized 5,505, invalid_units 13,484, prerequisite 642, arithmetic 61, bounds 3,712, energy 1,094); best some 6,233, none 33,394 (1,912 above MAX_UNITS); suite (3 tests) 41.7 s |
+| Requirements suite (C-1..C-6 and their non-vacuity tests) | C-* | 19 tests | 13.9 s |
 | Planted faults (`test_mc2`): each step-property checker fires on a corrupted real call and stays silent on the real one (the v1.0.0 fourteen plus TERM-1 on cancel(Completed), OBS-2, WIN-1, WIN-2); in `test_model` the INV-*, WIN-1, edge and probe checkers fire on corrupted or v1.0.0 states | vacuity | pass | |
 | PROP tags | | every prolog-layer catalogue ID is tagged; no unknown tag | 48 of 118 |
-| Mutants | | 47 of 47 killed | 1,510 s summed |
+| Mutants | | 47 of 47 killed | 1,554 s summed |
 
 MC-1 bounds. The exploration state is pool + clock + ghost. Time is monotone
 (ASM-TIME) over each universe's time set: wedge {100, 200}, healthy, window1

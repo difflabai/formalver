@@ -13,9 +13,12 @@ tla2tools 1.7.4, OpenJDK 23, 4 workers (`run.sh` default), macOS arm64, on a
 Conformance traces (REF-5): the v1.1.0 corpus `conformance/traces/core.txt`
 (216 traces, 8,865 calls; trace 210 is an `init_error`) and the matching
 `trace2tla.py` and `TraceCheck.{tla,cfg}` (states `s/7`, `init_error`,
-the invariant `TInv`) are committed together (the integration commit). The
-trace and mutant numbers below were measured on the same corpus and parser
-in a scratch tree before that commit.
+the invariant `TInv`) are committed together (the integration commit,
+a7781c7). The trace and mutant numbers were first measured on the same
+corpus and parser in a scratch tree; both checks were run again at
+a7781c7 on 2026-11-14 with the same results (`trace` 9 s, every trace
+accepted; `mutants` 6 min 57 s, all 52 killed, each by the check the
+table below names).
 
 ## What v1.1.0 changed, and where the model has it
 
@@ -117,14 +120,15 @@ checked on every transition, also into a state whose view TLC has seen.
 | `trace` (TraceCheck): 216 traces, 8,865 calls, every result and post-state equal; `Inv` and `StepProperty` on every core state; trace 210's config refused by `ValidCfg` | REF-5 (also TX-0, TX-NOOP, CFG-1, CFG-2) | every trace accepted | 9,081 of 9,081 states (216 initial + 8,865 steps), 9 s |
 | `executor` (Executor.tla) | TLA-EXEC | no error; 12 witnesses reachable | section Executor |
 | Inductive invariant (Apalache) | TLA-IND | not done | open item, below |
-| Spec mutants (`mutants/*.patch`) | | all 52 killed (46 core, 6 executor; 29 and 31 retired) | 7 min 2 s |
+| Spec mutants (`mutants/*.patch`) | | all 52 killed (46 core, 6 executor; 29 and 31 retired) | 6 min 57 s (a7781c7) |
 
 The configs list each invariant on its own `INVARIANT` line (in the order
 above), so a failing run names the property. Each run's distinct-state
 count is the same in every run. The default `run.sh` (safety liveness
 trace) took 5 min 8 s in the scratch tree on 2026-11-14 (02:21-02:27;
-MC_Safety 181 s, the rest under 30 s each), the mutants 7 min 2 s; the
-times in the table are from single runs on a shared machine.
+MC_Safety 181 s, the rest under 30 s each), the mutants 7 min 2 s there
+and 6 min 57 s at a7781c7; the times in the table are from single runs on
+a shared machine.
 
 ## LIVE-2 and LIVE-ALL
 
@@ -219,8 +223,9 @@ executor checks are exempt (their universe has no VIEW and does not finish
 on the unmutated model; their baseline is `run.sh executor`). 52 patches:
 46 core-model mutants (01-28, 30, 32-48; 32-48 are the FR mutants t32-t48
 of strategy section 4.5) and 6 executor mutants (49-54, section Executor).
-All 52 are killed (2026-11-14, 7 min 2 s on 4 workers, in a scratch tree
-with the v1.1.0 corpus and parser). Killer = the first check that kills,
+All 52 are killed (2026-11-14 at the integration commit a7781c7, 6 min
+57 s on 4 workers; the first run, in a scratch tree with the same corpus
+and parser, had the same killers). Killer = the first check that kills,
 with the property TLC names (the configs list each invariant separately).
 Where the first property TLC names is not the one strategy.md section 4.5
 names for an FR mutant, that property was also checked alone, in one-off

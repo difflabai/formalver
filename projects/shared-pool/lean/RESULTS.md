@@ -126,7 +126,7 @@ and, for 17-26, a property probe (`mutants/probes/`: a concrete state on
 which the named property fails; it must fail to compile unmutated and
 compile on the mutant). All 26 are killed by the build; none survives.
 
-| Mutant | FR | Build: first module (theorem) | Probe | Replay (scratch, candidate corpus) |
+| Mutant | FR | Build: first module (theorem) | Probe | Replay |
 |--------|----|------|-------|--------|
 | 01-refresh-accepts-changed-values (Pending dropped; re-target of observe-pending-dropped) | | Facts (`observe_ok`) | | killed |
 | 02-envelope-skip-ignored | | Lemmas (`envS_split`, `envS_close`) | | killed |
@@ -161,9 +161,15 @@ Several first breaks are proof shape rather than a false statement: 19
 (Inv still holds when Full fires more often), 21 (INV-DEP still holds when
 the guard counts fewer units), 24 and 25 (the Facts restatements still
 hold); the probes show the named property itself fails on each. The
-replay column was measured once in a scratch copy with the parser change
-and the v1.1.0 corpus, before both were committed (with Guard dropped from
-Main for 09, 23 and 25, whose `guards_order` breaks).
+replay column was first measured in a scratch copy with the parser change
+and the v1.1.0 corpus, before both were committed, with Guard dropped from
+Main for 09, 23 and 25, whose `guards_order` breaks. `run.sh mutants` at
+a7781c7 (2026-11-14) gives the same column for the other 23 mutants (17,
+18, 19-21, 22 and 24 diverge first at the traces named). For 09, 23 and 25
+it prints "killed by replay", but there the replay step fails because
+`pool-lean` imports Guard (for `pool-lean guards`) and does not build: a
+build failure, not a trace divergence. The column keeps the scratch
+result for those three (23 survives the replay).
 
 ## Run times (darwin arm64, this workspace)
 
@@ -173,9 +179,9 @@ Main for 09, 23 and 25, whose `guards_order` breaks).
 | `run.sh audit` (65 `#print axioms`) | 1 s |
 | `run.sh canary` (3 files) | 1 s |
 | `run.sh regression` (1 file) | under 1 s |
-| `run.sh replay` | 1 s (measured on the v1.0.0 corpus, where it fails at trace 0; 3 s on the v1.1.0 corpus in a scratch copy) |
-| `run.sh mutants` (26 mutants, 10 probes) | 135 s (one mutant at a time) |
-| whole run, all six checks | 148 s |
+| `run.sh replay` | 1 s (a7781c7, the v1.1.0 corpus; 3 s in the scratch copy) |
+| `run.sh mutants` (26 mutants, 10 probes) | 174 s at a7781c7, one mutant at a time, each with the replay (135 s before the corpus was committed, when the unmutated replay failed and the per-mutant replay was skipped) |
+| whole run, all six checks | 182 s at a7781c7 (148 s before the corpus was committed) |
 
 ## What is NOT shown here
 
