@@ -7,7 +7,7 @@
     code_caller_check/5, code_literal/3, code_status_guard/4, code_status_next/5,
     code_status_write/3, code_field/3, code_role_checks/2, shell_method/4, shell_core_call/4, shell_literal/3, shell_helper/3,
     fixture_names/2, fixture_executor/2, fixture_owner/2, fixture_actors/2, fixture_recipe_actors/2,
-    code_checked_add/3, fixture_derived/3]).
+    code_checked_add/3, code_error_cond/4, fixture_derived/3]).
 :- discontiguous(code_fn/3).
 :- discontiguous(code_events/2).
 :- discontiguous(code_caller_check/5).
@@ -21,6 +21,8 @@
 :- discontiguous(fixture_actors/2).
 :- discontiguous(fixture_recipe_actors/2).
 :- discontiguous(code_checked_add/3).
+:- discontiguous(code_error_cond/4).
+:- dynamic(code_error_cond/4).
 :- dynamic(fixture_derived/3).
 
 code_constant('MAX_METRICS', 32, 11).
@@ -83,10 +85,13 @@ code_fn(violations, 194, ref).
 code_events(violations, []).
 code_fn(envelope, 206, ref).
 code_events(envelope, [e('Arithmetic', 219), e('Arithmetic', 222), e('Arithmetic', 225), e('Arithmetic', 228), e('Arithmetic', 230)]).
+code_error_cond(envelope, 230, 'Arithmetic', [text('!bounded(low[i]) || !bounded(high[i])')]).
 code_fn(check_bounds, 250, ref).
 code_events(check_bounds, [c(envelope, 256), e('Bounds', 262)]).
 code_fn(candidate, 267, ref).
 code_events(candidate, [e('Paused', 269), e('Stale', 272), e('Expired', 275), e('SnapshotExpired', 283), e('Full', 288), e('InvalidRecipe', 294), e('Unauthorized', 296), e('InvalidUnits', 299), e('Prerequisite', 305), c(add, 307), c(check_bounds, 308), c(energy, 309), c(energy, 310), e('Energy', 312), c(add, 315), c(energy, 315), e('Energy', 317), e('Arithmetic', 320)]).
+code_error_cond(candidate, 288, 'Full', [ge(retained, 'MAX_RECORDS'), open(front)]).
+code_error_cond(candidate, 320, 'Arithmetic', [ge(version, 'VERSION_CAP')]).
 code_caller_check(candidate, 295, and, [actor], 'Unauthorized').
 code_literal(candidate, 86400, 274).
 code_fn(preview, 324, ref).
@@ -105,6 +110,7 @@ code_events(bump, [e('Arithmetic', 396)]).
 code_checked_add(bump, 396, version).
 code_fn(bump_new, 401, mut).
 code_events(bump_new, [e('Arithmetic', 403), t(bump, 405)]).
+code_error_cond(bump_new, 403, 'Arithmetic', [ge(version, 'VERSION_CAP')]).
 code_fn(dispatch, 407, mut).
 code_events(dispatch, [c(record, 408), e('Unauthorized', 411), e('Paused', 414), e('InvalidState', 417), e('Expired', 420), e('SnapshotExpired', 428), c(index, 430), c(bump_new, 431)]).
 code_caller_check(dispatch, 410, and, [actor], 'Unauthorized').

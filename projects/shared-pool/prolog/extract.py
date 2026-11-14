@@ -6,7 +6,8 @@ PROP: C-1 C-2 C-3 C-4 (code side of the requirement checks)
 Sources (relative to projects/shared-pool/):
   source-mirror/crates/core/src/lib.rs      per function: error sites, fallible
                                              calls, early Ok returns, caller
-                                             comparisons, status tests and writes;
+                                             comparisons, status tests and writes,
+                                             the conditions of Full and Arithmetic ifs;
                                              role comparisons in Config::validate
   source-mirror/crates/contract/src/lib.rs  #[near] methods: attributes,
                                              receiver, core calls, caller source
@@ -228,6 +229,45 @@ def parse_cond(cond):
 
 
 # --------------------------------------------------------------------------
+# Conditions of the Full and version-cap guards (C-2). A condition is split at
+# its top-level `&&`; one with a top-level `||` stays whole. Each conjunct
+# over the pool's window or version becomes a term; any other conjunct is
+# kept as text, so a changed condition is visible to the comparison.
+
+def conjuncts(cond):
+    parts, depth, start, i = [], 0, 0, 0
+    has_or = False
+    while i < len(cond):
+        ch = cond[i]
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+        elif depth == 0 and cond.startswith("&&", i):
+            parts.append(cond[start:i].strip())
+            i += 2
+            start = i
+            continue
+        elif depth == 0 and cond.startswith("||", i):
+            has_or = True
+        i += 1
+    parts.append(cond[start:].strip())
+    return [cond.strip()] if has_or else parts
+
+
+def cond_atom(c):
+    s = re.sub(r"\s+", "", c)
+    cmp_name = {">=": "ge", ">": "gt"}
+    if (m := re.fullmatch(r"self\.records\.len\(\)(>=|>)(\w+)", s)):
+        return f"{cmp_name[m.group(1)]}(retained, '{m.group(2)}')"
+    if (m := re.fullmatch(r"self\.version(>=|>)(\w+)", s)):
+        return f"{cmp_name[m.group(1)]}(version, '{m.group(2)}')"
+    if s == "open(&self.records[0].status)":
+        return "open(front)"
+    return "text('" + c.replace("\\", "\\\\").replace("'", "\\'") + "')"
+
+
+# --------------------------------------------------------------------------
 # Constant expressions (v1.1.0: `pub const VERSION_CAP: u32 = u32::MAX - 3 *
 # MAX_RECORDS as u32;`). Integer literals, earlier constants, `T::MAX`/`T::MIN`,
 # `+ - *`, parentheses and `as T` (binding tighter than `*`, as in Rust); every
@@ -390,6 +430,15 @@ def core_facts(raw):
                      body.rfind("}", 0, m.start())) + 1
             for fm in re.finditer(r"\bself\s*\.\s*(\w+)\s*\.\s*checked_add\s*\(", body[st:m.start()]):
                 facts.append(f"code_checked_add({name}, {line_of(text, base + m.start())}, {fm.group(1)}).")
+
+        # Conditions of the Full and Arithmetic `if` guards, as the list of the
+        # condition's top-level `&&` conjuncts, at the line of the Error site:
+        #   if <cond> { return Err(Error::Full|Arithmetic); }
+        # C-2 compares the record bound (Full) and the version cap with the
+        # docs' conditions (pool_req guard_condition/4).
+        for m in re.finditer(r"\bif\s+((?:(?!\bif\b)[^{;])*?)\{\s*return\s+Err\((Error::(Full|Arithmetic))\)\s*;\s*\}", body, re.S):
+            conjs = [cond_atom(c) for c in conjuncts(" ".join(m.group(1).split()))]
+            facts.append(f"code_error_cond({name}, {line_of(text, base + m.start(2))}, '{m.group(3)}', [{', '.join(conjs)}]).")
 
         # caller comparisons: if <cond on caller> { return Err(Error::X); }
         for m in re.finditer(r"\bif\s+((?:(?!\bif\b)[^{;])*?\bcaller\b[^{]*?)\{\s*return\s+Err\(Error::(\w+)\)", body, re.S):
@@ -651,14 +700,15 @@ def main(argv):
              "    code_caller_check/5, code_literal/3, code_status_guard/4, code_status_next/5,",
              "    code_status_write/3, code_field/3, code_role_checks/2, shell_method/4, shell_core_call/4, shell_literal/3, shell_helper/3,",
              "    fixture_names/2, fixture_executor/2, fixture_owner/2, fixture_actors/2, fixture_recipe_actors/2,",
-             "    code_checked_add/3, fixture_derived/3]).",
+             "    code_checked_add/3, code_error_cond/4, fixture_derived/3]).",
              ":- discontiguous(code_fn/3).", ":- discontiguous(code_events/2).",
              ":- discontiguous(code_caller_check/5).", ":- discontiguous(code_literal/3).",
              ":- discontiguous(code_status_guard/4).", ":- discontiguous(code_status_next/5).",
              ":- discontiguous(code_status_write/3).", ":- discontiguous(shell_core_call/4).",
              ":- discontiguous(shell_method/4).", ":- discontiguous(shell_literal/3).",
              ":- discontiguous(fixture_actors/2).", ":- discontiguous(fixture_recipe_actors/2).",
-             ":- discontiguous(code_checked_add/3).", ":- dynamic(fixture_derived/3).", ""]
+             ":- discontiguous(code_checked_add/3).", ":- discontiguous(code_error_cond/4).",
+             ":- dynamic(code_error_cond/4).", ":- dynamic(fixture_derived/3).", ""]
     try:
         lines += core_facts(open(core).read())
         lines += shell_facts(open(shell).read())

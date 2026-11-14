@@ -154,7 +154,14 @@ reach(F, G) :-
 %% (no calls) adjacent repeats of one error collapse: they are one check over
 %% several components. Error sites that cannot fire from an INV state are
 %% marked by unreachable/2 (decision c2-unreachable); they may be skipped or
-%% matched, every other site must match the specification in order.
+%% matched, every other site must match the specification in order. The
+%% specification leg also compares sites, not only outcome names: a guard with
+%% a documented condition (guard_condition/4: the record bound, the version
+%% cap) matches only a site whose extracted `if` condition (code_error_cond/4)
+%% is the same, and no other guard matches such a site. So observe's plain
+%% bump() in place of bump_new() (an Arithmetic site without the cap test), or
+%% a Full test without the open-front conjunct, fails C-2 although the outcome
+%% names still line up. The TLA+ leg has outcome names only.
 
 kind_code(submit,           submit,      none).
 kind_code(dispatch,         dispatch,    none).
@@ -226,15 +233,30 @@ unreachable(it(E, [energy_terms-_ | _]), energy_terms) :- memberchk(E, ['Bounds'
 unreachable(it('Arithmetic', [energy-_ | _]), energy_sum).
 unreachable(it('Arithmetic', [add-_, candidate-L | _]), recovery_add) :-
     code_events(candidate, Es), member(c(check_bounds, LB), Es), L > LB.
-% v1.1.0: bump() inside bump_new(), after bump_new's own cap check.
+% v1.1.0: bump() inside bump_new(), after bump_new's own cap check (an
+% Arithmetic site whose extracted condition is version >= VERSION_CAP).
 unreachable(it('Arithmetic', [bump-_, bump_new-L | _]), bump_below_cap) :-
-    code_events(bump_new, Es), member(e('Arithmetic', LC), Es), LC < L.
+    cap_check(bump_new, LC), LC < L.
 % v1.1.0: the plain checked increment of acknowledge, release and settle.
 unreachable(it('Arithmetic', [bump-_, F-_ | _]), bump_reserve) :-
     memberchk(F, [acknowledge, release, settle]).
-% v1.1.0: submit's own checked additions (lib.rs:362, 363-366), after candidate's cap.
-unreachable(it('Arithmetic', [submit-L | _]), submit_version_add) :- code_checked_add(submit, L, version).
-unreachable(it('Arithmetic', [submit-L | _]), submit_id_add) :- code_checked_add(submit, L, first_id).
+% v1.1.0: submit's own checked additions (lib.rs:362, 363-366), after a call
+% to candidate, whose last check is the cap check (straight-line: every Ok
+% return of candidate passed it, and nothing in between bumps the version).
+unreachable(it('Arithmetic', [submit-L | _]), submit_version_add) :-
+    code_checked_add(submit, L, version), cap_checked_before(submit, L).
+unreachable(it('Arithmetic', [submit-L | _]), submit_id_add) :-
+    code_checked_add(submit, L, first_id), cap_checked_before(submit, L).
+
+%% cap_check(?Fn, ?Line): an Arithmetic site of Fn whose `if` condition is the
+%% documented version cap (the same condition guard_condition/4 gives
+%% version_cap).
+cap_check(Fn, L) :-
+    code_error_cond(Fn, L, 'Arithmetic', CC),
+    once(spec_cond(_, version_cap, SC)), same_conds(SC, CC).
+cap_checked_before(Fn, L) :-
+    code_events(Fn, Es), member(c(G, LG), Es), LG < L, code_events(G, GEs),
+    append(_, [e('Arithmetic', LC)], GEs), cap_check(G, LC).
 
 %% unreachable_rule(Rule, Why, DischargedBy)
 unreachable_rule(add_length, "add's length check: every vector has length n in a valid config and an INV state", ['CFG-2', 'INV-WF']).
@@ -248,19 +270,48 @@ unreachable_rule(bump_reserve, "spec:50: acknowledgment, settlement and cancella
 unreachable_rule(submit_version_add, "candidate's last check failed Arithmetic at version >= VERSION_CAP (spec:50), so version + 1 fits", ['VER-CAP', 'C-4']).
 unreachable_rule(submit_id_add, "first_id + len(records) <= version < VERSION_CAP (spec:9, spec:27)", ['WIN-1']).
 
-%% spec_outcomes(+Kind, -Outs): guard/5 order, err(E) -> E, noop -> noop.
-spec_outcomes(K, Outs) :- guard_sequence(K, Os), maplist(spec_out, Os, Outs).
+%% spec_outcomes(+Kind, -Items): guard/5 order, as g(GuardId, Outcome, Cond):
+%% err(E) -> E, noop -> noop; Cond the guard's documented condition
+%% (guard_condition/4, doc constants renamed to the code's) or none.
+spec_outcomes(K, Outs) :-
+    guard_ids(K, Gs), guard_sequence(K, Os), maplist(spec_item(K), Gs, Os, Outs).
+spec_item(K, G, O, g(G, X, C)) :-
+    spec_out(O, X), ( spec_cond(K, G, C0) -> C = C0 ; C = none ).
 spec_out(err(E), E).
 spec_out(noop, noop).
+g_out(g(_, X, _), X).
+
+%% spec_cond(?Kind, ?Guard, -Conjuncts): guard_condition/4 with each doc
+%% constant replaced by its code name (doc_code_constant/2, as in C-4).
+spec_cond(K, G, C) :- guard_condition(K, G, C0, _), maplist(code_conj, C0, C).
+code_conj(T, T1) :- T =.. [F, A, D], doc_code_constant(D, Code), !, T1 =.. [F, A, Code].
+code_conj(T, T).
+same_conds(A, B) :- msort_dup(A, A1), msort_dup(B, B1), A1 == B1.
 
 tla_out('Noop', noop) :- !.
 tla_out(E, E).
 
 %% c2_align(+Expected, +Items, -Alignment): every reachable item matches the next
-%% expected outcome in order; an unreachable item may match or be skipped.
-c2_align([], [], []).
-c2_align(S, [It | Cs], [skip(R) | A]) :- unreachable(It, R), c2_align(S, Cs, A).
-c2_align([X | S], [it(X, F) | Cs], [X-F | A]) :- c2_align(S, Cs, A).
+%% expected item in order; an unreachable item may match or be skipped.
+%% Expected items are outcome names (the TLA+ leg) or g/3 (the specification:
+%% site-checked). c2_align/4's first argument is `sites` or `names` (outcome
+%% names only, used to tell a condition mismatch from an order mismatch).
+c2_align(S, Items, A) :- c2_align(sites, S, Items, A).
+
+c2_align(_, [], [], []).
+c2_align(M, S, [It | Cs], [skip(R) | A]) :- unreachable(It, R), c2_align(M, S, Cs, A).
+c2_align(M, [X | S], [it(Y, F) | Cs], [X-F | A]) :- c2_match(M, X, Y, F), c2_align(M, S, Cs, A).
+
+c2_match(_, X, Y, _) :- atom(X), !, X == Y.
+c2_match(names, g(_, X, _), Y, _) :- X == Y.
+c2_match(sites, g(_, X, C), Y, F) :- X == Y, site_ok(C, X, F).
+
+%% site_ok(+SpecCond, +Outcome, +Frames): a guard with a documented condition
+%% matches only a site whose extracted condition is the same; a guard without
+%% one does not match a site whose condition some guard documents.
+site_ok(none, X, [Fn-L | _]) :- !,
+    \+ ( code_error_cond(Fn, L, X, CC), spec_cond(_, _, SC), same_conds(SC, CC) ).
+site_ok(SC, X, [Fn-L | _]) :- code_error_cond(Fn, L, X, CC), same_conds(SC, CC).
 
 c_problems('C-2', Ps, Info) :-
     findall(P, c2_problem(P), Ps),
@@ -269,19 +320,36 @@ c_problems('C-2', Ps, Info) :-
     findall(R, ( op_kind(K), kind_code(K, F, Fl), code_path(F, Fl, Is), member(It, Is), unreachable(It, R) ), Rs0),
     sort(Rs0, Rs),
     (   tla_source(present) -> Tla = tla_leg(compared) ; Tla = tla_leg(gap_no_tla_file) ),
-    Info = [guards_per_kind(Sizes), basis(Basis), unreachable_rules_used(Rs), Tla].
+    findall(K-G-Fn-L, ( op_kind(K), kind_code(K, F, Fl), code_path(F, Fl, Is), spec_outcomes(K, S),
+                        once(c2_align(S, Is, A)), member(g(G, _, C)-[Fn-L | _], A), C \== none ), Conds),
+    length(Conds, NConds),
+    Info = [guards_per_kind(Sizes), basis(Basis), unreachable_rules_used(Rs),
+            conditions_compared(NConds), Tla].
 
-c2_problem(spec_vs_code(K, spec(S), code(Reach))) :-
+%% The specification leg: an order (or outcome) difference is spec_vs_code;
+%% if the outcome names line up but a documented condition does not, the
+%% problem names each guard whose site has another condition (code(none): the
+%% site has no extracted `if` condition, e.g. a plain checked increment).
+c2_problem(P) :-
     op_kind(K), kind_code(K, Fn, Flag),
     code_path(Fn, Flag, Items), spec_outcomes(K, S),
     \+ once(c2_align(S, Items, _)),
-    reachable_outcomes(Items, Reach).
+    (   once(c2_align(names, S, Items, A))
+    ->  findall(G-spec(C)-site(SFn-L)-code(CC),
+                ( member(g(G, X, C)-[SFn-L | Up], A), \+ site_ok(C, X, [SFn-L | Up]),
+                  ( code_error_cond(SFn, L, X, CC0) -> CC = CC0 ; CC = none ) ), Ds),
+        P = condition_vs_code(K, Ds)
+    ;   maplist(g_out, S, Names), reachable_outcomes(Items, Reach),
+        P = spec_vs_code(K, spec(Names), code(Reach))
+    ).
 c2_problem(tla_vs_code(K, tla(T), code(Reach))) :-
     tla_source(present),
     op_kind(K), tla_kind(K, Op), tla_guard_order(Op, T0), maplist(tla_out, T0, T),
     kind_code(K, Fn, Flag), code_path(Fn, Flag, Items),
-    \+ once(c2_align(T, Items, _)),
+    \+ once(c2_align(names, T, Items, _)),
     reachable_outcomes(Items, Reach).
+c2_problem(guard_condition_unknown(K, G)) :-
+    guard_condition(K, G, _, _), \+ guard(K, _, G, _, _).
 c2_problem(tla_missing(Op)) :-
     tla_source(present), op_kind(K), tla_kind(K, Op), \+ tla_guard_order(Op, _).
 c2_problem(tla_unknown_op(Op)) :-
@@ -726,7 +794,7 @@ release_results(trace(_, Cfg, Now, Init, Calls), [pairs_admitted(NP), releases_t
     findall(A-R, ( member(A-R, Atts), R \== ok ), Cx),
     states_before_observe(Init, Calls, Sts),
     length(Sts, NS),
-    findall(K-rel(J, St0, R), ( nth0(K, Sts, St), trace_to_pool(Cfg, St, S), trace_release(Cfg, S, Now, rel(J, St0, R)) ), TAtts),
+    findall(K-rel(Id, St0, R), ( nth0(K, Sts, St), trace_to_pool(Cfg, St, S), trace_release(Cfg, St, S, Now, rel(Id, St0, R)) ), TAtts),
     length(TAtts, NT),
     findall(state(K)-Rel, ( member(K-Rel, TAtts), Rel = rel(_, _, R), R \== ok ), TCx).
 
@@ -755,11 +823,24 @@ before_obs([call(Op, R, St) | Cs], Out) :-
     ;   Out = [St | Out1], before_obs(Cs, Out1)
     ).
 
-trace_release(Cfg, S, Now, rel(J, St, R)) :-
-    pool_records(S, Rs), nth0(J, Rs, c(RI, _, _, St)), open_status(St),
-    (   St == reserved -> actor_of(Cfg, RI, A), step(S, cancel(A, J, Now), R, _)
-    ;   executor_of(Cfg, RI, X), step(S, settle(X, J, false), R, _)
+%% trace_release(+Cfg, +TraceState, +Pool, +Now, -rel(Id, Status, Result)):
+%% an open record of the trace state and its release in the model (Pool is
+%% trace_to_pool of the same state): cancel by the actor if Reserved, else
+%% settle(false) by the executor.
+trace_release(Cfg, TSt, S, Now, rel(Id, St, R)) :-
+    trace_open_record(TSt, Id, RI, St),
+    (   St == reserved -> actor_of(Cfg, RI, A), step(S, cancel(A, Id, Now), R, _)
+    ;   executor_of(Cfg, RI, X), step(S, settle(X, Id, false), R, _)
     ).
+
+%% trace_open_record(+TraceState, -Id, -Recipe, -Status): an open record of
+%% the trace state with its id. Record j of the state has id FirstId + j
+%% (spec:9, spec:27: the window keeps the most recent records; s/7's sixth
+%% position); a v1.0.0 s/5 state has no pruned prefix (FirstId 0). The list
+%% index alone is the id only while FirstId = 0.
+trace_open_record(TSt, Id, RI, St) :-
+    st_parts(TSt, _, _, _, Rs), st_first_id(TSt, F),
+    nth0(J, Rs, c(RI, _, _, St)), open_status(St), Id is F + J.
 
 %% conserve_walk: every non-observe call keeps sum(Names); report the first that does not.
 conserve_walk([call(Op, _, St) | Cs], F, Names, V0, I, Why) :-
@@ -774,6 +855,8 @@ conserve_walk([call(Op, _, St) | Cs], F, Names, V0, I, Why) :-
 %% FirstId and DoneUnits after the five unchanged positions).
 st_parts(s(V, N, O, _, R), V, N, O, R).
 st_parts(s(V, N, O, _, R, _, _), V, N, O, R).
+st_first_id(s(_, _, _, _, _), 0).
+st_first_id(s(_, _, _, _, _, F, _), F).
 
 %% RISK-HEADROOM (spec:70, handoff:23): in every state of the risk trace and for
 %% every (recipe, units), (a) the envelope's high endpoint is the same with and

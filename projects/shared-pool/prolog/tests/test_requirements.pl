@@ -98,6 +98,32 @@ test('C-2 alignment covers every op kind and rejects a swapped spec', (
         ;   true
         ) )) )).
 
+% C-2 compares guard sites, not only outcome names: each guard with a
+% documented condition (guard_condition/4: the record bound, the version cap)
+% stands for a code site with the same extracted `if` condition. Observe with
+% a plain bump() in place of bump_new() (an Arithmetic site without the cap
+% test; mutant c12) still lines up by outcome names and is rejected; so is a
+% Full test without the open-front conjunct (mutant c11), and a cap-check
+% site cannot stand for a guard without that condition.
+test('C-2 compares the record bound and version cap conditions with the code', (
+    findall(K-G-Fn, ( op_kind(K), consistency:kind_code(K, F, Fl), code_path(F, Fl, Is),
+                      spec_outcomes(K, S), once(c2_align(S, Is, A)),
+                      member(g(G, _, C)-[Fn-_ | _], A), C \== none ), Ms),
+    note("conditioned guards and their code sites: ~q", [Ms]),
+    check(matched, Ms == [submit-record_bound-candidate, submit-version_cap-candidate,
+                          dispatch-version_cap-bump_new, pause-version_cap-bump_new,
+                          observe-version_cap-bump_new]),
+    consistency:kind_code(observe, OF, OFl), code_path(OF, OFl, OIs), spec_outcomes(observe, OS),
+    append(Pre, [it('Arithmetic', [bump_new-_, observe-LB]) | _], OIs),
+    code_events(bump, [e('Arithmetic', LBump)]),
+    append(Pre, [it('Arithmetic', [bump-LBump, observe-LB])], Plain),
+    check(plain_bump_names_align, once(consistency:c2_align(names, OS, Plain, _))),
+    check(plain_bump_rejected, \+ c2_align(OS, Plain, _)),
+    consistency:spec_cond(submit, record_bound, FC), note("record_bound condition: ~q", [FC]),
+    check(full_needs_open_front, \+ consistency:same_conds(FC, [ge(retained, 'MAX_RECORDS')])),
+    code_error_cond(bump_new, LC, 'Arithmetic', _),
+    check(cap_site_reserved, \+ consistency:site_ok(none, 'Arithmetic', [bump_new-LC])) )).
+
 % C-3: the code derivation is total and agrees with the spec on every row. The
 % v1.0.0 difference (Unknown -> Unknown on a negative acknowledgment) is closed:
 % spec:41 now names it an Ok no-op (div-ack-noop-version is a closed divergence).
@@ -141,6 +167,21 @@ test('VERSION_CAP is extracted as u32::MAX - 768 and matches the docs', (
     check(reserve, 4294966527 =:= VM - 3 * MR),
     guard_sequence(submit, SO), append(_, [Last], SO), note("submit's last guard: ~q", [Last]),
     check(cap_last_in_submit, guard(submit, _, version_cap, Last, _)) )).
+
+% C-5's trace releases address a record by id = FirstId + j (record j of an
+% s/7 state; spec:9, spec:27), not by its list index: in a pruned window
+% (FirstId > 0) the index is not the id. A v1.0.0 s/5 state starts at 0.
+% (The release itself is the model's step/4 at that id: an end-to-end test on
+% a pruned window needs the v1.1 model's pool with first_id, W6.)
+test('C-5 trace releases use id = first_id + index in a pruned window', (
+    St7 = s([0], 9, 0, false, [c(0, 1, 10, completed), c(0, 1, 10, reserved),
+                               c(1, 2, 10, cancelled), c(1, 2, 10, dispatched)], 5, [1, 0]),
+    findall(Id-RI-S, consistency:trace_open_record(St7, Id, RI, S), O7),
+    note("open records of a window starting at id 5: ~q", [O7]),
+    check(pruned, O7 == [6-0-reserved, 8-1-dispatched]),
+    St5 = s([0], 2, 0, false, [c(0, 1, 10, reserved), c(0, 1, 10, completed)]),
+    findall(Id-S, consistency:trace_open_record(St5, Id, _, S), O5),
+    check(unpruned, O5 == [0-reserved]) )).
 
 % Extracted fixture accounts (fixtures.rs) behind CASH-SELF.
 test('C-5 CASH-SELF uses the fixtures.rs account names, not the renamed trace atoms', (

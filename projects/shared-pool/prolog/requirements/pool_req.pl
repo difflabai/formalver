@@ -48,6 +48,9 @@
 %%       Outcome = err(Error) | noop (Ok, nothing changes); the first guard whose
 %%       condition fails decides; if none fails the effect applies
 %%   guard_sequence(OpKind, [Outcome..]), guard_ids(OpKind, [GuardId..])
+%%   guard_condition(OpKind, GuardId, [Conjunct..], Cite)
+%%       the documented failure condition of a guard whose condition C-2
+%%       compares with the code's `if` (record_bound, version_cap)
 %%   op_kind(OpKind)
 %%   pool_error(Error, Cite)                    error names the docs use
 %%   life(OpClass, Flag, From, Outcome, Basis)  lifecycle table
@@ -76,6 +79,7 @@
     guard/5,
     guard_sequence/2,
     guard_ids/2,
+    guard_condition/4,
     op_kind/1,
     pool_error/2,
     life/5,
@@ -171,7 +175,7 @@ requirement('A-REASONS', 'api:32', "Reasons include Unauthorized, Paused, Stale,
 requirement('A-AFTER', 'api:32', "after can be present for a rejected request to explain its prospective score; it is not accepted state.").
 requirement('A-EXECUTOR', 'api:40', "execute({id,recipe,units}) -> active | cancelled | unknown, only the lock may call; status({id}) also returns completed; any result that is not one JSON string of at most 64 bytes, and any unexpected string, becomes Unknown in the wrapper.").
 requirement('A-EXEC-WINDOW', 'api:42', "The synthetic adapter forgets a job once its id is 256 or more behind its newest id; execute of a forgotten id returns cancelled and starts nothing; on_settled raises the newest id only if the lock accepted; at most 512 jobs.").
-requirement('A-GAS', 'api:46', "Attach at least the documented prepaid gas; a call with too little gas fails without changing either contract.").
+requirement('A-GAS', 'api:46; api:57', "Attach at least the documented prepaid gas; a call with too little gas fails without changing either contract.").
 requirement('A-CONFIG-ROLES', 'api:65', "A recipe's actor and executor must be different accounts; new rejects the config otherwise (InvalidConfig).").
 % verification-handoff.md obligations (handoff:11-26) and nuances (handoff:32-39)
 requirement('H-CFG', 'handoff:11', "Accepted configuration references are valid and all loops/data are bounded.").
@@ -369,6 +373,22 @@ guard_sequence(Kind, Outcomes) :-
 guard_ids(Kind, Ids) :-
     op_kind(Kind),
     findall(N-G, guard(Kind, N, G, _, _), Ps), keysort(Ps, S), pairs_values(S, Ids).
+
+%% guard_condition(Kind, GuardId, Conjuncts, Cite): the guard fails (returns
+%% its error) exactly when every conjunct holds. Only the guards whose
+%% condition the docs state as a formula over the window or the version are
+%% listed; C-2 matches each to a code site with the same extracted condition
+%% (code_error_cond/4), and no other guard may stand for such a site.
+%%   ge(retained, max_records)  at least max_records records are retained
+%%   open(front)                the oldest retained record is open
+%%   ge(version, version_cap)   version has reached VERSION_CAP
+guard_condition(submit,   record_bound, [ge(retained, max_records), open(front)],
+                'spec:21 "Full only when 256 records are retained and the oldest is open"; api:28 "while it is open, submit fails Full"').
+guard_condition(submit,   version_cap,  [ge(version, version_cap)],
+                'spec:50 "submit (as its last check ...) ... fail Arithmetic once version reaches VERSION_CAP"').
+guard_condition(dispatch, version_cap,  [ge(version, version_cap)], 'spec:50 "dispatch ... fail Arithmetic once version reaches VERSION_CAP"').
+guard_condition(pause,    version_cap,  [ge(version, version_cap)], 'spec:50 "set_paused ... fail Arithmetic once version reaches VERSION_CAP"').
+guard_condition(observe,  version_cap,  [ge(version, version_cap)], 'spec:50 "observe fail Arithmetic once version reaches VERSION_CAP"').
 
 %%% ========================================================
 %%% Lifecycle (spec:39-46, api:14-17, api:30)
