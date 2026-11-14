@@ -344,11 +344,65 @@ fingerprint: CI's `mutants` job reruns every mutant's plain mode with
 `tools/versions.env`'s toolchain on every run.
 
 <!-- kani-local-record: begin (kani/local/record.py writes this block; do not edit) -->
-**PLACEHOLDER, not a result: the local record is not written yet.** The
-run at `89f99d6` is still in progress. When it has finished,
-`kani/local/record.py <run dir>` replaces this block with the record's
-provenance, its harness table and its mutant table.
-`check-kani-record.py` fails while this placeholder stands.
+Local record (`kani/local/`, 36 harnesses and 16 mutants): commit `89f99d6`, Kani inputs fingerprint `3ea19cce127f` (CI recomputes it, `tools/scripts/check-kani-record.py`); Kani 0.68.0, CBMC 6.11.0; Apple M1 Max 10 cores 64 GB, macOS 27.2.1; 2026-11-13T22:44:37Z to 2026-11-14T02:59:36Z, 2 jobs at a time, their measured peaks summing to at most 50 GB. Time is wall clock per harness including compilation (a mutant: its whole run, plain mode included); peak is CBMC's resident memory, sampled every 3 s; limit is the job's KANI_TIMEOUT.
+
+| Harness | Result | Time (s) | Peak (GB) | Limit (s) | Covers SATISFIED (this harness) |
+|---|---|---:|---:|---:|---|
+| `h_init` | ok | 430 | 27.9 | 2400 | 2 of 2 |
+| `h_validate` | ok | 800 | 33.7 | 2400 | 10 of 10 |
+| `h_energy` | ok | 145 | 18.9 | 1800 | 4 of 4 |
+| `h_energy_exact` | ok | 1356 | 17.5 | 5100 | 0 of 4 |
+| `h_energy_max` | ok | 468 | 27.1 | 1800 | 1 of 1 |
+| `h_preview` | ok | 1718 | 19.1 | 4800 | 5 of 5 |
+| `h_preview_post` | ok | 1102 | 12.2 | 4500 | 0 of 5 |
+| `h_wedge` | ok | 394 | 35.4 | 1800 | 2 of 2 |
+| `h_bmc_from_init_po` | ok | 1581 | 24.5 | 4800 | 0 of 2 |
+| `h_slot_cycle_0` | ok | 517 | 20.7 | 2400 | 1 of 1 |
+| `h_slot_cycle_2` | ok | 961 | 29.1 | 2700 | 1 of 1 |
+| `h_full_255` | ok | 829 | 17.5 | 2400 | 1 of 2 |
+| `h_version_max_submit` | ok | 400 | 14.4 | 1800 | 1 of 10 |
+| `h_bmc_from_init_s_submit` | ok | 996 | 29.8 | 3600 | 2 of 2 |
+| `h_bmc_from_init_s_dispatch` | ok | 227 | 15.9 | 1800 | 0 of 2 |
+| `h_bmc_from_init_s_ack` | ok | 225 | 15.1 | 1800 | 0 of 2 |
+| `h_bmc_from_init_s_cancel` | ok | 291 | 16.4 | 1800 | 0 of 2 |
+| `h_bmc_from_init_s_settle` | ok | 334 | 21.2 | 1800 | 0 of 2 |
+| `h_bmc_from_init_s_pause` | ok | 219 | 15.0 | 1800 | 0 of 2 |
+| `h_bmc_from_init_s_observe` | ok | 262 | 19.0 | 1800 | 0 of 2 |
+| `h_step_submit_tx` | ok | 636 | 16.1 | 1800 | 0 of 68 |
+| `h_step_submit_post` | ok | 472 | 16.6 | 1800 | 0 of 68 |
+| `h_step_submit_inv` | ok | 880 | 23.8 | 2700 | 0 of 68 |
+| `h_step_submit_cov` | ok | 215 | 14.9 | 1800 | 17 of 68 |
+| `h_step_cancel_post` | ok | 181 | 14.0 | 1800 | 0 of 68 |
+| `h_step_cancel_inv` | ok | 265 | 13.1 | 1800 | 0 of 68 |
+| `h_step_settle_tx` | ok | 232 | 12.2 | 1800 | 0 of 68 |
+| `h_step_settle_post` | ok | 372 | 18.2 | 1800 | 0 of 68 |
+| `h_step_settle_inv` | ok | 553 | 17.2 | 2100 | 0 of 68 |
+| `h_step_submit_inv_0` | ok | 388 | 21.0 | 1800 | 0 of 68 |
+| `h_step_submit_inv_1` | ok | 490 | 24.4 | 1800 | 0 of 68 |
+| `h_step_submit_inv_3` | ok | 1550 | 16.6 | 3600 | 0 of 68 |
+| `h_step_cancel_inv_3` | ok | 822 | 15.9 | 2100 | 0 of 68 |
+| `h_step_settle_inv_1` | ok | 179 | 12.4 | 1800 | 0 of 68 |
+| `h_step_settle_inv_3` | ok | 2424 | 13.1 | 5400 | 0 of 68 |
+| `h_step_observe_inv_3` | ok | 165 | 14.0 | 1800 | 0 of 68 |
+
+| Mutant | Expected | Plain | Kani (harness) | Time (s) | Peak (GB) | Limit (s) |
+|---|---|---|---|---:|---:|---:|
+| `01-guard-swap-paused-stale` | killed | killed | killed (`h_step_submit_tx`) | 360 | 12.5 | 1800 |
+| `03-submit-expiry-off-by-one` | killed | killed | killed (`h_step_submit_tx`) | 352 | 16.8 | 1800 |
+| `05-check-bounds-without-skip` | killed | killed | killed (`h_step_settle_tx`) | 210 | 12.8 | 1800 |
+| `06-envelope-ignores-reserved` | killed | killed | killed (`h_step_submit_tx`) | 306 | 15.6 | 1800 |
+| `10-settle-accepts-opposite-terminal` | killed | killed | killed (`h_step_settle_tx`) | 170 | 11.3 | 1800 |
+| `11-prerequisite-counts-non-completed` | killed | killed | killed (`h_step_submit_tx`) | 372 | 15.8 | 1800 |
+| `12-energy-ge` | killed | killed | killed (`h_step_submit_tx`) | 324 | 20.0 | 1800 |
+| `15-submit-actor-check-dropped` | killed | killed | killed (`h_step_submit_tx`) | 262 | 17.0 | 1800 |
+| `16-settle-executor-check-dropped` | killed | killed | killed (`h_step_settle_tx`) | 192 | 10.1 | 1800 |
+| `18-preview-candidate-divergence` | killed | killed | killed (`h_preview`) | 572 | 20.4 | 4800 |
+| `19-recovery-gt` | killed | killed | killed (`h_step_submit_tx`) | 265 | 16.7 | 1800 |
+| `21-full-off-by-one` | killed | killed | killed (`h_full_256`) | 338 | 15.4 | 1800 |
+| `23-envelope-ignores-extra` | killed | killed | killed (`h_step_submit_tx`) | 247 | 14.1 | 1800 |
+| `25-energy-excess-sign` | killed | killed | killed (`h_energy_exact`) | 306 | 14.3 | 5100 |
+| `28-check-bounds-vs-candidate` | killed | killed | killed (`h_step_submit_tx`) | 250 | 17.4 | 1800 |
+| `30-full-rejects-at-255` | killed | killed | killed (`h_full_255`) | 386 | 3.8 | 2400 |
 <!-- kani-local-record: end -->
 
 ## Bounds
