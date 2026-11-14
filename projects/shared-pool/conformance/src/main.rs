@@ -60,6 +60,57 @@
 //! `--check FILE` regenerates and fails if FILE differs (CI: the checked-in
 //! traces are current); `--reads-out` and `--reads-check` do the same for
 //! reads.txt. With none of the four, core.txt goes to stdout.
+//!
+//! # v1.1.0 trace contract (frozen in W1 of the v1.1.0 re-verification)
+//!
+//! The format above is v1.0.0's (pin a4bb5c3). For v1.1.0 (pin 57b3f02) the
+//! generator (W2) and every replayer (TLA+, Lean, Prolog, the shell) follow
+//! this contract; nothing below is implemented by this file yet.
+//!
+//! ```text
+//! State  = s([Values..], Version, ObservedAt, Paused, [c(Recipe,Units,ExpiresAt,Status),..],
+//!            FirstId, [DoneUnits..])
+//! ```
+//!
+//! - The first five positions of `s/7` are unchanged, and `c/4` is
+//!   unchanged. Record `j` of the list has id `FirstId + j` (no longer its
+//!   index); `DoneUnits` is `completed_units`, one entry per recipe:
+//!   `min(u32::MAX, lifetime Completed units of the recipe)`.
+//! - A refused configuration (`Config::validate` fails, e.g. actor =
+//!   executor) is the whole trace:
+//!   `trace(N). config(...). init_error(invalid_config). end.`
+//! - Numbering: traces 0-211 keep their numbers (fixtures are chosen by
+//!   name). Appended: 212 `station`, 213 `owner_exec`, 214
+//!   `f1_recovery_done`, 215 `f1_recovery_released`: 216 traces. Traces 208
+//!   and 209 keep their calls; only the results change.
+//! - Trace 207 `window` (was `full`) gains a third recipe `gate` with
+//!   `requires: [(0, 1)]`. Calls in order: id 0 (`nop`) driven to Completed;
+//!   id 1 submitted and cancelled; id 2 kept Reserved; ids 3-255 submitted
+//!   and cancelled; a `nop` submit gives `ok(256)` and prunes id 0; a `gate`
+//!   submit gives `ok(257)` and prunes id 1 (its prerequisite met by
+//!   `completed_units` only, id 0 being gone); a submit gives `err(full)` on
+//!   the open front, id 2; cancel(2); a submit gives `ok(258)`; four calls on
+//!   the pruned id 0 give `err(not_found)`; observe. About 520 calls; still
+//!   the only 256-record trace.
+//! - Trace 213 ends with an `observe` of the current values with no record
+//!   open, so every replayer exercises the ghost choice (re-base, not
+//!   refresh).
+//! - Traces 214 and 215 use the configuration of upstream
+//!   `crates/core/src/findings.rs:175` (a disturbing observe, the recovery
+//!   hedge admitted, dispatch, ack, then `settle` true in 214 and false in
+//!   215).
+//! - Coverage (`coverage.py`): `required` adds `submit:prune`,
+//!   `submit:full_open_front`, `submit:prereq_after_prune`,
+//!   `submit:recovery_admitted`, `<op>:not_found_pruned`, `observe:refresh`,
+//!   `cancel:invalid_state` and `init:invalid_config`. `forbidden` is every
+//!   `cancel` or `settle` result `bounds` or `arithmetic`.
+//! - No state in `core.txt` has a version at or above `VERSION_CAP`
+//!   (u32::MAX - 768; TLC's integers); states at the cap are in `reads.txt`
+//!   only.
+//! - Ghosts, for the replayers that keep them: on observe Ok, `base` and
+//!   `k0` are kept iff the new values equal the current values and some
+//!   record is open (the refresh); otherwise `base = values`,
+//!   `k0 = FirstId + len` (an id) and the pruned sum is 0.
 
 use pool_core::*;
 use std::collections::BTreeMap;
