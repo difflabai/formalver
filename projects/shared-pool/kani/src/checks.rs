@@ -509,17 +509,44 @@ pub fn step_ref(src: &mut impl Src, kind: u32) {
     refines(&pre, &g, &op, &res, &p);
 }
 
+/// The TLA+ ghost `(base, k0)` of a state with the Kani ghost `g`.
+/// SharedPool.tla folds a counted pruned record's contribution into `base`
+/// and moves `k0` past it (`Submit`); `spec::ghost_step` keeps that
+/// contribution in `pruned` and leaves `k0` (plan 2.2, K-D5). So the TLA+
+/// ghost is `base + pruned` and `max(k0, first_id)`: every id below
+/// `first_id` is pruned, and a record pruned with `id >= k0` is in
+/// `pruned`. Equal to `(base, k0)` on the INV domain (`first_id = 0`).
+pub fn tla_ghost(p: &Pool, g: &Ghost) -> ([i64; M], usize, u64) {
+    let nb = g.base.len();
+    assert!(nb <= M, "spec: the ghost base has at most M values");
+    let mut b = [0i64; M];
+    for i in 0..M {
+        if i < nb {
+            b[i] = g.base[i] + g.pruned[i];
+        }
+    }
+    let k0 = if g.k0 < p.first_id { p.first_id } else { g.k0 };
+    (b, nb, k0 as u64)
+}
+
 /// REF-1..3 for the step `pre --op--> post` (`tla::assert_refines` with
 /// the step bounds' image, `tla::TK`), and the `h_ref` covers.
 pub fn refines(pre: &Pool, g: &Ghost, op: &Op, res: &Res, post: &Pool) {
-    let w = crate::tla::assert_refines::<2, 2, 2, 2, 4>(pre, &g.base, g.k0, op, res, post); // PROP: REF-1 REF-2 REF-3
-    ref_covers(op, w);
+    let (b, nb, k0) = tla_ghost(pre, g);
+    let w = crate::tla::assert_refines::<2, 2, 2, 2, 4>(pre, &b[..nb], k0, op, res, post); // PROP: REF-1 REF-2 REF-3
+    ref_covers(pre, op, w);
 }
 
 /// The `h_ref` cover family: every value of each TLA+ error operator that
 /// the step domains reach ("Ok": the action is enabled, REF-2; "Noop" and
-/// every error: a stutter, REF-3). `Full` needs 256 records (`h_full_*`).
-fn ref_covers(op: &Op, w: crate::tla::TErr) {
+/// every error: a stutter, REF-3), and both ghost branches of `Observe`
+/// (the refresh keeps `base` and `k0`). `Full` and the prune need 256
+/// records (`h_full_*`, and the conformance traces in plain mode). From
+/// v1.1.0 no INV state reaches `AckErr`'s Arithmetic or `CancelErr`'s and
+/// `SettleErr`'s Arithmetic and Bounds (INV-VERCAP and INV-RES: LIVE-ALL,
+/// the F-2 and F-5 fixes; asserted by the `_tx` parts and `h_live_all`), so
+/// those values have no cover here; v1.0.0's did (its findings).
+fn ref_covers(pre: &Pool, op: &Op, w: crate::tla::TErr) {
     use crate::tla::TErr as W;
     match op {
         Op::Submit { .. } => {
@@ -550,16 +577,14 @@ fn ref_covers(op: &Op, w: crate::tla::TErr) {
             cover!(w == W::Ok, "ref ack: Ok (Ack enabled)");
             cover!(w == W::Noop, "ref ack: Noop");
             cover!(w == W::NotFound, "ref ack: NotFound");
-            cover!(w == W::Arithmetic, "ref ack: Arithmetic");
         }
         Op::Cancel { .. } => {
             cover!(w == W::Ok, "ref cancel: Ok (Cancel enabled)");
             cover!(w == W::Noop, "ref cancel: Noop");
             cover!(w == W::NotFound, "ref cancel: NotFound");
             cover!(w == W::Unauthorized, "ref cancel: Unauthorized");
+            cover!(w == W::InvalidState, "ref cancel: InvalidState (Completed)");
             cover!(w == W::Pending, "ref cancel: Pending");
-            cover!(w == W::Arithmetic, "ref cancel: Arithmetic");
-            cover!(w == W::Bounds, "ref cancel: Bounds");
         }
         Op::Settle { .. } => {
             cover!(w == W::Ok, "ref settle: Ok (Settle enabled)");
@@ -567,16 +592,16 @@ fn ref_covers(op: &Op, w: crate::tla::TErr) {
             cover!(w == W::NotFound, "ref settle: NotFound");
             cover!(w == W::Unauthorized, "ref settle: Unauthorized");
             cover!(w == W::InvalidState, "ref settle: InvalidState");
-            cover!(w == W::Arithmetic, "ref settle: Arithmetic");
-            cover!(w == W::Bounds, "ref settle: Bounds");
         }
         Op::Pause { .. } => {
             cover!(w == W::Ok, "ref pause: Ok (SetPaused enabled)");
             cover!(w == W::Unauthorized, "ref pause: Unauthorized");
             cover!(w == W::Arithmetic, "ref pause: Arithmetic");
         }
-        Op::Observe { .. } => {
-            cover!(w == W::Ok, "ref observe: Ok (Observe enabled)");
+        Op::Observe { vals, .. } => {
+            let refresh = spec::eq_i64s(vals, &pre.values) && spec::any_open(&pre.records);
+            cover!(w == W::Ok && !refresh, "ref observe: Ok (Observe enabled, re-base)");
+            cover!(w == W::Ok && refresh, "ref observe: Ok (Observe enabled, refresh keeps base and k0)");
             cover!(w == W::Unauthorized, "ref observe: Unauthorized");
             cover!(w == W::Pending, "ref observe: Pending");
             cover!(w == W::Bounds, "ref observe: Bounds");
@@ -628,11 +653,14 @@ pub fn version_cap(src: &mut impl Src, kind: Option<u32>) {
     let pre = gen::copy(&p);
     let x = spec::expected(&pre, &op);
     let res = spec::apply(&mut p, &op);
-    // Plain mode only (the Kani harnesses' code is unchanged).
+    // Plain mode only (the Kani harnesses' code is unchanged). Without the
+    // `h_ref` covers: at the cap most of them are unreachable (no submit is
+    // enabled).
     #[cfg(not(kani))]
     {
         if c.part & PART_REF != 0 {
-            refines(&pre, &_g, &op, &res, &p);
+            let (b, nb, k0) = tla_ghost(&pre, &_g);
+            crate::tla::assert_refines::<2, 2, 2, 2, 4>(&pre, &b[..nb], k0, &op, &res, &p); // PROP: REF-1 REF-2 REF-3
         }
     }
     assert!(res == x.res, "TX: exact result at or above the cap");
@@ -1690,7 +1718,8 @@ pub fn bmc_from_init(src: &mut impl Src, depth: usize) {
         if let Some(pre) = &pre {
             // PROP: REF-1 REF-2 REF-3 (plain mode: this body is plain-only;
             // up to `depth` records, so an image of 8)
-            crate::tla::assert_refines::<2, 2, 2, 2, 8>(pre, &g.base, g.k0, &op, &res, &p);
+            let (b, nb, k0) = tla_ghost(pre, &g);
+            crate::tla::assert_refines::<2, 2, 2, 2, 8>(pre, &b[..nb], k0, &op, &res, &p);
         }
         g = h;
         assert!(res == x.res, "TX: exact result along the trace");
@@ -2281,8 +2310,13 @@ pub fn canary(src: &mut impl Src) {
 // ---------------------------------------------------------------------------
 
 /// Plain mode: one step from an INV state with every shared check: the
-/// spec's exact outcome and frame (`_tx`, `_post`), LIVE-ALL, and every
-/// invariant after the step with the ghost's update.
+/// spec's exact outcome and frame (`_tx`, `_post`), LIVE-ALL, every
+/// invariant after the step with the ghost's update, and REF-1..3 on the
+/// window's image (256 records: the walks fill the window, prune, and meet
+/// prerequisites from pruned completions, which the Kani image `TK`, with
+/// `first_id = 0`, does not reach). The TLA+ ghost of the post-state from
+/// `spec::ghost_step` must be `tla::ghost_after`'s (plan 2.2: the Kani
+/// ghost's `pruned` is the TLA+ fold).
 #[cfg(not(kani))]
 pub fn checked_step(p: &mut Pool, g: &mut Ghost, op: &Op) -> Res {
     let pre = p.clone();
@@ -2293,6 +2327,16 @@ pub fn checked_step(p: &mut Pool, g: &mut Ghost, op: &Op) -> Res {
     check_live(&pre, op, &res);
     check_post(&pre, p, op, &res, &x);
     assert_inv(p, &h);
+    let (b, nb, k0) = tla_ghost(&pre, g);
+    // The image: 8 metrics, recipes and requirements (the fixtures of the
+    // F-tests), 64 terms (MAX_TERMS), 256 records.
+    crate::tla::assert_refines::<8, 64, 8, 8, 256>(&pre, &b[..nb], k0, op, &res, p); // PROP: REF-1 REF-2 REF-3
+    let ga = crate::tla::ghost_after::<M>(&pre, &b[..nb], k0, op, &res, p);
+    let (b2, nb2, k2) = tla_ghost(p, &h);
+    assert!(
+        ga.base[..ga.nb] == b2[..nb2] && ga.k0 == k2,
+        "REF ghost: spec::ghost_step's ghost is the TLA+ ghost (plan 2.2)"
+    );
     *g = h;
     res
 }

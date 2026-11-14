@@ -2,13 +2,11 @@
 //! Each test also requires every cover it evaluated to have fired, the
 //! plain-mode counterpart of Kani's cover check.
 
-use crate::checks::{self, PART_ALL, PART_REF};
+use crate::checks::{self, PART_ALL};
 use crate::spec::{self, Ghost, Op};
 use crate::src::{take_covers, Cfg, Dom, Rng, Shape, Ver};
 
-/// Every part except REF: `tla.rs` is still the v1.0.0 transcription of
-/// `SharedPool.tla` until the TLA+ layer freezes the v1.1.0 model (W7
-/// REMAINING); REF runs again once it is adapted.
+/// Every part, REF included (`tla.rs`, the v1.1.0 SharedPool.tla).
 const BASE: Cfg = Cfg {
     val: Dom::Small(6),
     delta: Dom::Small(4),
@@ -16,7 +14,7 @@ const BASE: Cfg = Cfg {
     any_weight: false,
     shape: Shape::ANY,
     ver: Ver::Free,
-    part: PART_ALL & !PART_REF,
+    part: PART_ALL,
 };
 
 fn run_with(name: &str, seed: u64, iters: u32, base: Cfg, reach_pct: u8, body: &dyn Fn(&mut Rng)) {

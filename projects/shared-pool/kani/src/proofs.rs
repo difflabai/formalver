@@ -183,12 +183,14 @@ step_parts!(checks::step_observe, h_step_observe_tx, h_step_observe_post, h_step
 /// per operation kind: the `h_step` pre-state and call (`checks::step_ref`:
 /// the same generators, `STEP` and its bounds), the real core applied, then
 /// `tla::assert_refines` on the image `TK` (capacity 2 metrics, 2 terms, 2
-/// recipes, 2 requirements, 4 records): REF-1 the core's result is the
-/// TLA+ error operator's (`Ok` exactly when the action is enabled or the
-/// call is the operator's "Noop"), REF-2 on "Ok" `alpha(post)` is the
-/// action's post-state, REF-3 every other call stutters. One cover per
-/// value of the operator that the step domain reaches (`checks::ref_covers`,
-/// the `h_ref` family).
+/// recipes, 2 requirements, 4 records; `first_id = 0`, so no prune: the
+/// window's REF is plain mode's, the walks and the traces): REF-1 the
+/// core's result is the TLA+ error operator's (`Ok` exactly when the action
+/// is enabled or the call is the operator's "Noop"), REF-2 on "Ok"
+/// `alpha(post)` is the action's post-state, REF-3 every other call
+/// stutters. One cover per value of the operator that the step domain
+/// reaches, and both ghost branches of `Observe` (`checks::ref_covers`, the
+/// `h_ref` family).
 macro_rules! step_ref {
     ($($h:ident = $k:ident);* $(;)?) => {
         $(
