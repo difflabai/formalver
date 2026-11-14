@@ -47,11 +47,11 @@ fails on the v1.0.0 model (section "v1.0.0 evidence").
 |---|---|
 | `SharedPool.tla` | The Pool as variables (`cfg`, `values`, `version`, `observedAt`, `paused`, `records`, `firstId`, `doneU`; config is a variable no action writes, so one TLC run replays every trace). Record ids are implicit: `records[k]` has id `firstId + k - 1`. Ghost: `base`, `k0` (the values and the first uncounted id at the last re-basing observe; a pruned counted record is folded into `base`), `steps`, `last`. One error operator per entry point gives the first failing guard in code order, `"Noop"` for the core's idempotent `Ok(())`, or `"Ok"`; the action is enabled exactly when it is `"Ok"`. `GuardOrder` lists the exits (C-2 compares it with the Prolog guard table). `InitAt(c, t0, v0)` is `Pool::new` at version `v0` (0, or near the cap in `MC_Cap`). |
 | `Props.tla` | State invariants (`InvRel`, view-safe: INV-WF, INV-LEDGER, INV-RES, INV-HARD, INV-DEP, INV-VER, TERM-1, LIVE-ALL, LIVE-1, `NoWedge`, WIN-ESC, WIN-2, REFRESH-1; `InvAbs`: INV-VERCAP, WIN-1's `firstId + NR <= version`; `InvOutcomes`: INV-HEALTHY over every outcome combination); step properties (`StepProperty`: config fixed, TX-VER, VER-CAP, LIFE-1 with the prune, STALE-1, AUTH-1, ADM-1, ADM-2, HARD-STEP, DEP-1, `completed_units`, ASYNC-1, OBS-1, OBS-2, TX-SUBMIT, TX-DISPATCH, PAUSE-1); witnesses (TLA-WIT). Properties restate the conditions they rely on (`FullCond`, `InFlightSpec`, and the envelope as the hull `HullLo`/`HullHi`: each open record's term min/max(d, x, 0)) instead of reusing the model's operators (`WinFull`, `LoTerm`/`HiTerm`), so a mutant of the operator is checked against the statement. |
-| `MCCommon.tla` | Four configurations. `MCConfig` (v1.0's, the F-1 wedge scaled down: m0 ∈ [0,2], m1 ∈ [-2,2], target term on m1; r0 hedge, r1 requiring r0 × 1; max_age 1). `CreditHedgeConfig` (F-2, the `risk` fixture's credit and hedge scaled down). `RecoveryConfig` (one hedge reserving on m1 and completing on m0: the admitted recovery submit, `WitStep_Recovery`; the trace 214/215 config scaled down). `F2bConfig` (F-2b: m0 ∈ [-10^6, 10^6], A reserves -10^6, B completes +10^6 × 2). Accounts o, a1, x1, z. Observation sets. The two `F2bConfig` witnesses (`Witness_EdgeValue`: a value at exactly ±MAX_VALUE; `Witness_F2bRefused`: with A open, B × 2 is refused with `Arithmetic`). |
+| `MCCommon.tla` | Four configurations. `MCConfig` (v1.0's, the F-1 wedge scaled down: m0 ∈ [0,2], m1 ∈ [-2,2], target term on m1; r0 hedge, r1 requiring r0 × 1; max_age 1). `CreditHedgeConfig` (F-2, the `risk` fixture's credit and hedge scaled down). `RecoveryConfig` (one hedge reserving on m1 and completing on m0: the admitted recovery submit, `WitStep_Recovery`; the trace 214/215 config scaled down). `F2bConfig` (F-2b: m0 ∈ [-10^6, 10^6], A reserves -10^6, B completes +10^6 × 2). Accounts o, a1, x1, z. Observation sets. The two `F2bConfig` witnesses (`Witness_EdgeValue`: a value at exactly ±MAX_VALUE; `Witness_F2bRefused`: with A open and the values at A's reservation, B × 2 is refused with `Arithmetic`). |
 | `MC_Safety.{tla,cfg}` | TLA-SAFE on `MCConfig`, MaxRecords 2, times {0,1,2} per call, expiry offsets {0,1,2,86400,86401}, 14 observation vectors (`AllObservations`). `VIEW` (header argument): values, observedAt, paused, records, doneU, base, `k0 - firstId`, `Min(firstId, 1)`, `version - steps`. `MC_Safety_1.cfg`: the same at MaxRecords 1 (smoke). `MC_Recovery.cfg`, `MC_F2b.cfg`: the same module on `RecoveryConfig` and `F2bConfig`. |
 | `MC_Cap.{tla,cfg}` | TLA-CAP: `Pool::new` at version `VersionCap - 4`, no VIEW, `InvCapMC` (everything, absolute invariants included) and `StepProperty`. Every behaviour reaches the cap. |
 | `MC_Liveness.tla` + 7 cfgs | LIVE-2 and WIN-LIVE on `MC_Cap`'s behaviours (finite: calls that start work stop at the cap), under named fairness assumptions (section LIVE-2). |
-| `TraceCheck.{tla,cfg}`, `trace2tla.py` | REF-5: `trace2tla.py` (python3 -I, no deps) writes `build/TraceData.tla`; TLC replays every trace in one run and checks `Inv` and `StepProperty` on every core state and step; for the `init_error` trace it checks `~ValidCfg(cfg)` (CFG-1, CFG-2). |
+| `TraceCheck.{tla,cfg}`, `trace2tla.py` | REF-5: `trace2tla.py` (python3 -I, no deps) writes `build/TraceData.tla`; TLC replays every trace in one run and checks `Inv` and `StepProperty` on every core state and step; with the W10 patch, for the `init_error` trace it checks `~ValidCfg(cfg)` (CFG-1, CFG-2). |
 | `Executor.tla`, `MC_Executor_W{2,3}.cfg` | TLA-EXEC (section Executor). |
 | `mutants/*.patch` | 46 core-model mutants (01-28, 30, 32-48) and 6 executor mutants (49-54); the `# checks:` header names the checks that must kill each. |
 | `run.sh` | The runner. |
@@ -118,14 +118,17 @@ checked on every transition, also into a state whose view TLC has seen.
 | `liveness-f2` (MC_Liveness_F2.cfg): `CreditHedgeConfig`, WF of `settle(false)` and of cancel | TLA-LIVE-F2 | no error (v1.0.0: violated, F-2) | 5,202 distinct, 4 s |
 | `liveness-win` (MC_Liveness_Win.cfg): `WinLive`, MaxRecords 1, WF of resolving the oldest record | WIN-LIVE | no error | 1,868 distinct, 2 s |
 | `liveness-win2` (MC_Liveness_Win2.cfg): the same at MaxRecords 2 (Full = two records, the oldest open) | WIN-LIVE | no error | 8,228 distinct, 4 s |
-| `trace` (TraceCheck): 216 traces, 8,865 calls, every result and post-state equal; `Inv` and `StepProperty` on every core state; trace 210's config refused by `ValidCfg` | REF-5 (also TX-0, TX-NOOP, CFG-1, CFG-2) | every trace accepted | 9,081 of 9,081 states (216 initial + 8,865 steps), 9 s |
+| `trace` (TraceCheck): 216 traces, 8,865 calls, every result and post-state equal; `Inv` and `StepProperty` on every core state; trace 210's config refused by `ValidCfg` | REF-5 (also TX-0, TX-NOOP, CFG-1, CFG-2) | every trace accepted (W10 corpus and parser, scratch tree) | 9,081 of 9,081 states (216 initial + 8,865 steps), 9 s |
 | `executor` (Executor.tla) | TLA-EXEC | no error; 12 witnesses reachable | section Executor |
 | Inductive invariant (Apalache) | TLA-IND | not done | open item, below |
-| Spec mutants (`mutants/*.patch`) | | all 52 killed (46 core, 6 executor; 29 and 31 retired), scratch tree | 7 min 25 s |
+| Spec mutants (`mutants/*.patch`) | | all 52 killed (46 core, 6 executor; 29 and 31 retired), scratch tree | 7 min 2 s |
 
 The configs list each invariant on its own `INVARIANT` line (in the order
 above), so a failing run names the property. Each run's distinct-state
-count is the same in every run; times are from one run.
+count is the same in every run. The default `run.sh` (safety liveness
+trace) took 5 min 8 s in the scratch tree on 2026-11-14 (02:21-02:27;
+MC_Safety 181 s, the rest under 30 s each), the mutants 7 min 2 s; the
+times in the table are from single runs on a shared machine.
 
 ## LIVE-2 and LIVE-ALL
 
@@ -221,7 +224,7 @@ on the unmutated model; their baseline is `run.sh executor`). 52 patches:
 46 core-model mutants (01-28, 30, 32-48; 32-48 are the FR mutants t32-t48
 of strategy section 4.5) and 6 executor mutants (49-54, section Executor).
 All 52 are killed (scratch tree with the v1.1.0 corpus and the W10 parser,
-2026-11-14, 7 min 25 s on 4 workers). Killer = the first check that kills, with the
+2026-11-14, 7 min 2 s on 4 workers). Killer = the first check that kills, with the
 property TLC names (the configs list each invariant separately).
 Where the first property TLC names is not the one strategy.md section 4.5
 names for an FR mutant, that property was also checked alone, in one-off
