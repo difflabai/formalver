@@ -1,8 +1,10 @@
+# checks: trace safety-1
+# submit checks Stale before Paused (guard order).
 --- a/SharedPool.tla
 +++ b/SharedPool.tla
-@@ -223,8 +223,8 @@
+@@ -261,8 +261,8 @@
  
- \* candidate() then submit's bump.
+ \* candidate() (U:267-323) then submit's additions (U:360-366).
  SubmitErr(c, r, u, v, exp, now) ==
 -    IF paused THEN "Paused"
 -    ELSE IF v # version THEN "Stale"
@@ -10,4 +12,4 @@
 +    ELSE IF paused THEN "Paused"
      ELSE IF exp <= now \/ exp > now + Window THEN "Expired"
      ELSE IF SnapExpired(now) THEN "SnapshotExpired"
-     ELSE IF NR >= MaxRecords THEN "Full"
+     ELSE IF WinFull THEN "Full"

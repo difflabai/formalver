@@ -29,6 +29,22 @@
 (* completion relies on the credit's reservation. Once the hedge has       *)
 (* completed (m0 = 0), releasing the credit (m0 = -1) fails Bounds.        *)
 (*                                                                         *)
+(* RecoveryConfig (WitStep_Recovery; MC_Recovery.cfg): MCConfig's metrics *)
+(* and term, one recipe r0 = hedge: actor a1, executor x1, reserve [0, -1], *)
+(* complete [-1, 0], max_units 1. After observe [3, 2] (m0 = 3 > max 2)   *)
+(* the hedge is admitted: its envelope keeps m0's violation at 1 and it    *)
+(* lowers the energy. In v1.1 no reservation that strictly reduces a       *)
+(* violation is admitted (its own release term returns to the current      *)
+(* values), and every MCConfig recipe reserves on m0, so MCConfig has no   *)
+(* recovery admission.                                                     *)
+(*                                                                         *)
+(* F2bConfig (finding F-2b, release-arith; MC_F2b.cfg): m0 in [-1e6, 1e6]  *)
+(* (initial 0), m1 in [-2, 2] (initial 0); term t(1, target 0); recipes    *)
+(* A: reserve [-1e6, 0], complete [0, 0], max_units 1; B: reserve [0, 0],  *)
+(* complete [1e6, 0], max_units 2. v1.0 admits A, then B with 2 units      *)
+(* (relying on A's reservation), settles B and then cannot release A       *)
+(* (Arithmetic). v1.1 counts A's release term (+1e6) in B's envelope.      *)
+(*                                                                         *)
 (* Accounts o (owner), a1 (actor), x1 (executor), z (stranger).            *)
 (***************************************************************************)
 EXTENDS Props, TLC
@@ -69,6 +85,32 @@ DisturbingObservations == HealthyObservations \cup {<<3, 2>>}
 \* CreditHedgeConfig: every in-bounds vector (B stays 0; no disturbing
 \* observe, so F-1 cannot occur).
 CreditHedgeObservations == {<<a>> : a \in 0 .. 2}
+
+RecoveryConfig ==
+    [owner |-> "o", maxAge |-> 1,
+     metrics |-> <<[min |-> 0, max |-> 2, init |-> 1], [min |-> -2, max |-> 2, init |-> 1]>>,
+     terms |-> <<[metric |-> 1, target |-> 0, weight |-> 1, shape |-> "target"]>>,
+     recipes |->
+        <<[actor |-> "a1", executor |-> "x1", reserve |-> <<0, -1>>, complete |-> <<-1, 0>>,
+           maxUnits |-> 1, requires |-> <<>>]>>]
+
+ASSUME ValidCfg(RecoveryConfig)
+
+F2bConfig ==
+    [owner |-> "o", maxAge |-> 0,
+     metrics |-> <<[min |-> -1000000, max |-> 1000000, init |-> 0],
+                   [min |-> -2, max |-> 2, init |-> 0]>>,
+     terms |-> <<[metric |-> 1, target |-> 0, weight |-> 1, shape |-> "target"]>>,
+     recipes |->
+        <<[actor |-> "a1", executor |-> "x1", reserve |-> <<-1000000, 0>>, complete |-> <<0, 0>>,
+           maxUnits |-> 1, requires |-> <<>>],
+          [actor |-> "a1", executor |-> "x1", reserve |-> <<0, 0>>, complete |-> <<1000000, 0>>,
+           maxUnits |-> 2, requires |-> <<>>]>>]
+
+ASSUME ValidCfg(F2bConfig)
+
+\* F2bConfig: the initial vector only (observe is a refresh or a re-base to it).
+F2bObservations == {<<0, 0>>}
 
 Init == InitFrom(MCConfig, 0)
 =============================================================================

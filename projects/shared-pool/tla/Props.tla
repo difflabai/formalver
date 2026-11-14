@@ -2,97 +2,198 @@
 (***************************************************************************)
 (* Properties of SharedPool. IDs are the shared-pool catalogue's (brief:   *)
 (* "Property catalogue"); each definition is tagged PROP: <ID>.            *)
+(*                                                                         *)
+(* Two groups of state invariants. InvRel reads version, firstId and k0    *)
+(* only relative to each other or through the version cap (false in every  *)
+(* state MC_Safety explores), so it is a function of MC_Safety's VIEW.     *)
+(* InvAbs reads absolute versions and ids (INV-VERCAP, WIN-1's             *)
+(* firstId + NR <= version); harnesses without a VIEW check it (MC_Cap,    *)
+(* the liveness configs, TraceCheck).                                      *)
 (***************************************************************************)
 EXTENDS SharedPool
 
-\* B_i = PV_i(base): the violation of metric m at the last observe (or new).
+\* B_i = PV_i(base): the violation of metric m at the last re-basing observe
+\* (or new).
 B(m) == PV(base, m)
 Healthy == \A m \in MIdx : B(m) = 0
+
+\* Units of Completed records of recipe p among the retained records.
+WinDone(p) ==
+    SumTo([k \in 1 .. NR |->
+              IF records[k].recipe = p /\ records[k].status = "Completed"
+              THEN records[k].units ELSE 0], NR)
+
+\* rem (strategy 2.2): the most version increments an open record can still
+\* take: Reserved 3 (dispatch below the cap, then as Dispatched), Dispatched
+\* 3 (ack Unknown, ack Active, settle), Unknown 2, Active 1, terminal 0.
+Rem(s) ==
+    CASE s = "Reserved" -> 3 [] s = "Dispatched" -> 3 [] s = "Unknown" -> 2
+      [] s = "Active" -> 1 [] OTHER -> 0
+RemSum == SumTo([k \in 1 .. NR |-> Rem(records[k].status)], NR)
+
+\* The properties restate the core's conditions they rely on rather than
+\* reuse the model's operators, so a mutant of the model's operator is
+\* checked against the statement: Full (U:287-289) and the in-flight
+\* statuses (an open record that is not Reserved).
+FullCond == NR >= MaxRecords /\ Open(records[1].status)
+InFlightSpec(s) == s \in {"Dispatched", "Active", "Unknown"}
 
 -----------------------------------------------------------------------------
 (* State invariants                                                        *)
 
-\* PROP: INV-WF. Shapes and bounds of every field (records[j].id = j holds
-\* by construction: an id is the record's index). Config never changes is
-\* StepCfg below; ValidCfg(cfg) is CFG-1's "init satisfies INV".
+\* PROP: INV-WF WIN-1. Shapes and bounds of every field. Ids are implicit
+\* (records[k] has id firstId + k - 1), the window holds at most MaxRecords
+\* records, completed_units has one entry per recipe, saturates at DoneCap
+\* and covers the window's Completed units. Config never changes is StepCfg
+\* below; ValidCfg(cfg) is CFG-1's "init satisfies INV". WIN-1's
+\* firstId + NR <= version is InvWinVer (absolute).
 InvWF ==
     /\ ValidCfg(cfg)
     /\ DOMAIN values = MIdx /\ \A m \in MIdx : Bounded(values[m])
     /\ version \in Nat /\ observedAt \in Nat /\ paused \in BOOLEAN
-    /\ NR <= MaxRecords
+    /\ firstId \in Nat /\ NR <= MaxRecords
     /\ \A k \in 1 .. NR :
         LET c == records[k] IN
         /\ c.recipe \in 0 .. NRcp - 1
         /\ c.units \in 1 .. Rcp(c.recipe).maxUnits
         /\ c.exp \in Nat
         /\ c.status \in Statuses
-    /\ DOMAIN base = MIdx /\ k0 \in 0 .. NR /\ steps \in Nat
+    /\ DOMAIN doneU = 1 .. NRcp
+    /\ \A p \in 1 .. NRcp : doneU[p] \in 0 .. DoneCap /\ doneU[p] >= Min(DoneCap, WinDone(p - 1))
+    /\ DOMAIN base = MIdx /\ k0 \in firstId .. firstId + NR /\ steps \in Nat
 
-\* PROP: INV-LEDGER. values = base + sum over records j >= k0 that are not
-\* Cancelled of reserve_j * u_j, plus complete_j * u_j for Completed ones.
+\* PROP: WIN-1. submit's id addition cannot overflow (U:363-366).
+InvWinVer == firstId + NR <= version
+
+\* PROP: INV-LEDGER. values = base + the contributions of the retained
+\* records with id >= k0 (records pruned since are folded into base).
 Contribution(m) ==
-    SumTo([k \in 1 .. NR |->
-              LET c == records[k] IN
-              IF k > k0 /\ c.status # "Cancelled"
-              THEN Rcp(c.recipe).reserve[m] * c.units
-                   + (IF c.status = "Completed" THEN Rcp(c.recipe).complete[m] * c.units ELSE 0)
-              ELSE 0], NR)
+    SumTo([k \in 1 .. NR |-> IF firstId + k - 1 >= k0 THEN Contrib(records[k], m) ELSE 0], NR)
 InvLedger == \A m \in MIdx : values[m] = base[m] + Contribution(m)
 
-\* PROP: INV-HARD. The envelope of the open records is computable and its
-\* violation never exceeds the violation at the last observe.
+\* PROP: INV-RES. The release-aware envelope of the open records is
+\* computable (endpoints within +-MAX_VALUE) and each metric's envelope
+\* violation equals its current violation.
 CheckEnvOk ==
     \A m \in MIdx : Bounded(Low(values, 0, 0, -1, m)) /\ Bounded(High(values, 0, 0, -1, m))
+InvRes == CheckEnvOk /\ \A m \in MIdx : EV(values, 0, 0, -1, m) = PV(values, m)
+
+\* PROP: INV-HARD. The envelope's violation never exceeds the violation at
+\* the last re-basing observe (a corollary of INV-RES and HARD-STEP).
 InvHard == CheckEnvOk /\ \A m \in MIdx : EV(values, 0, 0, -1, m) <= B(m)
 
-\* PROP: INV-HEALTHY (corollary of INV-HARD): with B = 0 every subset of the
-\* open records' completions lands inside [min, max]. Enumerates subsets,
-\* so the model-checking configs check it (InvMC); TraceCheck's Inv omits it.
-OpenIds == {j \in 0 .. NR - 1 : Open(Rec(j).status)}
-InvHealthy ==
-    Healthy =>
-        \A S \in SUBSET OpenIds : \A m \in MIdx :
-            LET v == values[m] + SetSum(S, [j \in OpenIds |-> RecRcp(j).complete[m] * Rec(j).units])
-            IN Mn(m) <= v /\ v <= Mx(m)
+\* PROP: INV-HEALTHY (InvOutcomes). Every combination of outcomes of the
+\* open records (complete, release, or none) has no metric's violation
+\* above its violation now; with B = 0 every combination lands inside
+\* [min, max]. Enumerates 3^|open| combinations, so the model-checking
+\* configs check it; TraceCheck's Inv omits it.
+OpenIds == {id \in WinIds : Open(Rec(id).status)}
+Outcome(f, m) ==
+    values[m] + SetSum(OpenIds,
+        [id \in OpenIds |->
+            CASE f[id] = "complete" -> RecRcp(id).complete[m] * Rec(id).units
+              [] f[id] = "release"  -> -(RecRcp(id).reserve[m] * Rec(id).units)
+              [] OTHER              -> 0])
+InvOutcomes ==
+    \A f \in [OpenIds -> {"none", "complete", "release"}] : \A m \in MIdx :
+        LET v == Outcome(f, m) IN
+        /\ Max0(Mn(m) - v) + Max0(v - Mx(m)) <= PV(values, m)
+        /\ Healthy => Mn(m) <= v /\ v <= Mx(m)
 
-\* PROP: INV-DEP. Every record's prerequisites are met by Completed records
-\* of lower index.
+\* PROP: INV-DEP. Every retained record's prerequisites are met by the
+\* lifetime completed units (completed_units only grows).
 InvDep ==
-    \A j \in 0 .. NR - 1 : \A q \in DOMAIN RecRcp(j).requires :
-        LET p == RecRcp(j).requires[q][1]
-            u == RecRcp(j).requires[q][2]
-        IN SumTo([k \in 1 .. j |->
-                     IF records[k].recipe = p /\ records[k].status = "Completed"
-                     THEN records[k].units ELSE 0], j) >= u
+    \A k \in 1 .. NR : \A q \in DOMAIN Rcp(records[k].recipe).requires :
+        LET rq == Rcp(records[k].recipe).requires[q] IN doneU[rq[1] + 1] >= rq[2]
 
-\* PROP: INV-VER. version = number of effective transitions.
+\* PROP: INV-VER. version = number of effective transitions (from the
+\* initial version).
 InvVer == version = steps
 
+\* PROP: INV-VERCAP. version + the open records' remaining increments
+\* <= u32::MAX (NO-OVF: ack, settle and cancel never fail Arithmetic).
+InvVerCap == RemSum <= MaxVersion - version
+
 \* PROP: TERM-1 (error view). A terminal record: the same terminal again is
-\* an Ok no-op, the opposite one InvalidState.
+\* an Ok no-op, the opposite one InvalidState, also for cancel of a
+\* Completed record (U:467).
 Term1 ==
-    \A j \in 0 .. NR - 1 :
-        LET x == RecRcp(j).executor IN
-        /\ Rec(j).status = "Completed" =>
-              SettleErr(x, j, TRUE) = "Noop" /\ SettleErr(x, j, FALSE) = "InvalidState"
-        /\ Rec(j).status = "Cancelled" =>
-              SettleErr(x, j, FALSE) = "Noop" /\ SettleErr(x, j, TRUE) = "InvalidState"
+    \A id \in WinIds :
+        LET x == RecRcp(id).executor IN
+        /\ Rec(id).status = "Completed" =>
+              /\ SettleErr(x, id, TRUE) = "Noop" /\ SettleErr(x, id, FALSE) = "InvalidState"
+              /\ CancelErr(cfg.owner, id, 0) = "InvalidState"
+        /\ Rec(id).status = "Cancelled" =>
+              /\ SettleErr(x, id, FALSE) = "Noop" /\ SettleErr(x, id, TRUE) = "InvalidState"
+              /\ CancelErr(cfg.owner, id, 0) = "Noop"
 
-\* PROP: LIVE-1. With B = 0 and version < u32::MAX the executor can
-\* complete every in-flight record.
+\* PROP: LIVE-ALL. No premise: every Reserved record can be cancelled by
+\* its actor and by the owner, and every in-flight record can be settled
+\* by its executor either way.
+LiveAll ==
+    \A id \in WinIds :
+        LET s == Rec(id).status  x == RecRcp(id).executor IN
+        /\ s = "Reserved" =>
+              CancelErr(RecRcp(id).actor, id, 0) = "Ok" /\ CancelErr(cfg.owner, id, 0) = "Ok"
+        /\ InFlightSpec(s) => SettleErr(x, id, TRUE) = "Ok" /\ SettleErr(x, id, FALSE) = "Ok"
+
+\* PROP: LIVE-1 (corollary of LIVE-ALL; v1.0's premises B = 0 and
+\* version < u32::MAX dropped). The executor can complete every in-flight
+\* record.
 Live1 ==
-    (Healthy /\ version < MaxVersion) =>
-        \A j \in 0 .. NR - 1 :
-            InFlight(Rec(j).status) => SettleErr(RecRcp(j).executor, j, TRUE) = "Ok"
+    \A id \in WinIds : InFlightSpec(Rec(id).status) => SettleErr(RecRcp(id).executor, id, TRUE) = "Ok"
 
-\* Everything but INV-HEALTHY (TraceCheck checks this on every core state).
-Inv == InvWF /\ InvLedger /\ InvHard /\ InvDep /\ InvVer /\ Term1 /\ Live1
-InvMC == Inv /\ InvHealthy
+\* PROP: LIVE-ALL (NoWedge). Neither wedge of v1.0 exists: F-1 (an
+\* in-flight record neither settle can resolve) and F-2 (an in-flight
+\* record whose honest settle(false) fails).
+NoWedge ==
+    \A id \in WinIds :
+        LET x == RecRcp(id).executor IN
+        InFlightSpec(Rec(id).status) =>
+            /\ ~(SettleErr(x, id, TRUE) # "Ok" /\ SettleErr(x, id, FALSE) # "Ok")
+            /\ SettleErr(x, id, FALSE) = "Ok"
+
+\* PROP: WIN-ESC. submit fails Full only when the window is full and its
+\* oldest record is open, and then that record can be resolved (cancel if
+\* Reserved, settle either way if in flight), after which the Full guard
+\* passes.
+WinEsc ==
+    /\ \A r \in 0 .. NRcp - 1 :
+          SubmitErr(Rcp(r).actor, r, 1, version, observedAt + 1, observedAt) = "Full" => FullCond
+    /\ FullCond =>
+          LET f == firstId  x == RecRcp(firstId).executor IN
+          /\ Rec(f).status = "Reserved" => CancelErr(cfg.owner, f, 0) = "Ok"
+          /\ InFlightSpec(Rec(f).status) => SettleErr(x, f, TRUE) = "Ok" /\ SettleErr(x, f, FALSE) = "Ok"
+
+\* PROP: WIN-2 (error view). A pruned id (the one below the window) is
+\* NotFound for every call on a record.
+Win2 ==
+    firstId > 0 =>
+        LET p == firstId - 1 IN
+        /\ DispatchErr(Rcp(0).actor, p, observedAt) = "NotFound"
+        /\ AckErr(p, TRUE) = "NotFound" /\ CancelErr(cfg.owner, p, 0) = "NotFound"
+        /\ SettleErr(Rcp(0).executor, p, TRUE) = "NotFound"
+
+\* PROP: REFRESH-1. Below the cap the owner can always restate the current
+\* values (renewing the snapshot), whatever is open.
+RefreshAlways == version < VersionCap => ObserveErr(cfg.owner, values, 0) = "Ok"
+
+\* View-safe invariants (MC_Safety); absolute ones; all but INV-HEALTHY
+\* (TraceCheck checks this on every core state).
+InvRel ==
+    /\ InvWF /\ InvLedger /\ InvRes /\ InvHard /\ InvDep /\ InvVer /\ Term1
+    /\ LiveAll /\ Live1 /\ NoWedge /\ WinEsc /\ Win2 /\ RefreshAlways
+InvAbs == InvVerCap /\ InvWinVer
+Inv    == InvRel /\ InvAbs
+\* MC_Safety (VIEW): everything view-safe, with INV-HEALTHY.
+InvMC  == InvRel /\ InvOutcomes
+\* MC_Cap and the liveness configs (no VIEW): everything.
+InvCapMC == Inv /\ InvOutcomes
 
 -----------------------------------------------------------------------------
 (* Step properties, checked as [][StepProps]_vars. Every effective step    *)
 (* changes version, so no effective step is a stutter of vars. L is the    *)
-(* call that made the step.                                                *)
+(* call that made the step; L.i is a record id.                            *)
 
 L == last'
 
@@ -102,21 +203,28 @@ StepCfg == cfg' = cfg
 \* PROP: TX-VER. Every effective step increments version by exactly 1.
 TxVer == version' = version + 1 /\ steps' = steps + 1
 
-\* PROP: LIFE-1. Status graph, terminal absorbing, records append-only with
-\* immutable id/recipe/units/expires_at, new records Reserved.
+\* PROP: VER-CAP. Submit, dispatch, pause and observe take effect only
+\* below VERSION_CAP; ack, cancel and settle use the plain bump (TX-VER).
+VerCapStep == L.op \in {"submit", "dispatch", "pause", "observe"} => version < VersionCap
+
+\* PROP: LIFE-1 WIN-2. Status graph, terminal absorbing; the window is
+\* appended to, or (submit) its terminal oldest record is pruned and a
+\* record appended; retained records keep recipe/units/expires_at; new
+\* records are Reserved.
 Edges ==
     { <<"Reserved", "Dispatched">>, <<"Reserved", "Cancelled">>,
       <<"Dispatched", "Active">>, <<"Dispatched", "Unknown">>, <<"Unknown", "Active">> }
     \cup { <<s, t>> : s \in {"Dispatched", "Active", "Unknown"}, t \in {"Completed", "Cancelled"} }
 Life1 ==
-    /\ Len(records') \in {NR, NR + 1}
-    /\ \A k \in 1 .. NR :
-        /\ records'[k].recipe = records[k].recipe
-        /\ records'[k].units = records[k].units
-        /\ records'[k].exp = records[k].exp
-        /\ records'[k].status = records[k].status
-           \/ <<records[k].status, records'[k].status>> \in Edges
-    /\ \A k \in NR + 1 .. Len(records') : records'[k].status = "Reserved"
+    LET drop == firstId' - firstId IN
+    /\ drop \in {0, 1}
+    /\ drop = 1 => NR = MaxRecords /\ ~Open(records[1].status) /\ L.op = "submit"
+    /\ Len(records') \in {NR - drop, NR + 1 - drop}
+    /\ \A k \in 1 + drop .. NR :
+        LET c == records[k]  d == records'[k - drop] IN
+        /\ d.recipe = c.recipe /\ d.units = c.units /\ d.exp = c.exp
+        /\ d.status = c.status \/ <<c.status, d.status>> \in Edges
+    /\ \A k \in NR + 1 - drop .. Len(records') : records'[k].status = "Reserved"
 
 \* PROP: STALE-1. An accepted request carries the current version, and
 \* versions strictly increase, so it cannot be accepted again.
@@ -142,12 +250,19 @@ Adm2 ==
 \* grows.
 HardStep == L.op # "observe" => \A m \in MIdx : PV(values', m) <= PV(values, m)
 
-\* PROP: DEP-1. An accepted request's prerequisites are met by Completed
-\* units.
+\* PROP: DEP-1. An accepted request's prerequisites are met by the
+\* lifetime completed units.
 Dep1 ==
     L.op = "submit" =>
         \A q \in DOMAIN Rcp(L.r).requires :
-            DoneUnits(Rcp(L.r).requires[q][1]) >= Rcp(L.r).requires[q][2]
+            doneU[Rcp(L.r).requires[q][1] + 1] >= Rcp(L.r).requires[q][2]
+
+\* PROP: WIN-1. completed_units changes only by an effective settle(true),
+\* which adds the record's units, saturating.
+DoneStep ==
+    doneU' = IF L.op = "settle" /\ L.b
+             THEN [doneU EXCEPT ![L.r + 1] = Min(@ + L.u, DoneCap)]
+             ELSE doneU
 
 \* PROP: ASYNC-1. acknowledge changes only the record's status (between
 \* in-flight statuses), never values: Active and Unknown keep the
@@ -155,40 +270,57 @@ Dep1 ==
 Async1 ==
     L.op = "ack" =>
         /\ values' = values /\ observedAt' = observedAt /\ paused' = paused
+        /\ firstId' = firstId /\ doneU' = doneU
         /\ Len(records') = NR
-        /\ \A k \in 1 .. NR : k # L.i + 1 => records'[k] = records[k]
-        /\ InFlight(records'[L.i + 1].status)
+        /\ \A k \in 1 .. NR : k # Pos(L.i) => records'[k] = records[k]
+        /\ InFlightSpec(records'[Pos(L.i)].status)
 
-\* PROP: OBS-1. observe only with no open record; config and records kept.
+\* PROP: OBS-1. observe keeps config and records, and changes the values
+\* only with no open record.
 Obs1 ==
     L.op = "observe" =>
-        (\A k \in 1 .. NR : ~Open(records[k].status)) /\ records' = records /\ cfg' = cfg
+        /\ (\A k \in 1 .. NR : ~Open(records[k].status)) \/ values' = values
+        /\ records' = records /\ firstId' = firstId /\ cfg' = cfg
 
-\* PROP: TX-SUBMIT. The time, capacity and unit guards of an effective
-\* submit held in the pre-state (the other guards are STALE-1, AUTH-1,
-\* DEP-1, ADM-1, ADM-2, HARD-STEP and PAUSE-1).
+\* PROP: OBS-2. observe with an open record (a refresh) changes only
+\* observed_at and version: values, records, completed_units and the
+\* ghost base and k0 stay.
+Obs2 ==
+    (L.op = "observe" /\ AnyOpen) =>
+        /\ values' = values /\ records' = records /\ firstId' = firstId /\ doneU' = doneU
+        /\ paused' = paused /\ base' = base /\ k0' = k0
+
+\* PROP: TX-SUBMIT WIN-ESC. The time, window and unit guards of an
+\* effective submit held in the pre-state, it got id firstId + NR, and the
+\* window was appended to or pruned (the other guards are STALE-1, AUTH-1,
+\* DEP-1, ADM-1, ADM-2, HARD-STEP, PAUSE-1 and VER-CAP).
 Fresh(now) == cfg.maxAge = 0 \/ now <= observedAt + cfg.maxAge
 TxSubmit ==
     L.op = "submit" =>
+        LET new == [recipe |-> L.r, units |-> L.u, exp |-> L.exp, status |-> "Reserved"] IN
         /\ L.now < L.exp /\ L.exp <= L.now + Window /\ Fresh(L.now)
-        /\ NR < MaxRecords /\ L.r < NRcp /\ L.u \in 1 .. Rcp(L.r).maxUnits
-        /\ records' = Append(records, [recipe |-> L.r, units |-> L.u, exp |-> L.exp, status |-> "Reserved"])
+        /\ ~FullCond /\ L.r < NRcp /\ L.u \in 1 .. Rcp(L.r).maxUnits
+        /\ L.i = firstId + NR
+        /\ IF NR >= MaxRecords
+           THEN records' = Append(Tail(records), new) /\ firstId' = firstId + 1
+           ELSE records' = Append(records, new) /\ firstId' = firstId
 
-\* PROP: TX-DISPATCH. An effective dispatch: the record was Reserved and
-\* unexpired, the snapshot fresh, and only its status changed.
+\* PROP: TX-DISPATCH. An effective dispatch: the record was retained,
+\* Reserved and unexpired, the snapshot fresh, and only its status changed.
 TxDispatch ==
     L.op = "dispatch" =>
-        /\ Rec(L.i).status = "Reserved" /\ L.now < Rec(L.i).exp /\ Fresh(L.now)
-        /\ records' = [records EXCEPT ![L.i + 1].status = "Dispatched"]
-        /\ values' = values
+        /\ Found(L.i) /\ Rec(L.i).status = "Reserved" /\ L.now < Rec(L.i).exp /\ Fresh(L.now)
+        /\ records' = [records EXCEPT ![Pos(L.i)].status = "Dispatched"]
+        /\ values' = values /\ firstId' = firstId /\ doneU' = doneU
 
 \* PROP: PAUSE-1. Paused: no submit or dispatch takes effect. (That settle,
 \* ack, cancel and observe still do is WitStep_Paused*.)
 Pause1 == paused => L.op \notin {"submit", "dispatch"}
 
 StepProps ==
-    /\ StepCfg /\ TxVer /\ Life1 /\ Stale1 /\ Auth1 /\ Adm1 /\ Adm2
-    /\ HardStep /\ Dep1 /\ Async1 /\ Obs1 /\ TxSubmit /\ TxDispatch /\ Pause1
+    /\ StepCfg /\ TxVer /\ VerCapStep /\ Life1 /\ Stale1 /\ Auth1 /\ Adm1 /\ Adm2
+    /\ HardStep /\ Dep1 /\ DoneStep /\ Async1 /\ Obs1 /\ Obs2 /\ TxSubmit /\ TxDispatch
+    /\ Pause1
 StepProperty == [][StepProps]_vars
 
 -----------------------------------------------------------------------------
@@ -197,27 +329,60 @@ StepProperty == [][StepProps]_vars
 (* them as invariants or step properties that must be VIOLATED.            *)
 
 \* A record completed.
-Witness_Completed == ~\E j \in 0 .. NR - 1 : Rec(j).status = "Completed"
+Witness_Completed == ~\E id \in WinIds : Rec(id).status = "Completed"
 \* A record with a prerequisite was admitted (prerequisite met).
-Witness_Prerequisite == ~\E j \in 0 .. NR - 1 : Len(RecRcp(j).requires) > 0
+Witness_Prerequisite == ~\E id \in WinIds : Len(RecRcp(id).requires) > 0
 \* An observe left a metric out of bounds (B # 0).
 Witness_Disturbed == Healthy
-\* F-1: an in-flight record neither settle can resolve.
-Witness_Wedge ==
-    ~\E j \in 0 .. NR - 1 :
-        /\ InFlight(Rec(j).status)
-        /\ SettleErr(RecRcp(j).executor, j, TRUE) = "Bounds"
-        /\ SettleErr(RecRcp(j).executor, j, FALSE) = "Bounds"
+\* A submit pruned a terminal oldest record (WIN-ESC, WIN-2).
+Witness_Prune == firstId = 0
+\* Full: the window is full with an open oldest record while a later one
+\* is terminal (the Full guard reads the front, not the count).
+Witness_FullOpenFront ==
+    ~(FullCond /\ \E k \in 2 .. NR : ~Open(records[k].status))
+\* cancel of a Completed record is InvalidState (TERM-1).
+Witness_CancelCompletedInvalid ==
+    ~\E id \in WinIds : CancelErr(cfg.owner, id, 0) = "InvalidState"
+\* A submit that v1.0's check (completion-only envelope, compared with the
+\* violation now only) would pass is Bounds: the release terms or the
+\* candidate's violation decide.
+V10Low(cand, r, u, m) ==
+    cand[m] + SumTo([k \in 1 .. NR |->
+                        LET c == records[k] IN
+                        IF Open(c.status) THEN Min0(Rcp(c.recipe).complete[m] * c.units) ELSE 0], NR)
+            + Min0(Rcp(r).complete[m] * u)
+V10High(cand, r, u, m) ==
+    cand[m] + SumTo([k \in 1 .. NR |->
+                        LET c == records[k] IN
+                        IF Open(c.status) THEN Max0(Rcp(c.recipe).complete[m] * c.units) ELSE 0], NR)
+            + Max0(Rcp(r).complete[m] * u)
+V10BoundsOk(r, u) ==
+    LET cand == AddVec(values, Rcp(r).reserve, u) IN
+    \A m \in MIdx :
+        Max0(Mn(m) - V10Low(cand, r, u, m)) + Max0(V10High(cand, r, u, m) - Mx(m)) <= PV(values, m)
+Witness_SubmitRejectedHull ==
+    ~\E r \in 0 .. NRcp - 1, u \in 1 .. MaxU :
+        /\ u <= Rcp(r).maxUnits
+        /\ SubmitErr(Rcp(r).actor, r, u, version, observedAt + 1, observedAt) = "Bounds"
+        /\ V10BoundsOk(r, u)
 
 \* Step witnesses (checked on every transition, VIEW or not).
 \* Cancelled after dispatch: settle(false) of an in-flight record.
 WitStep_CancelledAfterDispatch ==
-    [][~\E k \in 1 .. NR : InFlight(records[k].status) /\ records'[k].status = "Cancelled"]_vars
+    [][~(L.op = "settle" /\ ~L.b /\ InFlightSpec(Rec(L.i).status))]_vars
 \* Unknown -> Active (a late positive acknowledgement).
 WitStep_UnknownToActive ==
-    [][~\E k \in 1 .. NR : records[k].status = "Unknown" /\ records'[k].status = "Active"]_vars
+    [][~(L.op = "ack" /\ Rec(L.i).status = "Unknown" /\ L.b)]_vars
 \* Recovery admission: a submit accepted in a violating state.
 WitStep_Recovery == [][~(L.op = "submit" /\ Violating)]_vars
+\* REFRESH-1, OBS-2: an observe took effect with a record open.
+WitStep_Refresh == [][~(L.op = "observe" /\ AnyOpen)]_vars
+\* A submit was accepted on a prerequisite whose Completed records were all
+\* pruned (completed_units, not the window, decides).
+WitStep_PrereqAfterPrune ==
+    [][~(/\ L.op = "submit"
+         /\ Len(Rcp(L.r).requires) > 0
+         /\ \A q \in DOMAIN Rcp(L.r).requires : WinDone(Rcp(L.r).requires[q][1]) = 0)]_vars
 \* PAUSE-1's second half: settle, ack, cancel and observe still take effect
 \* while paused (one witness each).
 PausedStep(op) == paused /\ paused' /\ L.op = op
@@ -225,5 +390,12 @@ WitStep_PausedSettle  == [][~PausedStep("settle")]_vars
 WitStep_PausedAck     == [][~PausedStep("ack")]_vars
 WitStep_PausedCancel  == [][~PausedStep("cancel")]_vars
 WitStep_PausedObserve == [][~PausedStep("observe")]_vars
+
+\* MC_Cap: the cap reached with a record open (ack, cancel and settle
+\* still take effect, LIVE-ALL and INV-VERCAP at the cap).
+Witness_AtCap == ~(version >= VersionCap /\ AnyOpen)
+\* MC_Cap: a record resolved at or above the cap.
+WitStep_ResolveAtCap ==
+    [][~(version >= VersionCap /\ L.op \in {"ack", "cancel", "settle"})]_vars
 
 =============================================================================

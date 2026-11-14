@@ -2,119 +2,70 @@
 (***************************************************************************)
 (* LIVE-2: every dispatched record eventually ends (Completed or           *)
 (* Cancelled), under weak fairness of the executor. What "fairness of the  *)
-(* executor" means decides the answer, so each config fixes it:            *)
+(* executor" means decided the answer at v1.0.0 (findings F-1, F-2), so    *)
+(* each config fixes it. At v1.1.0 every one holds (LIVE-ALL: both settles *)
+(* of an in-flight record are Ok in every reachable state):                *)
 (*                                                                         *)
 (*   TLA-LIVE-1  the completion path (MC_Liveness.cfg, universe MCConfig;  *)
 (*               MC_Liveness_F2Done.cfg, universe CreditHedgeConfig):      *)
 (*               observes stay inside [min, max] and the executor is       *)
-(*               weakly fair to COMPLETING each record (SettleDone):       *)
-(*               LIVE-2 holds. This is close to the fairness premise:      *)
-(*               LIVE-1 (Props.tla, an invariant) says settle(true) is Ok  *)
-(*               for every in-flight record while B = 0, so WF of it ends  *)
-(*               the record. The check adds that LIVE-1 holds in every     *)
-(*               reachable state and nothing else keeps a record open. It  *)
-(*               says nothing about an executor that reports nonexecution  *)
-(*               (that is TLA-LIVE-F2).                                    *)
-(*               MC_Liveness_Unfair.cfg: without fairness LIVE-2 fails.    *)
-(*   TLA-LIVE-F1 (MC_Liveness_F1.cfg) one disturbing observe is allowed,   *)
-(*               and the executor is weakly fair to settling each record   *)
-(*               either way (SettleAny): LIVE-2 must FAIL (finding F-1).   *)
-(*               MC_Liveness_F1Shape.cfg: Live2F1 holds, i.e. every        *)
-(*               counterexample is the F-1 wedge: a record that stays in   *)
-(*               flight is eventually forever Wedged (both settles fail    *)
-(*               Bounds, cancel Pending, observe Pending, B # 0).          *)
+(*               weakly fair to COMPLETING each record (SettleDone).       *)
+(*               MC_Liveness_Unfair.cfg: without fairness LIVE-2 fails     *)
+(*               (non-vacuity).                                            *)
+(*   TLA-LIVE-F1 (MC_Liveness_F1.cfg) disturbing observes are allowed, and *)
+(*               the executor is weakly fair to settling each record       *)
+(*               either way (SettleAny): LIVE-2 holds (v1.0.0: violated by *)
+(*               the F-1 wedge).                                           *)
 (*   TLA-LIVE-F2 (MC_Liveness_F2.cfg, universe CreditHedgeConfig) only     *)
-(*               in-bounds observes (B = 0 throughout), the executor is    *)
-(*               weakly fair to reporting NONEXECUTION (SettleFalse: the   *)
-(*               honest settle(false) of ASM-EXEC) and actors/owner are    *)
-(*               weakly fair to cancelling Reserved records: LIVE-2 must   *)
-(*               FAIL (finding F-2). MC_Liveness_F2Shape.cfg: Live2F2      *)
-(*               holds, i.e. every counterexample is the F-2 wedge: a      *)
-(*               record that stays in flight is eventually forever         *)
-(*               WedgedRelease (settle(false) Bounds because a completed   *)
-(*               sibling relied on its reservation, settle(true) Ok,       *)
-(*               cancel Pending, observe Pending, B = 0).                  *)
-(*               Weak fairness of SettleAny would not show F-2: in the     *)
-(*               wedge settle(true) stays enabled (LIVE-1), so WF forces   *)
-(*               it, i.e. the executor escapes only by attesting a         *)
-(*               completion that did not happen.                           *)
+(*               in-bounds observes, the executor is weakly fair to        *)
+(*               reporting NONEXECUTION (SettleFalse: the honest           *)
+(*               settle(false) of ASM-EXEC) and actors/owner are weakly    *)
+(*               fair to cancelling Reserved records: LIVE-2 holds (v1.0.0: *)
+(*               violated by the F-2 wedge; at v1.1.0 the hedge that       *)
+(*               relied on the credit's reservation is refused at submit). *)
+(*   WIN-LIVE    (MC_Liveness_Win.cfg, MaxRecords 1) a Full window is      *)
+(*               eventually not Full, under weak fairness of resolving its *)
+(*               oldest record (ResolveFront: cancel or settle either way).*)
 (*                                                                         *)
-(* Bounds are in the actions, not a CONSTRAINT or VIEW, so TLC's liveness  *)
-(* check is sound: submit, pause and observe only while version < VB, and  *)
-(* MaxRecords records, so every behaviour has finitely many effective      *)
-(* steps (then stutters). Settle, ack, dispatch and cancel are unbounded.  *)
-(* Scaled (C-5): MaxRecords 2 (real 256), VB 4; 1-2 metrics, 2 recipes.    *)
+(* The behaviours are MC_Cap's (Pool::new at VersionCap - H): calls that   *)
+(* start work (submit, dispatch, pause, observe) stop at the cap, so every *)
+(* behaviour has finitely many effective steps (then stutters) and TLC's   *)
+(* liveness check is sound without a VIEW or CONSTRAINT. At most H records *)
+(* are ever submitted, so their ids are 0 .. H - 1; a pruned id counts as  *)
+(* terminal (WIN-2: only a terminal record is pruned).                     *)
+(* Scaled (C-5): MaxRecords 2 (real 256; 1 for WIN-LIVE), H 4; 1-2         *)
+(* metrics, 2 recipes.                                                     *)
 (***************************************************************************)
-EXTENDS MCCommon
+EXTENDS MC_Cap
 
-CONSTANTS
-    VB,
-    \* The configuration of the universe (MCConfig or CreditHedgeConfig).
-    LCfg
+RecIds == 0 .. H - 1
+InFlightRec(id) == Found(id) /\ InFlight(Rec(id).status)
+TerminalRec(id) == id < firstId \/ (Found(id) /\ ~Open(Rec(id).status))
 
-LInit == InitFrom(LCfg, 0)
-
-LNext ==
-    \/ version < VB /\ (SubmitNext \/ PauseNext \/ ObserveNext)
-    \/ DispatchNext \/ AckNext \/ CancelNext \/ SettleNext
-
-RecIds == 0 .. MaxRecords - 1
-InFlightRec(i) == i < NR /\ InFlight(Rec(i).status)
-TerminalRec(i) == i < NR /\ ~Open(Rec(i).status)
-
-\* The executor completes record i / reports its nonexecution / settles it
+\* The executor completes record id / reports its nonexecution / settles it
 \* either way; some caller cancels it (only a Reserved record can be).
-SettleDone(i)  == i < NR /\ \E x \in Accounts : Settle(x, i, TRUE)
-SettleFalse(i) == i < NR /\ \E x \in Accounts : Settle(x, i, FALSE)
-SettleAny(i)   == i < NR /\ \E x \in Accounts, b \in BOOLEAN : Settle(x, i, b)
-CancelAny(i)   == i < NR /\ \E c \in Accounts, now \in Times : Cancel(c, i, now)
+SettleDone(id)  == Found(id) /\ \E x \in Accounts : Settle(x, id, TRUE)
+SettleFalse(id) == Found(id) /\ \E x \in Accounts : Settle(x, id, FALSE)
+SettleAny(id)   == Found(id) /\ \E x \in Accounts, b \in BOOLEAN : Settle(x, id, b)
+CancelAny(id)   == Found(id) /\ \E c \in Accounts, now \in Times : Cancel(c, id, now)
 
 \* PROP: TLA-LIVE-1
 \* (the completion path)
-LiveSpec   == LInit /\ [][LNext]_vars /\ \A i \in RecIds : WF_vars(SettleDone(i))
-UnfairSpec == LInit /\ [][LNext]_vars
+LiveSpec   == CapInit /\ [][Next]_vars /\ \A id \in RecIds : WF_vars(SettleDone(id))
+UnfairSpec == CapSpec
 \* PROP: TLA-LIVE-F1
-F1Spec     == LInit /\ [][LNext]_vars /\ \A i \in RecIds : WF_vars(SettleAny(i))
+F1Spec     == CapInit /\ [][Next]_vars /\ \A id \in RecIds : WF_vars(SettleAny(id))
 \* PROP: TLA-LIVE-F2
-F2Spec     == LInit /\ [][LNext]_vars
-                    /\ \A i \in RecIds : WF_vars(SettleFalse(i)) /\ WF_vars(CancelAny(i))
+F2Spec     == CapInit /\ [][Next]_vars
+                      /\ \A id \in RecIds : WF_vars(SettleFalse(id)) /\ WF_vars(CancelAny(id))
 
 \* PROP: LIVE-2
-Live2 == \A i \in RecIds : [](InFlightRec(i) => <>TerminalRec(i))
+Live2 == \A id \in RecIds : [](InFlightRec(id) => <>TerminalRec(id))
 
-\* F-1's shape: neither settle can resolve the record, it cannot be
-\* cancelled, the pool cannot be re-observed, and an observe disturbed it.
-Wedged(i) ==
-    /\ InFlightRec(i)
-    /\ SettleErr(RecRcp(i).executor, i, TRUE) = "Bounds"
-    /\ SettleErr(RecRcp(i).executor, i, FALSE) = "Bounds"
-    /\ CancelErr(cfg.owner, i, 0) = "Pending"
-    /\ CancelErr(RecRcp(i).actor, i, 0) = "Pending"
-    /\ ObserveErr(cfg.owner, values, 0) = "Pending"
-    /\ ~Healthy
-
-\* PROP: TLA-LIVE-F1
-\* (LIVE-2 fails only by the F-1 wedge)
-Live2F1 == \A i \in RecIds : (<>[]InFlightRec(i)) => <>[]Wedged(i)
-
-\* F-2's shape, with no disturbance (B = 0): the honest nonexecution report
-\* fails Bounds because undoing the record's reservation alone takes a
-\* metric out of [min, max], and a sibling record has Completed (its
-\* completion relied on that reservation); the record cannot be cancelled,
-\* the pool cannot be re-observed; only an attestation of completion
-\* (settle(true), Ok by LIVE-1) would end it.
-WedgedRelease(i) ==
-    /\ InFlightRec(i)
-    /\ SettleErr(RecRcp(i).executor, i, FALSE) = "Bounds"
-    /\ SettleErr(RecRcp(i).executor, i, TRUE) = "Ok"
-    /\ CancelErr(cfg.owner, i, 0) = "Pending"
-    /\ CancelErr(RecRcp(i).actor, i, 0) = "Pending"
-    /\ ObserveErr(cfg.owner, values, 0) = "Pending"
-    /\ Healthy
-    /\ \E m \in MIdx : PV(AddVec(values, Neg(RecRcp(i).reserve), Rec(i).units), m) > 0
-    /\ \E j \in 0 .. NR - 1 : j # i /\ Rec(j).status = "Completed"
-
-\* PROP: TLA-LIVE-F2
-\* (LIVE-2 fails only by the F-2 wedge in this universe)
-Live2F2 == \A i \in RecIds : (<>[]InFlightRec(i)) => <>[]WedgedRelease(i)
+\* Resolving the window's oldest record: cancel it or settle it either way.
+ResolveFront == NR > 0 /\ (CancelAny(firstId) \/ SettleAny(firstId))
+\* PROP: WIN-LIVE
+WinSpec == CapInit /\ [][Next]_vars /\ WF_vars(ResolveFront)
+\* PROP: WIN-LIVE
+WinLive == [](WinFull => <>~WinFull)
 =============================================================================

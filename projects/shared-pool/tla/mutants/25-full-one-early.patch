@@ -1,11 +1,13 @@
+# checks: trace
+# Full one record early (a full window is MaxRecords - 1).
 --- a/SharedPool.tla
 +++ b/SharedPool.tla
-@@ -227,7 +227,7 @@
-     ELSE IF v # version THEN "Stale"
-     ELSE IF exp <= now \/ exp > now + Window THEN "Expired"
-     ELSE IF SnapExpired(now) THEN "SnapshotExpired"
--    ELSE IF NR >= MaxRecords THEN "Full"
-+    ELSE IF NR + 1 >= MaxRecords THEN "Full"
-     ELSE IF r >= NRcp THEN "InvalidRecipe"
-     ELSE IF c # Rcp(r).actor THEN "Unauthorized"
-     ELSE IF u = 0 \/ u > Rcp(r).maxUnits THEN "InvalidUnits"
+@@ -134,7 +134,7 @@
+ AnyOpen     == \E k \in 1 .. NR : Open(records[k].status)
+ \* candidate()'s Full (U:287-289): the window is full and its oldest
+ \* record, which a submit would prune, is open.
+-WinFull == NR >= MaxRecords /\ Open(records[1].status)
++WinFull == NR + 1 >= MaxRecords /\ Open(records[1].status)
+ 
+ \* Config::validate (CFG-2), names omitted. requires is a sequence of
+ \* <<prerequisite recipe, units>>. v1.1 adds actor # executor (U:130).

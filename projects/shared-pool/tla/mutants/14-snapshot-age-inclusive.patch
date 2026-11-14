@@ -1,8 +1,10 @@
+# checks: safety-1 trace
+# SnapshotExpired at now = observed_at + max_age.
 --- a/SharedPool.tla
 +++ b/SharedPool.tla
-@@ -197,7 +197,7 @@
- \* bump(): version.checked_add(1).
- VerErr == IF version >= MaxVersion THEN "Arithmetic" ELSE "Ok"
+@@ -231,7 +231,7 @@
+ \* bump_new() (U:401-406): the cap, then bump (which cannot fail below it).
+ CapErr == IF version >= VersionCap THEN "Arithmetic" ELSE VerErr
  
 -SnapExpired(now) == cfg.maxAge > 0 /\ now > observedAt + cfg.maxAge
 +SnapExpired(now) == cfg.maxAge > 0 /\ now >= observedAt + cfg.maxAge
