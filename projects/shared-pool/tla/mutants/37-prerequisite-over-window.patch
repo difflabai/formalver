@@ -1,4 +1,4 @@
-# checks: trace WitStep_PrereqAfterPrune
+# checks: WitStep_PrereqAfterPrune trace
 # FR-4. v1.0's prerequisite: Completed units among the retained records
 # (no completed_units), so a pruned completion no longer counts.
 --- a/SharedPool.tla

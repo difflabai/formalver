@@ -1,4 +1,4 @@
-# checks: trace f2b
+# checks: Witness_EdgeValue trace
 # add() rejects a result of exactly +-MAX_VALUE.
 --- a/SharedPool.tla
 +++ b/SharedPool.tla

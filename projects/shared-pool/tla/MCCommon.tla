@@ -112,5 +112,20 @@ ASSUME ValidCfg(F2bConfig)
 \* F2bConfig: the initial vector only (observe is a refresh or a re-base to it).
 F2bObservations == {<<0, 0>>}
 
+\* PROP: TLA-WIT
+\* Witnesses of the F2bConfig universe (MC_F2b.cfg). A value at exactly
+\* +-MAX_VALUE is reached (A's reservation: add() accepts the bound).
+Witness_EdgeValue == ~\E m \in MIdx : values[m] = -MaxValue \/ values[m] = MaxValue
+\* F-2b's admission is refused with Arithmetic: with A open and nothing
+\* else applied (values = A's reservation), B x 2 (whose completion v1.0
+\* admitted on A's reservation) has the hull's high endpoint -1e6 + 1e6
+\* (A's release) + 2e6 (B's completion) = 2e6, while its completion terms
+\* alone end at 1e6. So only the release term's endpoint check gives
+\* Arithmetic here (without it the call fails Bounds: mutants 24, 34).
+Witness_F2bRefused ==
+    ~(/\ values = <<-1000000, 0>>
+      /\ \E id \in WinIds : Rec(id).recipe = 0 /\ Open(Rec(id).status)
+      /\ SubmitErr(Rcp(1).actor, 1, 2, version, observedAt + 1, observedAt) = "Arithmetic")
+
 Init == InitFrom(MCConfig, 0)
 =============================================================================

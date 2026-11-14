@@ -33,8 +33,9 @@ RemSum == SumTo([k \in 1 .. NR |-> Rem(records[k].status)], NR)
 
 \* The properties restate the core's conditions they rely on rather than
 \* reuse the model's operators, so a mutant of the model's operator is
-\* checked against the statement: Full (U:287-289) and the in-flight
-\* statuses (an open record that is not Reserved).
+\* checked against the statement: Full (U:287-289), the in-flight
+\* statuses (an open record that is not Reserved) and the envelope
+\* (HullLo, HullHi below).
 FullCond == NR >= MaxRecords /\ Open(records[1].status)
 InFlightSpec(s) == s \in {"Dispatched", "Active", "Unknown"}
 
@@ -71,16 +72,29 @@ Contribution(m) ==
     SumTo([k \in 1 .. NR |-> IF firstId + k - 1 >= k0 THEN Contrib(records[k], m) ELSE 0], NR)
 InvLedger == \A m \in MIdx : values[m] = base[m] + Contribution(m)
 
+\* The release-aware envelope of the open records around the current
+\* values (the hull of every outcome: each record stays open, completes,
+\* d = complete * u, or releases, x = -reserve * u), restated rather than
+\* read from the model's LoTerm/HiTerm, so a mutant of the admission
+\* envelope is checked against the statement.
+HullTerm(k, m, neg) ==
+    LET c == records[k]  rc == Rcp(c.recipe)
+        d == rc.complete[m] * c.units  x == -(rc.reserve[m] * c.units)
+    IN IF ~Open(c.status) THEN 0
+       ELSE IF neg THEN Min(0, Min(d, x)) ELSE Max(0, Max(d, x))
+HullLo(m) == values[m] + SumTo([k \in 1 .. NR |-> HullTerm(k, m, TRUE)], NR)
+HullHi(m) == values[m] + SumTo([k \in 1 .. NR |-> HullTerm(k, m, FALSE)], NR)
+HullEV(m) == Max0(Mn(m) - HullLo(m)) + Max0(HullHi(m) - Mx(m))
+
 \* PROP: INV-RES. The release-aware envelope of the open records is
 \* computable (endpoints within +-MAX_VALUE) and each metric's envelope
 \* violation equals its current violation.
-CheckEnvOk ==
-    \A m \in MIdx : Bounded(Low(values, 0, 0, -1, m)) /\ Bounded(High(values, 0, 0, -1, m))
-InvRes == CheckEnvOk /\ \A m \in MIdx : EV(values, 0, 0, -1, m) = PV(values, m)
+CheckEnvOk == \A m \in MIdx : Bounded(HullLo(m)) /\ Bounded(HullHi(m))
+InvRes == CheckEnvOk /\ \A m \in MIdx : HullEV(m) = PV(values, m)
 
 \* PROP: INV-HARD. The envelope's violation never exceeds the violation at
 \* the last re-basing observe (a corollary of INV-RES and HARD-STEP).
-InvHard == CheckEnvOk /\ \A m \in MIdx : EV(values, 0, 0, -1, m) <= B(m)
+InvHard == CheckEnvOk /\ \A m \in MIdx : HullEV(m) <= B(m)
 
 \* PROP: INV-HEALTHY (InvOutcomes). Every combination of outcomes of the
 \* open records (complete, release, or none) has no metric's violation

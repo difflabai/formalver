@@ -1,4 +1,4 @@
-# checks: trace
+# checks: WitStep_UnknownToActive trace
 # acknowledge of an Unknown record is a no-op (no late Active).
 --- a/SharedPool.tla
 +++ b/SharedPool.tla

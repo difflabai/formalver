@@ -13,6 +13,7 @@
 #              then every witness must be VIOLATED (TLA-WIT, non-vacuity):
 #              the Witness_* invariants and WitStep_* step properties on
 #              MC_Safety.cfg, WitStep_Recovery on MC_Recovery.cfg,
+#              Witness_EdgeValue and Witness_F2bRefused on MC_F2b.cfg,
 #              Witness_AtCap and WitStep_ResolveAtCap on MC_Cap.cfg
 #   safety-1   TLC, MC_Safety_1.cfg (MaxRecords 1): the smoke run (opt-in)
 #   liveness   TLC, MC_Liveness (LIVE-2; the MC_Cap behaviours):
@@ -24,6 +25,7 @@
 #                liveness-f2        healthy, executor fair to settle(false):
 #                                   holds (TLA-LIVE-F2; v1.0.0: F-2)
 #                liveness-win       WinLive, MaxRecords 1 (WIN-LIVE)
+#                liveness-win2      WinLive, MaxRecords 2 (WIN-LIVE)
 #   executor   TLA-EXEC (EX-6, EX-7, EX-8): TLC, Executor.tla, the executor's
 #              job window against the lock's record window with receipts in
 #              any order, at WINDOW 2 (MC_Executor_W2, as executor-w2) and 3
@@ -162,6 +164,10 @@ run_liveness-win() {
   tlc "$1" MC_Liveness.tla MC_Liveness_Win.cfg "$2"
   tlc_ok "$2"
 }
+run_liveness-win2() {
+  tlc "$1" MC_Liveness.tla MC_Liveness_Win2.cfg "$2"
+  tlc_ok "$2"
+}
 # TLA-EXEC: every invariant and StepExec of Executor.tla.
 run_executor-w2() {
   tlc "$1" Executor.tla MC_Executor_W2.cfg "$2"
@@ -220,6 +226,7 @@ WITNESSES="Witness_Completed:MC_Safety:MC_Safety Witness_Prerequisite:MC_Safety:
   WitStep_PausedSettle:MC_Safety:MC_Safety WitStep_PausedAck:MC_Safety:MC_Safety
   WitStep_PausedCancel:MC_Safety:MC_Safety WitStep_PausedObserve:MC_Safety:MC_Safety
   WitStep_Recovery:MC_Safety:MC_Recovery
+  Witness_EdgeValue:MC_Safety:MC_F2b Witness_F2bRefused:MC_Safety:MC_F2b
   Witness_AtCap:MC_Cap:MC_Cap WitStep_ResolveAtCap:MC_Cap:MC_Cap"
 
 # run_witness <spec dir> <log> <witness>: 0 iff the witness is violated
@@ -277,7 +284,8 @@ check_safety-1() {
 
 check_liveness() {
   local d=$1 c log start
-  for c in liveness liveness-f2-done liveness-unfair liveness-f1 liveness-f2 liveness-win; do
+  for c in liveness liveness-f2-done liveness-unfair liveness-f1 liveness-f2 liveness-win \
+    liveness-win2; do
     log="$logs/$c.log"
     start=$(date +%s)
     "run_$c" "$d" "$log"
@@ -297,6 +305,7 @@ desc() {
     liveness-f1) echo "LIVE-2 holds with disturbing observes, fair settles (TLA-LIVE-F1)" ;;
     liveness-f2) echo "LIVE-2 holds, healthy, fair settle(false)/cancel (TLA-LIVE-F2)" ;;
     liveness-win) echo "WinLive, MaxRecords 1, fair resolution of the front (WIN-LIVE)" ;;
+    liveness-win2) echo "WinLive, MaxRecords 2, fair resolution of the front (WIN-LIVE)" ;;
     executor-w2) echo "TLA-EXEC, WINDOW 2, MAX_JOBS 4" ;;
     executor-w3) echo "TLA-EXEC, WINDOW 3, MAX_JOBS 6" ;;
     executor-w2-fullview) echo "TLA-EXEC quotient cross-check, WINDOW 2, ids 0 .. 4, ViewFull" ;;

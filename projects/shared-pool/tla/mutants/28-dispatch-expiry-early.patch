@@ -1,5 +1,6 @@
 # checks: trace
 # dispatch expires one second early.
+# It only rejects more calls: the traces kill it.
 --- a/SharedPool.tla
 +++ b/SharedPool.tla
 @@ -291,7 +291,7 @@

@@ -1,5 +1,6 @@
 # checks: trace
 # submit rejects expires_at = now + 86400.
+# It only rejects more calls: the traces kill it.
 --- a/SharedPool.tla
 +++ b/SharedPool.tla
 @@ -263,7 +263,7 @@

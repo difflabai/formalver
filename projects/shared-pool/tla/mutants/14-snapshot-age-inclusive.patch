@@ -1,5 +1,6 @@
-# checks: safety-1 trace
+# checks: trace
 # SnapshotExpired at now = observed_at + max_age.
+# It only rejects more calls, which no property forbids: the traces kill it.
 --- a/SharedPool.tla
 +++ b/SharedPool.tla
 @@ -231,7 +231,7 @@

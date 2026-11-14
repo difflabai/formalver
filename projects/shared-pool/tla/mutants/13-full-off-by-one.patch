@@ -1,4 +1,4 @@
-# checks: trace safety-1
+# checks: safety-1 trace
 # Full only above MaxRecords: a submit at a full window with an open
 # oldest record prunes it.
 --- a/SharedPool.tla

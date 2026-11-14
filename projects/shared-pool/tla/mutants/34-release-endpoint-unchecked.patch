@@ -1,9 +1,12 @@
-# checks: trace
+# checks: Witness_F2bRefused trace
 # FR-2 (F-2b). The +-1e6 endpoint check covers the completion terms only,
 # not the release terms. As with 24, an endpoint beyond +-1e6 then fails
 # Bounds instead of Arithmetic (any passing envelope has its endpoints
-# inside [min, max]), so INV-RES's endpoint clause cannot see it; trace
-# 208 (release-arith, refused Arithmetic at submit) kills it.
+# inside [min, max]), so the reachable states are the same and INV-RES's
+# endpoint clause cannot see it. The error name can: F-2b's admission (B
+# x 2 with only A applied, whose completion terms alone end at 1e6) is
+# Bounds, not Arithmetic, so Witness_F2bRefused (MC_F2b) is unreachable;
+# trace 208 (release-arith, refused Arithmetic at submit) kills it too.
 --- a/SharedPool.tla
 +++ b/SharedPool.tla
 @@ -206,10 +206,18 @@

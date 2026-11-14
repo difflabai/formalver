@@ -1,5 +1,7 @@
-# checks: trace safety-1
-# submit checks Stale before Paused (guard order).
+# checks: trace
+# submit checks Stale before Paused (guard order). Only the error name of
+# a stale request while paused differs (both reject, nothing changes), so
+# no state or step property sees it: the traces do.
 --- a/SharedPool.tla
 +++ b/SharedPool.tla
 @@ -261,8 +261,8 @@

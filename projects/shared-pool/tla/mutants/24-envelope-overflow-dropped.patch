@@ -1,8 +1,9 @@
-# checks: trace
+# checks: Witness_F2bRefused trace
 # The envelope's endpoint check (Arithmetic) is dropped. An endpoint
 # beyond +-1e6 then fails Bounds instead (it exceeds every violation the
 # comparator allows), so the reachable states are the same: only the
-# error name differs, which the traces (206, 208) see.
+# error name differs, which Witness_F2bRefused and the traces (206, 208)
+# see.
 --- a/SharedPool.tla
 +++ b/SharedPool.tla
 @@ -209,7 +209,7 @@
