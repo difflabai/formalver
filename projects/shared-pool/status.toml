@@ -2,18 +2,28 @@
 name = "shared-pool"
 upstream = "https://github.com/difflabai/shared-pool-controls"
 upstream_path = ""
-pinned_commit = "a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7"   # PR #1 head (feat/shared-pool-controls, 2026-11-12 UTC): "Address review: reconcile griefing, broken doc link, CI robustness". PR #1 merged (b9e994f); the pin is on upstream main. Verified: shared-pool-controls v1.0.0 (6f616160303e0376fc5e032837fcd566a344f66a, "Mark the contract as v1.0.0"), whose crates/core/src/lib.rs, crates/contract and crates/executor are byte-identical to this pin; kept, not re-pinned (strategy.md section 13). Upstream PR #4 (v1.1) is not verified here.
+pinned_commit = "57b3f02d18e85149db3c1035431368c4e07a4d8a"   # merge commit of upstream PR #4 on main (2026-11-13 UTC, "Merge pull request #4 from difflabai/gabehamilton/v1.1-verification-findings"): shared-pool-controls v1.1.0. Its tree is the tree of the PR head 6fcbd56. Re-verification in progress (strategy.md Target); v1.0.0 (pin a4bb5c3) was verified in PR #31, tag shared-pool-v1.0.0.
 last_reviewed = "2026-11-13"
 release_overflow_checks = true  # ASM-COMPILE: check-pin.sh fails unless upstream [profile.release] sets overflow-checks = true
-# The verified release is not the pin itself (strategy.md section 13):
-# check-pin.sh fetches verified_release_commit and fails unless every
-# identical_paths entry (relative to upstream_path) is the same git tree or
-# blob, mode included, at the pin and at that commit. Upstream has no tags;
-# 6f61616 is the commit "Mark the contract as v1.0.0", head of upstream PR #2
-# (merged), on main.
-verified_release = "v1.0.0"
-verified_release_commit = "6f616160303e0376fc5e032837fcd566a344f66a"
-identical_paths = ["crates/core/src/lib.rs", "crates/contract", "crates/executor"]
+verified_release = "v1.1.0"     # the release under verification (root Cargo.toml version = "1.1.0")
+# Identity (strategy.md section 12): for each entry check-pin.sh checks that
+# every path (relative to upstream_path) is the same git tree or blob, mode
+# included, at the pin and at the entry's commit, fetching the commit by SHA
+# if the mirror lacks it. An entry whose commit is the pin only checks that
+# its paths exist. The merge commit is the pin; PR #4's head 6fcbd56 has the
+# same tree, so every path below is byte-identical at both.
+identity = [
+  { label = "v1.1.0 merge commit", commit = "57b3f02d18e85149db3c1035431368c4e07a4d8a", paths = ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "crates", "scripts", "scenarios", "docs"] },
+  { label = "PR #4 head", commit = "6fcbd566e9b335fa2011272a897bd4beb7e6969b", paths = ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "crates", "scripts", "scenarios", "docs"] },
+]
+# The previous verification: v1.0.0, pin a4bb5c3 (PR #1 head), whose
+# crates/core/src/lib.rs, crates/contract and crates/executor are
+# byte-identical to 6f61616 "Mark the contract as v1.0.0". Its results are in
+# PR #31 and the tag shared-pool-v1.0.0; every row below that is `stale`
+# records them.
+previous_release = "v1.0.0"
+previous_pinned_commit = "a4bb5c3c9cef1ed03bcbe8f3350ab6e84200eae7"
+previous_release_commit = "6f616160303e0376fc5e032837fcd566a344f66a"
 
 # Status values, evidence vocabulary and ceilings: projects/near-approval/strategy.md section 12.
 # Status values: unverified | in-progress | verified | verified-with-assumptions | stale
@@ -83,22 +93,33 @@ near_sdk = "5.29.1"         # from source-mirror Cargo.lock
 upstream_rust = "1.98"      # source-mirror rust-toolchain.toml
 
 [source_hashes]             # sha256 at pinned_commit; check-pin.sh recomputes
-"Cargo.toml" = "b2e34970efce90df1726c3f1639fa116c1c7c987fb924f60f018a0f32aa0942c"
-"Cargo.lock" = "d7e9d84d9e64001ac2aa51e9c15290f1ba14af85f3a30a52a4e587940a34def1"
+"Cargo.toml" = "be3e474323d5364cd74bfbb9b949ffee001e7a0f5cf8a08ccde4884ef895ac08"
+"Cargo.lock" = "09a1439436039ddeaf4129577fd4de5c21c84c42b0651ddb493079922754e83e"
 "rust-toolchain.toml" = "5878a36e61292d01952bbaa165e48284703ed79ec46918d407aefccf7709d2f9"
 "crates/core/Cargo.toml" = "5f29e05fedf59163b56ab57c3d760e5614b331523e76a1a6056d8c630707bfd2"
-"crates/core/src/lib.rs" = "9a4eb36cc9690d353f8ec78e4eec6e389a895caccab24ced54994b8a8e7505c4"
-"crates/core/src/fixtures.rs" = "b8168b743509b5996a7d0b1a363341d17278cc4689b60014ad3702d9cc791389"
-"crates/core/src/tests.rs" = "22037750d5521113c53ff801ecbad8200b0d7de19055c786b95cd68ece5144e4"
+"crates/core/src/lib.rs" = "c3bb825b91f7c277dee8651beafd45955f7cf8935c858f928b6a1b62d607ba48"
+"crates/core/src/fixtures.rs" = "d63273f7f4efbb23acfb8e13bcb90a2af66047a18ffed6b0a1ecbdd086dc601d"
+"crates/core/src/tests.rs" = "795366ef5574a2bfb69866dc6a41c586462904072c3d46fb2fef556548af98e2"
+"crates/core/src/findings.rs" = "d2cf95a45e37b3ab350111125ac6f936ad10a1830d480a1d49b9ebdf27713c0f"
 "crates/contract/Cargo.toml" = "fa1906e2a7bee9593eff9fdecd957a6f3a5bb4072ac11e492363304062f545f2"
-"crates/contract/src/lib.rs" = "6ee32c1e4b05934c69ef4a338c58f13f658fc55b3bc132c832ae762c9fe29784"
+"crates/contract/src/lib.rs" = "3810d18d9afa6ba3a6fc6dac9c2e897acc343d8e532bd13b2c2bbc81da20c03c"
 "crates/executor/Cargo.toml" = "b75fb69980e7b0c06926096c14927e96ecb6372760a1edaa33457c6f9b9f8804"
-"crates/executor/src/lib.rs" = "917d0dcc667a7f55f963313b495e5bf8067f22f80b206543f12b8332e1d005c5"
+"crates/executor/src/lib.rs" = "a2d63842c23d760882b36b1d0548062b6b4fe24f49b7ce5fda7c492cbe129198"
 "crates/sandbox/Cargo.toml" = "24b6e0e946710ca6e7f7f508249e0d32cc36a2d12c1bf9a31c4dad079ad85e03"
-"crates/sandbox/tests/integration.rs" = "eca6e156ef165a9b50720fd95d4535ca964b382e5ee4a14022fc724f3a5fdd34"
-"docs/spec.md" = "8b3a03f0d6aed6545f1a6edc617b1d5c8a795df15bbb2a573f67f1baf21be3e6"
-"docs/api.md" = "1730c10d46af74772c49fbf0c54ce27f6e827b3b536e286adc1c92ad098e840c"
-"docs/verification-handoff.md" = "07bb0a92806c130bbd0a591928ecce91d831dd22284441063cbfcf7e1d5116d9"
+"crates/sandbox/tests/integration.rs" = "0dbcbc093557df587f5efea086af72c45c242d81b2fe60194089667558a056c1"
+"crates/sandbox/tests/res1.rs" = "ab6aa6d20253f8268dbffc951bde8618a3b07fb5b56f567013917cc7048e8bc2"
+"crates/demo/src/main.rs" = "c1558094b907463a5d6b56f971417f83ba751157bfbd22a9bf865a63bb56fcc5"
+"scripts/build.sh" = "429b63ea57ca92d140d1a79c43228e7a3b182e57875f2f0c2829d3180dd61f3e"
+"docs/spec.md" = "27ad470589db5c4a48c651135026a74c1fdcea4fbc08c87d413e65e6b0e49a11"
+"docs/api.md" = "1b1175b07181e520bc271412e4238b2895bdbf299906f17368ee32dbc16c6d34"
+"docs/verification-handoff.md" = "495ebd96b2268fce731f5afe1086663a36b31287f31c8f84268e4d5182b2266b"
+"docs/verification-findings.md" = "7f4ffd9e82df8ce20c4c809215f8cab074d0bf3244ec22bd19b0d6752e2e2819"
+"scenarios/friday/trace.json" = "ae1dd04b661765aa3c5b1eecd8015f10b66cf1208922f85eff4697dc7e13eeb7"
+"scenarios/gpu/trace.json" = "b872dbfa9165925fb3a57c33c1eeeff38ddcc48af1a483e2627de8c61f9de87b"
+"scenarios/hiring/trace.json" = "da50a246ad0b6b664f4648c0dd19618d947306c80ad8e3085d3e904c2f7e9960"
+"scenarios/inventory/trace.json" = "cf4ab803d162077c8570aec6cf29eb7916c1eb77defbd25d93235a7ffd0513e2"
+"scenarios/risk/trace.json" = "75c216fc5c028b754aaf99d7d0b4775ae57a3bdf2606762e26d112a71a6e89ff"
+"scenarios/station/trace.json" = "ae2409969289e823f5413f4a33f1e911fba4a13d0010bbdcb7b8d8ac505943b5"
 
 # ---------------------------------------------------------------------------
 # Trust assumptions (strategy.md sections 3.3 and 5.14).

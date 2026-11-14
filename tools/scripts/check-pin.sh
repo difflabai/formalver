@@ -2,12 +2,15 @@
 # Checks that a project's source mirror is the commit status.toml pins and
 # that every file listed in [source_hashes] still has its recorded sha256.
 #
-# If [project] names a verified_release_commit (a release that is not the pin
-# itself), also checks that each of [project] identical_paths (relative to
-# upstream_path) is byte-identical at the pin and at that commit: the same
-# git tree or blob entry (mode, type and object id) at both. The commit is
-# fetched by SHA from the mirror's origin if the clone lacks it (a CI
-# submodule checkout has depth 1); a commit that cannot be fetched fails.
+# If [project] has an `identity` list, also checks each entry
+# { label, commit, paths }: every path (relative to upstream_path) must be
+# byte-identical at the pin and at that commit, the same git tree or blob
+# entry (mode, type and object id) at both. An entry whose commit is the pin
+# passes without a fetch or a comparison. Any other commit is fetched by SHA
+# from the mirror's origin if the clone lacks it (a CI submodule checkout has
+# depth 1); a commit that cannot be fetched fails. The older form
+# (verified_release_commit with identical_paths) is refused, so a status.toml
+# that still uses it cannot skip the check.
 #
 # usage: tools/scripts/check-pin.sh <project>
 # Needs the submodule checked out and python3 >= 3.11 (tomllib).
@@ -49,49 +52,67 @@ if st["project"].get("release_overflow_checks"):
     if prof.get("overflow-checks") is not True:
         print(f"ASM-COMPILE: {cargo.relative_to(root)} [profile.release] does not set overflow-checks = true"); fail = 1
 
-# The verified release, when it is not the pin: its code at identical_paths
-# must be the pin's, byte for byte.
+# Identity: each entry's commit holds the pin's code at its paths, byte for
+# byte (strategy.md section 12).
 proj = st["project"]
-rel_commit = proj.get("verified_release_commit", "")
-if rel_commit:
-    mirror = d / "source-mirror"
-    label = proj.get("verified_release", rel_commit[:7])
-    paths = proj.get("identical_paths", [])
-    def git(*args):
-        return subprocess.run(["git", "-C", str(mirror), *args], capture_output=True, text=True)
-    def entry(commit, path):
-        # "<mode> <type> <object>" of the path in the commit, or None.
-        out = git("ls-tree", commit, "--", path).stdout.splitlines()
-        return out[0].split("\t")[0] if len(out) == 1 and out[0].endswith("\t" + path) else None
-    if not re.fullmatch(r"[0-9a-f]{40}", rel_commit):
-        print(f"verified_release_commit {rel_commit!r} is not a 40-character sha"); fail = 1
-    elif not paths:
-        print("verified_release_commit is set but identical_paths is empty"); fail = 1
-    else:
-        have = git("cat-file", "-e", rel_commit + "^{commit}").returncode == 0
+for key in ("verified_release_commit", "identical_paths"):
+    if key in proj:
+        print(f"[project] {key} is no longer read: list the commit under identity = [{{ label, commit, paths }}]"); fail = 1
+ident = proj.get("identity", [])
+mirror = d / "source-mirror"
+def git(*args):
+    return subprocess.run(["git", "-C", str(mirror), *args], capture_output=True, text=True)
+def entry(commit, path):
+    # "<mode> <type> <object>" of the path in the commit, or None.
+    out = git("ls-tree", commit, "--", path).stdout.splitlines()
+    return out[0].split("\t")[0] if len(out) == 1 and out[0].endswith("\t" + path) else None
+if not isinstance(ident, list):
+    print("[project] identity is not a list of { label, commit, paths } tables"); fail = 1
+    ident = []
+for n, it in enumerate(ident, 1):
+    if not isinstance(it, dict):
+        print(f"identity entry {n} is not a table"); fail = 1
+        continue
+    commit = it.get("commit", "")
+    label = it.get("label") or f"identity entry {n}"
+    paths = it.get("paths", [])
+    if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+        print(f"{label}: commit {commit!r} is not a 40-character sha"); fail = 1
+        continue
+    if not isinstance(paths, list) or not paths or not all(isinstance(p, str) and p.strip("/") for p in paths):
+        print(f"{label}: paths must be a non-empty list of paths"); fail = 1
+        continue
+    up = proj.get("upstream_path", "")
+    gps = [posixpath.join(up, p.strip("/")) if up else p.strip("/") for p in paths]
+    if commit == pin:
+        gone = [gp for gp in gps if entry(pin, gp) is None]
+        for gp in gone:
+            print(f"{label}: {gp} is missing at the pin"); fail = 1
+        if not gone:
+            print(f"{label} ({commit[:7]}) is the pin")
+        continue
+    have = git("cat-file", "-e", commit + "^{commit}").returncode == 0
+    if not have:
+        f = git("fetch", "--quiet", "--no-tags", "--depth", "1", "origin", commit)
+        have = f.returncode == 0 and git("cat-file", "-e", commit + "^{commit}").returncode == 0
         if not have:
-            f = git("fetch", "--quiet", "--no-tags", "--depth", "1", "origin", rel_commit)
-            have = f.returncode == 0 and git("cat-file", "-e", rel_commit + "^{commit}").returncode == 0
-            if not have:
-                print(f"cannot fetch verified_release_commit {rel_commit} ({label}): {f.stderr.strip()}"); fail = 1
-        if have:
-            up = proj.get("upstream_path", "")
-            bad = []
-            for p in paths:
-                gp = posixpath.join(up, p.rstrip("/")) if up else p.rstrip("/")
-                a, b = entry(pin, gp), entry(rel_commit, gp)
-                if a is None or b is None:
-                    where = " and ".join(w for w, e in (("the pin", a), (label, b)) if e is None)
-                    print(f"verified release: {gp} is missing at {where}"); bad.append(gp)
-                elif a != b:
-                    print(f"verified release: {gp} differs between the pin and {label} ({a} != {b})"); bad.append(gp)
-            if bad:
-                stat = git("diff", "--stat", pin, rel_commit, "--", *bad).stdout.rstrip()
-                if stat:
-                    print(stat)
-                fail = 1
-            else:
-                print(f"verified release {label} ({rel_commit[:7]}): {', '.join(paths)} byte-identical to the pin")
+            print(f"{label}: cannot fetch {commit}: {f.stderr.strip()}"); fail = 1
+            continue
+    bad = []
+    for gp in gps:
+        a, b = entry(pin, gp), entry(commit, gp)
+        if a is None or b is None:
+            where = " and ".join(w for w, e in (("the pin", a), (label, b)) if e is None)
+            print(f"{label}: {gp} is missing at {where}"); bad.append(gp)
+        elif a != b:
+            print(f"{label}: {gp} differs between the pin and {commit[:7]} ({a} != {b})"); bad.append(gp)
+    if bad:
+        stat = git("diff", "--stat", pin, commit, "--", *bad).stdout.rstrip()
+        if stat:
+            print(stat)
+        fail = 1
+    else:
+        print(f"{label} ({commit[:7]}): {', '.join(paths)} byte-identical to the pin")
 
 print("pin ok" if not fail else "pin check FAILED")
 sys.exit(fail)

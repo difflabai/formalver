@@ -1,9 +1,11 @@
 # shared-pool CI: the layers of projects/shared-pool against the pinned
-# shared-pool-controls commit (status.toml pinned_commit, a4bb5c3: PR #1's
-# head, on upstream main since PR #1 merged). Verified: shared-pool-controls
-# v1.0.0 (contract code byte-identical to the pin a4bb5c3); the pin job
-# fails if that identity stops holding (status.toml verified_release_commit
-# and identical_paths). Upstream PR #4 (v1.1) is not verified here.
+# shared-pool-controls commit (status.toml pinned_commit, 57b3f02: the merge
+# commit of upstream PR #4 on main, shared-pool-controls v1.1.0). The v1.1.0
+# re-verification is in progress: the layers still hold v1.0.0's artifacts
+# (pin a4bb5c3, PR #31, tag shared-pool-v1.0.0) until each is re-done, so
+# jobs that check those artifacts against the new pin (kani-record first)
+# fail until then. The pin job fails unless PR #4's head 6fcbd56 holds the
+# pin's code byte for byte (status.toml [project] identity).
 # Each layer has its own runner, projects/shared-pool/<layer>/run.sh (exit 0 =
 # every check passes, vacuity guards included); the jobs below call them.
 # The Kani jobs (plain, mutants, kani, kani-large, kani-record, covers,
@@ -11,7 +13,8 @@
 # the conformance job.
 # shared-pool-controls is public; the jobs that read the source fetch its
 # submodule without a key. TLA+ and Lean read only the checked-in traces.
-# The pin and v1.0.0 are fetched by SHA; both are on upstream main.
+# The pin and the identity commits are fetched by SHA; the pin is on
+# upstream main and 6fcbd56 is its second parent.
 name: shared-pool
 
 on:
@@ -23,6 +26,7 @@ on:
       - "tools/scripts/check-kani-record.py"
       - "tools/scripts/test-check-kani-record.sh"
       - "tools/scripts/check-pin.sh"
+      - "tools/scripts/test-check-pin.sh"
       - "tools/scripts/check-status.sh"
       - "tools/scripts/ci-submodule.sh"
       - "tools/scripts/get-lean.sh"
@@ -52,6 +56,7 @@ on:
       - "tools/scripts/check-kani-record.py"
       - "tools/scripts/test-check-kani-record.sh"
       - "tools/scripts/check-pin.sh"
+      - "tools/scripts/test-check-pin.sh"
       - "tools/scripts/check-status.sh"
       - "tools/scripts/ci-submodule.sh"
       - "tools/scripts/get-lean.sh"
@@ -190,17 +195,21 @@ jobs:
             fi
           done
           echo "::error::no python3 >= 3.11 on PATH"; exit 1
-      - name: Gitlink, source hashes and v1.0.0 identity match status.toml
+      - name: Pin check self-test
+        # check-pin.sh's identity check on scratch repositories (no network).
+        run: tools/scripts/test-check-pin.sh
+      - name: Gitlink, source hashes and v1.1.0 identity match status.toml
         # Also ASM-COMPILE: upstream [profile.release] keeps overflow-checks.
-        # And the verified release: check-pin.sh fetches upstream 6f61616
-        # (v1.0.0, status.toml verified_release_commit) by SHA and fails
-        # unless crates/core/src/lib.rs, crates/contract and crates/executor
-        # (identical_paths) are the same git trees and blobs as at the pin.
+        # And the identity: for each status.toml [project] identity entry,
+        # check-pin.sh fetches its commit by SHA if the mirror lacks it (PR
+        # #4's head 6fcbd56) and fails unless every listed path (Cargo.toml,
+        # Cargo.lock, rust-toolchain.toml, crates, scripts, scenarios, docs)
+        # is the same git tree or blob as at the pin (57b3f02).
         run: tools/scripts/check-pin.sh shared-pool
 
   status-lint:
     # status.toml claims nothing the repository doesn't back (near-approval
-    # strategy.md sections 12 and 14): 83 properties, 14 assumptions.
+    # strategy.md sections 12 and 14): 103 properties, 15 assumptions.
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
