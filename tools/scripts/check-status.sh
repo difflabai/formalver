@@ -19,6 +19,28 @@
 #     least one row past `unverified`/`stale` (a rejected one may have none);
 #   - a property's `finding` (comma-separated IDs) names open findings only.
 # Without [findings], `closes` is an error and `finding` is free text.
+# When `[project] catalogue = "<file>"` names the property catalogue
+# (shared-pool: strategy.md, plan-meta section 4.5; the path is relative to
+# status.toml), status.toml must match its section 5, whose tables C-6 reads
+# too (prolog/verification/consistency.pl): rows are the markdown table rows
+# from "## 5." to the next "## ", each table headed ID ... Layer(s) ... Status.
+#   - the properties are exactly the rows whose Layer(s) is not `assumption`,
+#     the [assumptions.<ID>] tables exactly the others, with no ID twice;
+#   - `layer` is the first entry of Layer(s) (near-tests: unit, difftest or
+#     wasm-check), and each other entry is in `cross`;
+#   - one module per "### 5.N" subsection: a subsection's rows share one
+#     [modules.<m>], and no two subsections share one;
+#   - `status` is what the Status cell records for the row's primary layer
+#     (an assumption's: any layer):
+#       "stale; ..." first, or `Kani: pending (vX.Y.Z: ...)` on a Kani row,
+#         is a previous release's result not re-checked: stale;
+#       `Kani: pending` alone on a Kani row: unverified (new) or stale;
+#       otherwise a result word outside "(vX.Y.Z: ...)" brackets (proved,
+#         model-checked, tested, checked, bounded proof; a Kani row needs
+#         `bounded proof`): in-progress, or a verified* status the cell
+#         names; no result word (open, untested, policy): unverified;
+#   - an assumption's `level` is the cell's "(high)", "(med)", "(low)" or
+#     leading "policy".
 # In-progress K/V properties are allowed without sign-off: they record that
 # the proofs pass in CI while the human spec review is still pending.
 #
@@ -28,7 +50,8 @@
 #
 # usage: tools/scripts/check-status.sh <project>
 #        STATUS_TOML=<file> ...   (lint another status file against the project's
-#                                  artifacts; test-check-status.sh uses it)
+#                                  artifacts; its catalogue is read next to it;
+#                                  test-check-status.sh uses it)
 set -euo pipefail
 
 project=${1:?usage: check-status.sh <project>}
@@ -38,7 +61,8 @@ python3 -I - "$root" "$root/projects/$project" <<'PY'
 import os, pathlib, re, sys, tomllib
 
 root, d = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
-st = tomllib.loads(pathlib.Path(os.environ.get("STATUS_TOML") or d / "status.toml").read_text())
+status_path = pathlib.Path(os.environ.get("STATUS_TOML") or d / "status.toml")
+st = tomllib.loads(status_path.read_text())
 
 ALLOWED = {
     "kani": {"bounded-proof"},
@@ -179,9 +203,174 @@ for fid, f in findings.items():
         elif not any(rank_of.get(x, 0) >= RANK["in-progress"] for x in by):
             errors.append(f"findings.{fid}: closed, but every closed_by row is unverified or stale")
 
+# Catalogue (plan-meta section 4.5): status.toml against the catalogue's
+# section 5 (header comment). Only with [project] catalogue.
+NEAR = {"near-tests": {"unit", "difftest", "wasm-check"}}
+PREV = re.compile(r"\(v\d+(?:\.\d+)*:")
+RESULT = re.compile(r"(?<![\w-])(?:proved|model-checked|tested|checked|bounded proof)(?![\w-])")
+BOUNDED = re.compile(r"(?<![\w-])bounded proof(?![\w-])")
+
+def md_cells(line):
+    # The trimmed cells of "| a | b |"; "\|" inside a cell is not a separator.
+    s = line.strip()
+    s = s[1:] if s.startswith("|") else s
+    s = s[:-1] if s.endswith("|") and not s.endswith("\\|") else s
+    return [c.strip() for c in re.split(r"(?<!\\)\|", s)]
+
+def bare_id(s):
+    return bool(re.fullmatch(r"[A-Z][A-Z0-9-]*[A-Z0-9]", s)) and "-" in s[1:]
+
+def section5(text, name):
+    # [(line, subsection, id, layers, status cell)] in file order, and problems.
+    lines, rows, probs = text.split("\n"), [], []
+    start = next((i for i, l in enumerate(lines) if l.startswith("## 5.")), None)
+    if start is None:
+        return rows, [f"catalogue: {name} has no \"## 5.\" section"]
+    i, sub = start + 1, None
+    while i < len(lines) and not lines[i].startswith("## "):
+        m = re.match(r"### (5\.\d+)(?!\d)", lines[i])
+        if m:
+            sub = m.group(1)
+        if not lines[i].startswith("|"):
+            i += 1
+            continue
+        j = i
+        while j < len(lines) and lines[j].startswith("|"):
+            j += 1
+        head = md_cells(lines[i])
+        sep = md_cells(lines[i + 1]) if i + 1 < j else []
+        if not sep or not all(c and set(c) <= set("-:") and "-" in c for c in sep):
+            probs.append(f"catalogue: {name}:{i + 1}: a section 5 table without a separator row")
+        elif head[0] != "ID" or "Layer(s)" not in head or "Status" not in head:
+            probs.append(f"catalogue: {name}:{i + 1}: a section 5 table not headed ID ... Layer(s) ... Status")
+        else:
+            li, si = head.index("Layer(s)"), head.index("Status")
+            for k in range(i + 2, j):
+                c = md_cells(lines[k])
+                if not bare_id(c[0]):
+                    probs.append(f"catalogue: {name}:{k + 1}: a section 5 row whose first cell {c[0]!r} is not a bare ID")
+                elif len(c) <= max(li, si):
+                    probs.append(f"{c[0]}: {name}:{k + 1}: {len(c)} cells, no Layer(s) or Status cell")
+                else:
+                    lay = [x.strip() for x in c[li].split(",") if x.strip()]
+                    rows.append((k + 1, sub, c[0], lay, c[si]))
+        i = j
+    if not rows and not probs:
+        probs.append(f"catalogue: {name} section 5 has no rows")
+    return rows, probs
+
+def drop_prev(cell):
+    # The cell without its "(vX.Y.Z: ...)" brackets (balanced parentheses).
+    out, i = [], 0
+    while (m := PREV.search(cell, i)):
+        out.append(cell[i:m.start()])
+        depth, j = 0, m.start()
+        while j < len(cell):
+            depth += {"(": 1, ")": -1}.get(cell[j], 0)
+            j += 1
+            if depth == 0:
+                break
+        i = j
+    return "".join(out) + cell[i:]
+
+def implied(cell, kani):
+    # (statuses the Status cell allows, what it records). kani: the row's
+    # primary layer is Kani, or it is an assumption (any `Kani: pending`).
+    pending = kani and "Kani: pending" in cell
+    if re.match(r"stale\b", cell) or (pending and re.search(r"Kani: pending \(v\d+(?:\.\d+)*:", cell)):
+        return {"stale"}, "a previous release's result, not re-checked at the pin"
+    if pending:
+        return {"stale", "unverified"}, "`Kani: pending` with no previous result"
+    base = drop_prev(cell)
+    if not (BOUNDED if kani == "kani" else RESULT).search(base):
+        return {"unverified"}, "no Kani result (`bounded proof`)" if kani == "kani" else "no result"
+    named = {v for v in ("verified", "verified-with-assumptions")
+             if re.search(r"(?<![\w-])" + v + r"(?![\w-])", base)}
+    return {"in-progress"} | named, "a result at the pin"
+
+cat_rows = None
+cat_name = st.get("project", {}).get("catalogue")
+if cat_name:
+    cat_path = status_path.parent / cat_name
+    if not cat_path.is_file():
+        errors.append(f"catalogue: {cat_name} not found next to {status_path.name}")
+    else:
+        cat_rows, probs = section5(cat_path.read_text(), cat_name)
+        errors.extend(probs)
+    if cat_rows:   # with no rows, the problem above is the only one reported
+        where = {}
+        for r in cat_rows:
+            where.setdefault(r[2], []).append(r)
+        for rid, rs in where.items():
+            if len(rs) > 1:
+                errors.append(f"{rid}: {len(rs)} rows in {cat_name} section 5 (lines {', '.join(str(r[0]) for r in rs)})")
+        asm_rows = {rid: rs[0] for rid, rs in where.items() if rs[0][3] == ["assumption"]}
+        prop_rows = {rid: rs[0] for rid, rs in where.items() if rs[0][3] != ["assumption"]}
+        mod_of, twice = {}, set()
+        for mn, mod in st.get("modules", {}).items():
+            for pid, p in mod.get("properties", {}).items():
+                if isinstance(p, dict) and "status" in p:
+                    if pid in mod_of:   # props keeps the last; so does mod_of
+                        errors.append(f"{pid}: in [modules.{mod_of[pid]}] and [modules.{mn}]")
+                        twice.add(pid)
+                    mod_of[pid] = mn
+        for pid in props:
+            if pid not in prop_rows:
+                errors.append(f"{pid}: a status.toml property with no {cat_name} section 5 property row")
+        for rid, r in prop_rows.items():
+            if rid not in props:
+                errors.append(f"{rid}: {cat_name}:{r[0]} is a section 5 property row with no status.toml property")
+        for aid in assumptions:
+            if aid not in asm_rows:
+                errors.append(f"{aid}: [assumptions.{aid}] has no {cat_name} section 5 row with Layer(s) assumption")
+        for rid, r in asm_rows.items():
+            if rid not in assumptions:
+                errors.append(f"{rid}: {cat_name}:{r[0]} is a section 5 assumption row with no [assumptions.{rid}]")
+        sub_mod = {}
+        for n, sub, rid, lay, cell in cat_rows:
+            if rid not in props or prop_rows.get(rid, (None,))[0] != n:
+                continue
+            p, at = props[rid], f"{cat_name}:{n}"
+            first = lay[0] if lay else None
+            if p.get("layer") not in NEAR.get(first, {first}):
+                errors.append(f"{rid}: layer {p.get('layer')!r}, but {at} Layer(s) {', '.join(lay)!r} starts with {first!r}"
+                              + (" (unit, difftest or wasm-check)" if first in NEAR else ""))
+            for other in lay[1:]:
+                if not NEAR.get(other, {other}) & set(p.get("cross", [])):
+                    errors.append(f"{rid}: cross {p.get('cross', [])!r} lacks {other!r} of {at} Layer(s) {', '.join(lay)!r}")
+            if sub and rid not in twice:
+                m0, r0 = sub_mod.setdefault(sub, (mod_of[rid], rid))
+                if mod_of[rid] != m0:
+                    errors.append(f"{rid}: in [modules.{mod_of[rid]}], but section {sub}'s rows are in [modules.{m0}] ({r0})")
+            if p["status"] in RANK:
+                ok, says = implied(cell, "kani" if p.get("layer") == "kani" else None)
+                if p["status"] not in ok:
+                    errors.append(f"{rid}: status {p['status']!r}, but {at} Status {cell!r} records {says}: {' or '.join(sorted(ok))}")
+        subs_of = {}
+        for sub, (m0, _) in sub_mod.items():
+            subs_of.setdefault(m0, []).append(sub)
+        for m0, subs in subs_of.items():
+            if len(subs) > 1:
+                errors.append(f"catalogue: [modules.{m0}] holds sections {', '.join(subs)}; one module per section 5 subsection")
+        for rid, (n, sub, _, lay, cell) in asm_rows.items():
+            a = assumptions.get(rid)
+            if not isinstance(a, dict):
+                continue
+            at = f"{cat_name}:{n}"
+            lv = re.search(r"\((high|med|low)\)", cell)
+            lv = lv.group(1) if lv else "policy" if re.match(r"policy\b", cell) else None
+            if a.get("level") != lv:
+                errors.append(f"{rid}: level {a.get('level')!r}, but {at} Status {cell!r} says {lv!r}")
+            ok, says = implied(cell, "assumption")
+            if a.get("status") not in ok:
+                errors.append(f"{rid}: status {a.get('status')!r}, but {at} Status {cell!r} records {says}: {' or '.join(sorted(ok))}")
+
 for e in errors:
     print(f"::error::status-lint: {e}" if os.environ.get("GITHUB_ACTIONS") else f"status-lint: {e}")
-if findings:
+if cat_rows is not None:
+    print(f"status-lint: {seen} properties, {len(assumptions)} assumptions, {len(findings)} findings, "
+          f"{len(cat_rows)} {cat_name} section 5 rows, {len(errors)} problem(s)")
+elif findings:
     print(f"status-lint: {seen} properties, {len(findings)} findings, {len(errors)} problem(s)")
 else:
     print(f"status-lint: {seen} properties, {len(errors)} problem(s)")

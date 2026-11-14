@@ -6,6 +6,7 @@ pinned_commit = "57b3f02d18e85149db3c1035431368c4e07a4d8a"   # merge commit of u
 last_reviewed = "2026-11-14"
 release_overflow_checks = true  # ASM-COMPILE: check-pin.sh fails unless upstream [profile.release] sets overflow-checks = true
 verified_release = "v1.1.0"     # the release under verification (root Cargo.toml version = "1.1.0")
+catalogue = "strategy.md"       # status-lint checks the rows against its section 5 (header comment below)
 # Identity (strategy.md section 12): for each entry check-pin.sh checks that
 # every path (relative to upstream_path) is the same git tree or blob, mode
 # included, at the pin and at the entry's commit, fetching the commit by SHA
@@ -51,6 +52,16 @@ previous_release_commit = "6f616160303e0376fc5e032837fcd566a344f66a"
 #     to unit, difftest or wasm-check by the file that tags it); `cross` holds
 #     the row's other layers plus any other layer whose files carry the ID's
 #     PROP tag. Other evidence the row cites is named in `harness`.
+#   - status-lint (tools/scripts/check-status.sh, through [project]
+#     catalogue) checks these rules against strategy.md section 5: the IDs
+#     and one module per subsection, `layer` and `cross` against Layer(s),
+#     and each row's `status` (an assumption's `level` too) against its
+#     Status cell. "stale; v1.0.0: ..." is `stale`; so is "Kani: pending
+#     (v1.0.0: ...)" on a Kani row or an assumption, where a bare "Kani:
+#     pending" is `unverified` or `stale`. Otherwise a result (proved,
+#     model-checked, tested, checked; a Kani row needs "bounded proof") is
+#     `in-progress`, and none (open, untested, policy) `unverified`. A row's
+#     status and its cell change together.
 #   - Kani-primary properties carry the Kani layer's result (strategy.md
 #     section 6, kani/RESULTS.md): in-progress, evidence bounded-proof, the
 #     harnesses first in `harness`, the bound in `kani_bound`, and in

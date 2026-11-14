@@ -51,7 +51,8 @@ on:
       - "!**/*.adoc"
       - "!**/docs/**"
       # Re-included (a later positive pattern wins): the prolog job's C-6
-      # reads section 5 of this file. A change to it alone runs every job.
+      # and status-lint read section 5 of this file. A change to it alone
+      # runs every job.
       - "projects/shared-pool/strategy.md"
   push:
     branches: [main]
@@ -82,7 +83,8 @@ on:
       - "!**/*.adoc"
       - "!**/docs/**"
       # Re-included (a later positive pattern wins): the prolog job's C-6
-      # reads section 5 of this file. A change to it alone runs every job.
+      # and status-lint read section 5 of this file. A change to it alone
+      # runs every job.
       - "projects/shared-pool/strategy.md"
   workflow_dispatch:
     inputs:
@@ -218,8 +220,13 @@ jobs:
     # status.toml claims nothing the repository doesn't back (near-approval
     # strategy.md sections 12 and 14): 103 properties, 15 assumptions and
     # 14 [findings] tables (closes <-> closed_by, closed_in, a closer past
-    # unverified). The self-test runs first: its findings cases edit a
-    # scratch copy of near-approval's status.toml, which has no [findings].
+    # unverified). With [project] catalogue it also agrees with strategy.md
+    # section 5 (strategy.md section 12, "Catalogue"): the 118 IDs, modules,
+    # layer and cross against Layer(s), each status against its Status cell.
+    # The self-test runs first: its findings cases edit a scratch copy of
+    # near-approval's status.toml, which has no [findings]; its catalogue
+    # cases edit scratch copies of this project's status.toml and
+    # strategy.md.
     runs-on: ${{ (startsWith(github.head_ref || github.ref_name, 'dependabot/') || github.actor == 'dependabot[bot]' || github.triggering_actor == 'dependabot[bot]' || startsWith(github.head_ref || github.ref_name, 'claude/') || contains(github.event.pull_request.body, 'claude.ai/code/session_') || github.event.head_commit.committer.email == 'noreply@anthropic.com') && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
