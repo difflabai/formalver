@@ -5,7 +5,7 @@
 # expect: test_mc2 MC-2: all traces replay
 --- a/prolog/requirements/pool_req.pl
 +++ b/prolog/requirements/pool_req.pl
-@@ -289,8 +289,8 @@
+@@ -293,8 +293,8 @@
  op_kind(observe).
  
  % --- submit (spec:19-27, api:13, api:28-32)

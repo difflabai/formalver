@@ -4,12 +4,12 @@
 # expect: test_mc2 MC-2: all traces replay
 --- a/prolog/model/pool_machine.pl
 +++ b/prolog/model/pool_machine.pl
-@@ -460,7 +460,7 @@
- effect(observe, pool(C, _, N, _, P, R), observe(_, Vs, Now), ok, pool(C, Vs, N1, Now, P, R)) :- N1 is N + 1.
+@@ -564,7 +564,7 @@
+     N1 is N + 1.
  
- set_status(pool(C, V, N, O, P, R0), Id, St, pool(C, V, N1, O, P, R1)) :-
--    N1 is N + 1,
-+    N1 is N,
-     nth0(Id, R0, c(RI, U, E, _), Rest),
-     nth0(Id, R1, c(RI, U, E, St), Rest).
+ set_status(pool(C, V, N, O, P, R0, F, D), Id, St, pool(C, V, N1, O, P, R1, F, D)) :-
+-    N1 is N + 1, K is Id - F,
++    N1 is N, K is Id - F,
+     nth0(K, R0, c(RI, U, E, _), Rest),
+     nth0(K, R1, c(RI, U, E, St), Rest).
  

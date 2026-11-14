@@ -5,7 +5,7 @@
 # expect: test_mc1 MC-1 healthy
 --- a/prolog/model/pool_machine.pl
 +++ b/prolog/model/pool_machine.pl
-@@ -421,7 +421,7 @@
+@@ -512,7 +512,7 @@
  
  release_next(S, Id, Next) :-
      record_of(S, Id, c(RI, U, _, _)), pool_config(S, C), recipe_of(C, RI, r(_, _, Res, _, _, _)),

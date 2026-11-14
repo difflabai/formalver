@@ -176,21 +176,21 @@ prolog_evidence('C-3', check("pool_req life/5 vs extracted status guards, TLA Ed
 prolog_evidence('C-4', check("pool_req constant/3 and model_constant/3 vs extracted constants")).
 prolog_evidence('C-5', check("fixture claims on trace configs 1-5, their replays, fixtures.rs accounts (station derived from gpu), a two-record release search per fixture; validate rejects actor = executor; no known finding at v1.1.0 (F-2, F-4 fixed)")).
 prolog_evidence('C-6', check("this file")).
-prolog_evidence('MC-1', 'model-check'("bounded exploration of three small universes (wedge F-1, healthy, reliance F-2)")).
+prolog_evidence('MC-1', 'model-check'("bounded exploration of seven small universes: wedge (F-1), healthy, reliance (F-2), window and window1 (F-3, windows of 2 and 1), cap (F-5, from 4 below VERSION_CAP), f2b (F-2b)")).
 prolog_evidence('MC-2', test("replay of every conformance trace through step/4")).
 prolog_evidence(P, test("MC-2: checked on every edge/state of the real core's traces; MC-1: on the model's reachable graph")) :-
     member(P, ['TX-0', 'TX-NOOP', 'TX-VER', 'AUTH-1', 'STALE-1', 'ADM-1', 'ADM-2', 'HARD-STEP',
                'DEP-1', 'LIFE-1', 'ASYNC-1', 'TERM-1', 'OBS-1', 'PAUSE-1',
-               'INV-WF', 'INV-LEDGER', 'INV-HARD', 'INV-HEALTHY', 'INV-DEP', 'INV-VER', 'LIVE-1']).
+               'INV-WF', 'INV-LEDGER', 'INV-HARD', 'INV-HEALTHY', 'INV-DEP', 'INV-VER', 'LIVE-1',
+               'INV-RES', 'INV-VERCAP', 'WIN-1', 'WIN-2', 'OBS-2']).
 prolog_evidence(P, test("MC-2: exact result and post-state of every replayed call of this kind")) :-
     member(P, ['TX-SUBMIT', 'TX-DISPATCH', 'TX-ACK', 'TX-CANCEL', 'TX-SETTLE', 'TX-PAUSE', 'TX-OBSERVE']).
-prolog_evidence('LIVE-2', 'model-check'("MC-1: healthy universe has no dead or release-blocked record; wedge universe has dead in-flight records (F-1); reliance universe has release-blocked in-flight records with B = 0 (F-2)")).
+prolog_evidence('LIVE-2', 'model-check'("MC-1: no dead or release-blocked record in the wedge, healthy, reliance, cap and f2b universes (v1.0.0: wedge 228 states with a dead in-flight record, F-1; reliance 150 release-blocked states, F-2); the windowed universes check LIVE-ALL instead (ids move)")).
 prolog_evidence('RD-PREVIEW', test("COV-2 differential (test_reads): the real core's preview (allowed, reason, candidate, energies) at 1,246 trace states, 36,797 requests (conformance/traces/reads.txt) equals the model's; model unit tests (preview_allowed <=> submit Ok)")).
 prolog_evidence('RD-BEST', test("COV-2 differential (test_reads): the real core's best_quantity on the same 36,797 requests equals the model's best_quantity/4; model unit test against brute force on small cases")).
-% v1.1.0 (W1): planned. The model (W3) and the requirements (W6) replace this
-% clause with what they check; until then run.sh's PROP-tag step fails on these IDs.
-prolog_evidence(P, test("planned for v1.1.0: MC-2 on every trace state and MC-1 on the model's reachable graph (W3, W6)")) :-
-    member(P, ['VER-CAP', 'OBS-2', 'WIN-2', 'INV-RES', 'INV-VERCAP', 'WIN-1', 'LIVE-ALL', 'WIN-ESC', 'REFRESH-1']).
+prolog_evidence(P, test("MC-2: probed at every state of the real core's traces; MC-1: at every reachable state of the model (each open record resolved by its callers, the owner's restatement Ok below the cap, Full exactly with an open front)")) :-
+    member(P, ['LIVE-ALL', 'REFRESH-1', 'WIN-ESC']).
+prolog_evidence('VER-CAP', 'model-check'("MC-1 cap universe (window 2, from 4 below VERSION_CAP): submit, dispatch, pause and observe fail Arithmetic at the cap, ack, cancel and settle stay Ok past it; MC-2 checks every edge (no trace nears the cap); test_model F-5 at u32::MAX - 768")).
 
 %%% ========================================================
 %%% Requirements -> properties

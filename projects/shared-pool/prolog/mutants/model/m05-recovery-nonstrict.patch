@@ -3,7 +3,7 @@
 # expect: test_mc2 MC-2: all traces replay
 --- a/prolog/model/pool_machine.pl
 +++ b/prolog/model/pool_machine.pl
-@@ -330,7 +330,7 @@
+@@ -413,7 +413,7 @@
              % happen once the envelope (guard envelope_arith) passed; surfaced loudly.
              throw(unreachable(recovery_add, S, Op))
          ),

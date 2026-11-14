@@ -4,12 +4,12 @@
 # expect: test_model submit: saturating u64 expiry
 --- a/prolog/model/pool_machine.pl
 +++ b/prolog/model/pool_machine.pl
-@@ -301,7 +301,7 @@
+@@ -378,7 +378,7 @@
  holds(submit, expiry, _, submit(_, _, _, _, Exp, Now)) :-
      constant(expiry_horizon, H, _),
      sat_add64(Now, H, Max),                 % CODE-ONLY: saturating u64 sum
 -    Exp > Now, Exp =< Max.
 +    Exp > Now, Exp < Max.
  holds(submit, freshness, S, submit(_, _, _, _, _, Now)) :- fresh(S, Now).
+ % spec:21 "Full only when 256 records are retained and the oldest is open"
  holds(submit, record_bound, S, _) :-
-     pool_records(S, Rs), length(Rs, N), constant(max_records, M, _), N < M.

@@ -4,12 +4,12 @@
 # expect: test_mc2 MC-2: all traces replay
 --- a/prolog/model/pool_machine.pl
 +++ b/prolog/model/pool_machine.pl
-@@ -368,7 +368,7 @@
- % --- cancel (spec:41, 43; api:15)
+@@ -451,7 +451,7 @@
+ % --- cancel (spec:43, 45; api:17)
  holds(cancel, caller, S, cancel(Caller, Id, _)) :-
      record_of(S, Id, c(RI, _, _, _)), pool_config(S, C),
 -    actor_of(C, RI, A), owner_of(C, O), ( Caller == A ; Caller == O ), !.
 +    actor_of(C, RI, A), owner_of(C, _), Caller == A, !.
  holds(cancel, not_cancelled, S, cancel(_, Id, _)) :- record_of(S, Id, c(_, _, _, St)), St \== cancelled.
- holds(cancel, reserved, S, cancel(_, Id, _)) :- record_of(S, Id, c(_, _, _, reserved)).
- holds(Kind, release_arith, S, Op) :- release_kind(Kind), op_id(Op, Id), release_next(S, Id, _).
+ % spec:43 "A cancel of a Completed record returns InvalidState" (v1.0.0: Pending)
+ holds(cancel, not_completed, S, cancel(_, Id, _)) :- record_of(S, Id, c(_, _, _, St)), St \== completed.

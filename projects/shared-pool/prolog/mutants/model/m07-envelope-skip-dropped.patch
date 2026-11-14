@@ -4,12 +4,12 @@
 # expect: test_mc2 MC-2: all traces replay
 --- a/prolog/model/pool_machine.pl
 +++ b/prolog/model/pool_machine.pl
-@@ -207,7 +207,7 @@
- pending_effects([], _, _, _, []).
- pending_effects([c(RI, U, _, St) | Cs], Id, Rs, Skip, Out) :-
+@@ -268,7 +268,7 @@
+ open_terms([], _, _, _, []).
+ open_terms([c(RI, U, _, St) | Cs], Id, Rs, Skip, Out) :-
      Id1 is Id + 1,
 -    (   open_status(St), Skip \== Id
 +    (   open_status(St), Skip \== x
-     ->  nth0(RI, Rs, r(_, _, _, Com, _, _)), scale(Com, U, E), Out = [E | Out1]
+     ->  nth0(RI, Rs, R), hull_term(R, U, T), Out = [T | Out1]
      ;   Out = Out1
      ),

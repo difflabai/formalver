@@ -183,6 +183,20 @@ test('C-5 trace releases use id = first_id + index in a pruned window', (
     findall(Id-S, consistency:trace_open_record(St5, Id, _, S), O5),
     check(unpruned, O5 == [0-reserved]) )).
 
+% End to end on the v1.1.0 model (pool/8): C-5's release of an open record of
+% a pruned window reaches the model's step/4 at id first_id + index, and the
+% list index alone would name a pruned id (NotFound).
+test('C-5 trace releases in a pruned window are Ok on the model at id = first_id + index', (
+    Cfg = config(o, 0, [m(0, 10, 5)], [t(0, 5, 1, target)],
+                 [r(a1, x1, [0], [0], 5, []), r(a2, x2, [0], [0], 5, [])]),
+    S = pool(Cfg, [5], 9, 100, false, [c(0, 1, 1000, completed), c(0, 1, 1000, reserved),
+                                       c(1, 2, 1000, cancelled), c(1, 2, 1000, dispatched)], 5, [1, 0]),
+    pool_machine:to_trace_state(S, St7),
+    findall(R, consistency:trace_release(Cfg, St7, S, 100, R), Rels),
+    note("releases ~q", [Rels]),
+    check(released, Rels == [rel(6, reserved, ok), rel(8, dispatched, ok)]),
+    check(index_is_pruned, pool_machine:step(S, cancel(a1, 1, 100), err(not_found), _)) )).
+
 % Extracted fixture accounts (fixtures.rs) behind CASH-SELF.
 test('C-5 CASH-SELF uses the fixtures.rs account names, not the renamed trace atoms', (
     fixture_executor(X, _), fixture_actors(hiring, As),

@@ -4,7 +4,7 @@
 # expect: test_reads RD-PREVIEW/RD-BEST differential
 --- a/prolog/model/pool_machine.pl
 +++ b/prolog/model/pool_machine.pl
-@@ -504,9 +504,9 @@
+@@ -607,9 +607,9 @@
      findall(E-Neg, ( between(1, Hi, K),
                       admissible(S, Caller, req(RI, K, V, Exp, Now)),
                       submit_next(S, submit(Caller, RI, K, V, Exp, Now), Next),

@@ -15,8 +15,8 @@
 #      clauses overwritten, which would silently drop tests)
 #   3. canary: with SHARED_POOL_PROLOG_CANARY=1 each fast suite must exit 1
 #      (a failing test makes the file fail). test_mc1 and test_reads have no
-#      canary run; mutants m12, m15, m17 (test_mc1) and m18-m20 (test_reads)
-#      show that each exits non-zero on a failing test.
+#      canary run; mutants m12, m15, m21, m22, m24-m32 (test_mc1) and m18-m20,
+#      m28 (test_reads) show that each exits non-zero on a failing test.
 #   4. PROP tags: every catalogue property that lists the prolog layer is
 #      tagged `PROP: <ID>` in a file of this directory, and every tagged ID
 #      is in the catalogue.
@@ -33,7 +33,7 @@
 # C-6 reads the property catalogue from ../strategy.md section 5, so that
 # file must be present (a missing one fails C-6).
 #
-# usage: projects/shared-pool/prolog/run.sh        (about 9 minutes)
+# usage: projects/shared-pool/prolog/run.sh        (about 30 minutes locally)
 #        PROLOG_LOGS=dir run.sh                   (keep the logs in dir)
 set -uo pipefail
 export PATH="$HOME/.cargo/bin:$PATH"
