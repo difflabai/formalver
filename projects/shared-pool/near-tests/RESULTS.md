@@ -160,8 +160,10 @@ ASM-DEPLOY: the in-contract half is now checked (no deploy, key, transfer,
 stake, account or global-contract import, no upgrade export). What remains
 assumed is the account holder's own keys and redeploys.
 
-Last run 2026-11-13 (`--update`, then the check): exit 0; the mirror's git
-status stays clean (`target/` and `artifacts/` are gitignored upstream).
+Last run 2026-11-14 (the check; `../wasm-surface.expected` was regenerated
+with `--update` on 2026-11-13): exit 0, all of SURF-1, SURF-2, SURF-3(a) and
+SURF-3(b) ok; the mirror's git status stays clean (`target/` and
+`artifacts/` are gitignored upstream).
 
 ## Mutants (`./run.sh mutants`)
 
